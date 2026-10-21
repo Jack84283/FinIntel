@@ -1,0 +1,63 @@
+name: Bootstrap CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend / Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend
+        run: python -m pip install -e './backend[dev]'
+      - name: Python lint
+        run: |
+          ruff check backend
+          ruff format --check backend
+      - name: Unit tests
+        run: python -m pytest backend/tests -q
+
+  frontend:
+    name: Frontend / React
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install JavaScript dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm run test
+      - name: Build frontend
+        run: npm run build
+
+  tauri-macos:
+    name: macOS / Rust
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install JavaScript dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build frontend assets
+        run: npm run build
+      - name: Check native Rust shell
+        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
