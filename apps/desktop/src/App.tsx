@@ -54,7 +54,7 @@ export default function App() {
         <p className="mt-auto px-2 pt-8 text-[10px] font-medium tracking-widest text-[#62758d]">PRIVATE · LOCAL FIRST</p>
       </aside>
 
-      <main className="mx-auto w-full max-w-[1640px] min-w-0 px-4 py-6 sm:px-6 lg:px-9 lg:py-8">
+      <main className="w-full min-w-0 px-3 py-4 sm:px-4 lg:py-5">
         <nav aria-label="Mobile sections" className="mb-5 flex gap-2 lg:hidden">
           <Button type="button" variant={screen === "overview" ? "secondary" : "ghost"} onClick={() => setScreen("overview")} aria-current={screen === "overview" ? "page" : undefined}><Activity aria-hidden="true" /> Overview</Button>
           <Button type="button" variant={screen === "markets" ? "secondary" : "ghost"} onClick={() => setScreen("markets")} aria-current={screen === "markets" ? "page" : undefined}><BarChart3 aria-hidden="true" /> Markets</Button>
@@ -68,7 +68,7 @@ export default function App() {
               </div>
               <Badge variant="outline">M1 · Local workstation</Badge>
             </header>
-            <section className="max-w-[820px] py-9 lg:py-12">
+            <section className="max-w-[820px] py-6 lg:py-8">
               <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">Historical research</p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Your local market workspace.</h2>
               <p className="mt-4 max-w-[68ch] text-sm leading-7 text-muted-foreground">

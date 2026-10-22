@@ -12,6 +12,18 @@ The Mac desktop window (Tauri 2) and future iPad/Android PWA share React/TypeScr
 
 This is a real source-owned shadcn/ui integration, not a linked third-party stylesheet or an embedded demo. The installed component code is part of this repository and may be reviewed/customized. Base-nova CLI configuration lives in `apps/desktop/components.json`.
 
+## Shared page layout and gutters
+
+Use the single shared `<main>` container in `src/App.tsx` for both Overview and Markets. **Keep page-edge spacing separate from shadcn Card internals**:
+
+- Compact screens: `px-3` (**12px** horizontal page gutter).
+- Tablet and desktop: `sm:px-4` (**16px** horizontal page gutter), including wide desktop windows.
+- Vertical: `py-4` (**16px**), increasing to `lg:py-5` (**20px**) on desktop.
+- Use `w-full min-w-0` without an arbitrary `max-w` cap, so market tables and charts can use the full content area beside the fixed navigation rail.
+- Do not add page gutters again in individual screens. Component padding (`CardContent`, `CardHeader`) remains source-owned shadcn styling; tighter page edges must not compromise card legibility, keyboard focus or responsive layout.
+
+The Overview intro uses `py-6 lg:py-8` to preserve hierarchy with less unused vertical space.
+
 ## Adding UI components
 
 Work in the desktop workspace:
