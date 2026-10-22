@@ -42,7 +42,11 @@ def test_starter_symbols_readable_without_database_or_key(tmp_path, monkeypatch)
     assert both.json()["total"] >= 40
     assert stocks.json()["results"][0]["symbol"] == "AAPL"
     assert etfs.json()["results"][0]["symbol"] == "SPY"
-    assert not path.exists()  # GET never creates or migrates
+    assert path.exists()  # The catalog is durably seeded on first search.
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0] >= 73
+        assert conn.execute("SELECT asset_type FROM symbol_catalog WHERE symbol='^GSPC'").fetchone()[0] == "Index"
 
 
 def test_migrate_v1_prices_without_data_loss(tmp_path, monkeypatch):
@@ -52,10 +56,10 @@ def test_migrate_v1_prices_without_data_loss(tmp_path, monkeypatch):
         conn.execute("PRAGMA user_version = 1")
     monkeypatch.setenv("FININTEL_DB_PATH", str(db))
     assert search_symbols(db=db)["source"] == "starter"
-    assert replace_symbol_catalog(parse_listing_csv(LISTING), db=db)["total"] == 2
+    assert replace_symbol_catalog(parse_listing_csv(LISTING), db=db)["total"] == 12
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
-        assert conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0] == 12
         assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 0
 
 
@@ -76,9 +80,9 @@ def test_upgrading_populated_v1_preserves_imported_prices(tmp_path, monkeypatch)
         conn.execute("DROP TABLE symbol_catalog")
         conn.execute("PRAGMA user_version = 1")
     assert search_symbols(db=db)["source"] == "starter"
-    assert replace_symbol_catalog(parse_listing_csv(LISTING), db=db)["total"] == 2
+    assert replace_symbol_catalog(parse_listing_csv(LISTING), db=db)["total"] == 12
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert conn.execute("SELECT * FROM daily_prices").fetchall() == before_prices
         assert conn.execute("SELECT * FROM ingestion_runs").fetchall() == before_runs
         assert conn.execute("SELECT * FROM series").fetchall() == before_series
@@ -106,7 +110,7 @@ def test_catalog_sync_does_not_change_historical_prices(tmp_path, monkeypatch):
         after = client.get(API + "?q=AAPL")
         empty = client.get(API + "?asset_type=Stock&q=NO_MATCH")
     assert response.status_code == 200
-    assert response.json()["total"] == 2
+    assert response.json()["total"] == 12
     assert after.json()["source"] == "alpha_vantage"
     assert after.json()["results"][0]["symbol"] == "AAPL"
     assert empty.json()["results"] == []
@@ -131,7 +135,7 @@ def test_bad_listing_preserves_last_successful_directory(tmp_path, monkeypatch):
         response = client.post(API + "/sync", headers=HEADERS)
         directory = client.get(API)
     assert response.status_code == 502
-    assert directory.json()["total"] == 2
+    assert directory.json()["total"] == 12
     assert directory.json()["results"][0]["symbol"] == "AAPL"
 
 

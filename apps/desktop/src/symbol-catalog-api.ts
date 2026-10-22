@@ -54,7 +54,7 @@ export function parseSymbolSearch(value: unknown): SymbolSearchResponse {
         !(/^\^?[A-Z0-9][A-Z0-9.-]{0,14}$/.test(row.symbol)) ||
         typeof row.name !== "string" ||
         typeof row.exchange !== "string" ||
-        !["Stock", "ETF", "Index", "Mutual Fund"].includes(String(row.asset_type))
+        (row.asset_type !== "Stock" && row.asset_type !== "ETF" && row.asset_type !== "Index" && row.asset_type !== "Mutual Fund")
       ) {
         throw new Error("Invalid stock or ETF directory entry.");
       }

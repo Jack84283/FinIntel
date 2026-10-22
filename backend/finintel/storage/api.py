@@ -17,10 +17,10 @@ from finintel.market_data.provider import (
 )
 from finintel.market_data.symbol_catalog import fetch_active_listings
 from finintel.storage.db import (
-    lookup_symbol_type,
     StorageError,
     list_imports,
     list_instruments,
+    lookup_symbol_type,
     read_daily,
     replace_symbol_catalog,
     search_symbols,
