@@ -152,7 +152,7 @@ def test_bad_request_csrf_and_invalid_entitlements_do_not_fetch(tmp_path, monkey
                 headers={"x-finintel-client": "local-workstation", "content-type": "text/plain"},
                 content='{"symbol":"IBM"}',
             ).status_code
-            == 403
+            == 422
         )
     assert calls == []
     assert not db.exists()
