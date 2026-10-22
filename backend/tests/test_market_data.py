@@ -73,16 +73,12 @@ def test_invalid_market_data_is_rejected(mutation):
     payload = json.loads(RAW)
     mutation(payload)
     with pytest.raises(ProviderPayloadInvalid):
-        parse_alpha_vantage_daily(
-            json.dumps(payload).encode(), symbol="IBM", source_url=SOURCE
-        )
+        parse_alpha_vantage_daily(json.dumps(payload).encode(), symbol="IBM", source_url=SOURCE)
 
 
 def test_bad_date_is_rejected():
     payload = json.loads(RAW)
-    payload["Time Series (Daily)"]["2026-13-99"] = payload["Time Series (Daily)"].pop(
-        "2026-10-20"
-    )
+    payload["Time Series (Daily)"]["2026-13-99"] = payload["Time Series (Daily)"].pop("2026-10-20")
     with pytest.raises(ProviderPayloadInvalid):
         parse_alpha_vantage_daily(json.dumps(payload).encode(), symbol="IBM", source_url=SOURCE)
 

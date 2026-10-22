@@ -50,9 +50,7 @@ def test_failed_cli_request_preserves_previous_snapshot(tmp_path, monkeypatch, c
         def fetch_daily(self, symbol, *, outputsize="compact"):
             raise ProviderUnavailable("Provider unavailable")
 
-    monkeypatch.setattr(
-        "finintel.market_data.__main__.AlphaVantageDailyProvider", lambda: Failed()
-    )
+    monkeypatch.setattr("finintel.market_data.__main__.AlphaVantageDailyProvider", lambda: Failed())
     assert main(["--symbol", "IBM", "--output", str(target)]) == 1
     assert target.read_bytes() == before
     assert "Provider unavailable" in capsys.readouterr().err
@@ -67,9 +65,7 @@ def test_successful_cli_request_summarizes_without_secrets(tmp_path, monkeypatch
             assert outputsize == "compact"
             return fixture_batch()
 
-    monkeypatch.setattr(
-        "finintel.market_data.__main__.AlphaVantageDailyProvider", lambda: Mocked()
-    )
+    monkeypatch.setattr("finintel.market_data.__main__.AlphaVantageDailyProvider", lambda: Mocked())
     assert main(["--symbol", "IBM", "--output", str(target)]) == 0
     summary = json.loads(capsys.readouterr().out)
     assert summary["status"] == "validated_local_snapshot"

@@ -220,11 +220,7 @@ class AlphaVantageDailyProvider:
                 raise ProviderUnavailable("Alpha Vantage unavailable after retries")
             if response.status_code != 200:
                 raise ProviderError(
-                    "Alpha Vantage rejected the request (HTTP "
-                    + str(response.status_code)
-                    + ")"
+                    "Alpha Vantage rejected the request (HTTP " + str(response.status_code) + ")"
                 )
-            return parse_alpha_vantage_daily(
-                response.content, symbol=symbol, source_url=source_url
-            )
+            return parse_alpha_vantage_daily(response.content, symbol=symbol, source_url=source_url)
         raise ProviderUnavailable("Provider attempts exhausted")
