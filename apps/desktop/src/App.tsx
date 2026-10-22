@@ -77,7 +77,7 @@ export default function App() {
               </p>
               <Button type="button" className="mt-5" onClick={() => setScreen("markets")}><BarChart3 aria-hidden="true" /> Open Market Data Explorer</Button>
             </section>
-            <div className="grid gap-4 xl:grid-cols-2">
+            <div className="grid gap-2 xl:grid-cols-2">
               <Card aria-labelledby="backend-title">
                 <CardHeader>
                   <h3 id="backend-title"><CardTitle>Python backend</CardTitle></h3>

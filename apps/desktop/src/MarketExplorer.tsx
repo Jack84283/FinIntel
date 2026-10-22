@@ -113,7 +113,7 @@ export function MarketExplorer() {
     label + (sortColumn === column ? (descending ? " ↓" : " ↑") : "");
 
   return (
-    <section className="space-y-5" aria-labelledby="markets-title">
+    <section className="space-y-2" aria-labelledby="markets-title">
       <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-5">
         <div>
           <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Markets</p>
@@ -196,7 +196,7 @@ export function MarketExplorer() {
           )}
           {seriesState === "ready" && series && (
             <>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <Metric label="Instrument" value={series.symbol} note={currentInstrument ? formatInteger(currentInstrument.sessions) + " stored sessions" : series.provider} />
                 <Metric label="Last close" value={last ? price(last.close) : "—"} note={last?.session_date ?? "No trading sessions"} />
                 <Metric label="Daily change" value={closeChange === null ? "—" : (closeChange >= 0 ? "+" : "") + price(String(closeChange))} note="Compared with prior loaded session" />

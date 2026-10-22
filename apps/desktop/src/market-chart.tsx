@@ -24,7 +24,7 @@ export function MarketCharts({ bars }: { bars: DailyBar[] }) {
     .filter((index, i, arr) => arr.indexOf(index) === i);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       <div className="overflow-x-auto rounded-md border border-border bg-muted/40 p-2">
         <svg viewBox="0 0 840 280" role="img" aria-label={"Historical candlestick chart showing " + visible.length + " daily sessions"} className="h-auto min-w-[560px] w-full">
           {ticks.map((tick) => (

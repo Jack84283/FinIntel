@@ -24,7 +24,26 @@ Use the single shared `<main>` container in `src/App.tsx` for both Overview and 
 
 The Overview intro uses `py-6 lg:py-8` to preserve hierarchy with less unused vertical space.
 
-## Adding UI components
+## Dense card layout
+
+FinIntel is a **data-dense financial workstation**. Keep the shared card-to-card
+spacing predictable and compact, rather than adding new margins inside
+individual page sections:
+
+- Markets' top-level card/section stack uses `space-y-2` (**8px**) instead
+  of `space-y-5` (20px).
+- The Overview two-card grid and the Markets KPI card grid both use `gap-2`
+  (**8px**) instead of `gap-4` (16px).
+- Candlestick and volume chart sections use `space-y-2` (**8px**) instead
+  of `space-y-4` (16px).
+- Keep all `Card`, `CardHeader`, and `CardContent` **internal** padding,
+  chart legibility, control hit targets, keyboard focus, and responsive
+  wrapping unchanged. These rules only adjust the **space between** peers.
+- Extend this 8px inter-card spacing convention to new market, research and
+  dashboard pages; do not alter field-to-field or table-row spacing merely
+  to reduce card gutters.
+
+
 
 Work in the desktop workspace:
 ```sh
