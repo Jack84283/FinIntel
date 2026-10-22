@@ -59,6 +59,31 @@ def test_migrate_v1_prices_without_data_loss(tmp_path, monkeypatch):
         assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 0
 
 
+def test_upgrading_populated_v1_preserves_imported_prices(tmp_path, monkeypatch):
+    """Existing PR #4 user databases must keep prices and their import history."""
+    from finintel.market_data.provider import parse_alpha_vantage_daily
+
+    db = tmp_path / "existing-v1.sqlite3"
+    monkeypatch.setenv("FININTEL_DB_PATH", str(db))
+    batch = parse_alpha_vantage_daily(FIXTURE.read_bytes(), symbol="IBM", source_url=SOURCE)
+    snapshot = tmp_path / "legacy-IBM.json"
+    snapshot.write_text(batch.model_dump_json())
+    import_snapshot(snapshot, db=db)
+    with sqlite3.connect(db) as conn:
+        before_prices = conn.execute("SELECT * FROM daily_prices").fetchall()
+        before_runs = conn.execute("SELECT * FROM ingestion_runs").fetchall()
+        before_series = conn.execute("SELECT * FROM series").fetchall()
+        conn.execute("DROP TABLE symbol_catalog")
+        conn.execute("PRAGMA user_version = 1")
+    assert search_symbols(db=db)["source"] == "starter"
+    assert replace_symbol_catalog(parse_listing_csv(LISTING), db=db)["total"] == 2
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("SELECT * FROM daily_prices").fetchall() == before_prices
+        assert conn.execute("SELECT * FROM ingestion_runs").fetchall() == before_runs
+        assert conn.execute("SELECT * FROM series").fetchall() == before_series
+
+
 def test_catalog_sync_does_not_change_historical_prices(tmp_path, monkeypatch):
     db = tmp_path / "financial.sqlite3"
     monkeypatch.setenv("FININTEL_DB_PATH", str(db))
