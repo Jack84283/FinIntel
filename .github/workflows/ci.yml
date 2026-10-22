@@ -37,7 +37,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install JavaScript dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Typecheck
         run: npm run typecheck
       - name: Lint
@@ -57,7 +57,7 @@ jobs:
           node-version: "22"
       - uses: dtolnay/rust-toolchain@stable
       - name: Install JavaScript dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Build frontend assets
         run: npm run build
       - name: Check native Rust shell

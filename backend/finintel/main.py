@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict
 
 from finintel import __version__
+from finintel.storage.api import router as market_data_router
 
 app = FastAPI(
     title="FinIntel Local API",
@@ -25,3 +26,6 @@ class HealthResponse(BaseModel):
 @app.get("/api/v1/health", response_model=HealthResponse, tags=["system"])
 def health() -> HealthResponse:
     return HealthResponse(status="ok", service="finintel-backend", version=__version__)
+
+
+app.include_router(market_data_router)

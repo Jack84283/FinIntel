@@ -2,14 +2,14 @@
 
 Private, local-first financial intelligence workstation.
 
-> **Implementation stage:** PR #1 desktop bootstrap is merged. PR #2 adds optional Alpha Vantage daily historical-price acquisition and local validated JSON snapshots. SQLite persistence, dashboards and AI remain future phases.
+> **Implementation stage:** PR #1 native bootstrap, PR #2 historical-data acquisition and UI foundation are merged. This PR adds SQLite persistence and read-only historical-data APIs. Market charts and local AI remain future phases.
 
 ## Architecture
 
 - **Desktop:** Tauri 2 (Rust) + React / TypeScript / Vite.
 - **Backend:** FastAPI / Pydantic, run as a separate **development** process.
 - **Transport:** React calls a typed Tauri command. Rust forwards a bounded health request to the Python backend bound on `127.0.0.1:8765`. In browser-only development, Vite proxies `/api` to that same local service.
-- **Later:** authenticated, lifecycle-managed Python sidecar and local SQLite history (PRs #3 and #5).
+- **Data storage:** validated snapshot JSON is imported into the versioned local SQLite database (M1 storage milestone, GitHub PR #4). The Python sidecar lifecycle and authentication remain a later delivery phase.
 
 ## Prerequisites
 
@@ -77,8 +77,8 @@ Project specifications are maintained in the FinIntel Google Drive: [ENG-0002 Im
 ## Next implementation milestones
 
 - **PR #2:** Alpha Vantage historical OHLCV adapter, integrity tests, privacy-safe provenance and a one-shot local snapshot CLI (see below).
-- **PR #3:** SQLite migrations, idempotent persistence, and historical-data API.
-- **PR #4:** Chart/grid workspace backed by the local API.
+- **M1 storage milestone (GitHub PR #4):** SQLite migrations, idempotent persistence, snapshot ingestion history and read-only historical-data APIs.
+- **Next M1 dashboard milestone:** React chart/grid workspace backed by the stored data API.
 - **PR #5:** Bundle/manage the authenticated Python sidecar, offline/resume behavior and native packaging.
 
 This repository uses an independent FinIntel interface inspired by financial workstation workflows; it does not include Bloomberg intellectual property or licensed datasets.
@@ -105,3 +105,50 @@ One CLI call normally consumes one provider API request; transient server/networ
 **Important:** CI uses a clearly **synthetic** IBM API-shaped fixture for deterministic parser tests. Fixture observations are not market prices and must never be used for analysis. Live smoke tests are opt-in, require your own key and do not run in CI. PR #3 will implement persistent SQLite ingestion; these JSON snapshots are a PR #2 staging format, not the final database.
 
 See [Data provider policy](docs/DATA_PROVIDER.md) for terms, rate-limit behavior, failure recovery and provenance. Do not expose the Python development API over your LAN or Internet; the secure tablet gateway is a separate M1.5 milestone.
+
+## SQLite persistence & local history API (M1 storage milestone)
+
+PR #2 fetches and validates a source snapshot; the storage milestone **imports**
+that snapshot into a local versioned SQLite database. Imports are explicitly
+initiated by the developer, never automatically by application launch. No
+network request happens when inspecting the database.
+
+With the existing Python venv active, from the repository root:
+
+```sh
+python -m finintel.storage import data/raw/AAPL.json
+python -m finintel.storage inspect
+python -m finintel.storage inspect --symbol AAPL
+python -m finintel.storage imports
+```
+
+Default database: `data/finintel.sqlite3`, gitignored along with its journal
+files. Override it via environment variable `FININTEL_DB_PATH`, or by passing
+`--db /path/to/db.sqlite3` **before** the subcommand.
+
+The backend must be started from the repository root with the same
+`FININTEL_DB_PATH` environment value:
+
+```sh
+python -m uvicorn finintel.main:app --host 127.0.0.1 --port 8765
+curl http://127.0.0.1:8765/api/v1/market-data/instruments
+curl 'http://127.0.0.1:8765/api/v1/market-data/AAPL/daily?limit=20'
+curl 'http://127.0.0.1:8765/api/v1/market-data/AAPL/daily?start_date=2026-09-01&end_date=2026-10-22'
+curl http://127.0.0.1:8765/api/v1/market-data/imports
+```
+
+These are **historical**, as-traded, unadjusted price observations. The JSON
+API keeps prices as **decimal strings** to prevent precision loss; volume is
+an integer. Responses are bounded (daily: 1–1000 rows, default 250;
+import history: 1–100). A missing database yields an empty catalog and a 404
+for an unknown symbol. No API write endpoints, remote exposure, scheduled
+fetching, or browser-side financial data caching are provided.
+
+The data survives backend restart. Reimporting the same file won't duplicate
+daily bars; new provider revisions replace changed values in a single SQLite
+transaction, while an older retrieval cannot overwrite a newer value. Failed
+validation leaves the existing local database untouched.
+
+See [SQLite data storage design](docs/STORAGE.md) for schema, provenance,
+backups, security boundaries and verification. A dedicated market-data
+**frontend** is still a separate planned dashboard milestone.
