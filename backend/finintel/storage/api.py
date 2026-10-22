@@ -2,7 +2,6 @@
 
 import threading
 from datetime import date
-
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
@@ -10,11 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from finintel.market_data.acquisition import acquire_and_store, key_configured
 from finintel.market_data.provider import (
+    SYMBOL_PATTERN,
     ProviderError,
     ProviderPayloadInvalid,
     ProviderRateLimited,
     ProviderUnavailable,
-    SYMBOL_PATTERN,
 )
 from finintel.storage.db import StorageError, list_imports, list_instruments, read_daily
 
@@ -152,7 +151,7 @@ class AcquisitionStatus(BaseModel):
     key_configured: bool
     requires_explicit_action: bool = True
     api_key_environment_variable: str = "FININTEL_ALPHA_VANTAGE_API_KEY"
-    supports_full_entitlement: bool = True
+    full_requires_premium: bool = True
 
 
 class AcquisitionResult(BaseModel):
