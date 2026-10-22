@@ -7,8 +7,7 @@ the database and cannot modify it. PR #3/M1 data persistence (GitHub PR #4).
 import hashlib
 import os
 import sqlite3
-from contextlib import closing
-from datetime import UTC, date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -121,13 +120,17 @@ def _write_connection(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         conn = sqlite3.connect(path, timeout=10)
+    except (sqlite3.Error, OSError) as exc:
+        raise StorageError("Unable to open the local SQLite database") from exc
+    try:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 10000")
         _migrate(conn)
         return conn
-    except (sqlite3.Error, OSError):
-        raise StorageError("Unable to open or initialize the local SQLite database") from None
+    except (sqlite3.Error, StorageError):
+        conn.close()
+        raise
 
 
 def _read_connection(path: Path) -> sqlite3.Connection | None:
@@ -136,11 +139,15 @@ def _read_connection(path: Path) -> sqlite3.Connection | None:
     try:
         # Read-only URI ensures API calls cannot mutate schema or records.
         conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
+    except sqlite3.Error as exc:
+        raise StorageError("Could not open the local database read-only") from exc
+    try:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA query_only = ON")
         _ensure_version(conn, allow_missing=False)
         return conn
     except (sqlite3.Error, StorageError) as exc:
+        conn.close()
         raise StorageError("Local database is unavailable or needs migration") from exc
 
 
@@ -149,12 +156,17 @@ def _safe_source(batch: HistoricalBatch) -> None:
     from urllib.parse import parse_qs, urlsplit
 
     url = urlsplit(batch.source_url)
+    params = parse_qs(url.query)
     if (
         url.scheme != "https"
         or url.hostname != "www.alphavantage.co"
+        or url.port is not None
+        or url.path != "/query"
         or url.username
         or url.password
-        or "apikey" in {key.lower() for key in parse_qs(url.query)}
+        or not set(params) <= {"function", "symbol", "outputsize", "datatype"}
+        or params.get("function") != ["TIME_SERIES_DAILY"]
+        or params.get("symbol") != [batch.symbol]
     ):
         raise StorageError("Snapshot source metadata is not an approved sanitized provider URL")
     terms = urlsplit(batch.provider_terms_url)
@@ -189,7 +201,7 @@ def import_snapshot(snapshot: Path, *, db: Path | None = None) -> dict[str, obje
     batch, digest = load_snapshot(snapshot)
     path = db if db is not None else database_path()
     retrieved = batch.retrieved_at.astimezone(UTC).isoformat(timespec="microseconds")
-    now = __import__("datetime").datetime.now(UTC).isoformat(timespec="microseconds")
+    now = datetime.now(UTC).isoformat(timespec="microseconds")
     conn = _write_connection(path)
     try:
         with conn:
