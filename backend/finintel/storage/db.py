@@ -563,7 +563,18 @@ def lookup_symbol_type(symbol: str, *, db: Path | None = None) -> str | None:
         result = conn.execute(
             "SELECT asset_type FROM symbol_catalog WHERE symbol=?", (symbol,)
         ).fetchone()
-        return result["asset_type"] if result else None
+        if result:
+            return result["asset_type"]
+        # Protect direct API calls against unsupported reference instruments
+        # even if an earlier v2 catalog has not yet been upgraded by the UI.
+        return next(
+            (
+                row["asset_type"]
+                for row in STARTER_SYMBOLS
+                if row["symbol"] == symbol and row["asset_type"] in ("Index", "Mutual Fund")
+            ),
+            None,
+        )
     except sqlite3.Error as exc:
         raise StorageError("Could not check symbol asset type") from exc
     finally:
