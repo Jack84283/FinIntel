@@ -12,6 +12,14 @@ describe("local Stock / ETF directory contracts", () => {
     });
     expect(data.results.map((item) => item.asset_type)).toEqual(["Stock", "ETF"]);
     expect(data.source).toBe("starter");
+    const expanded = parseSymbolSearch({
+      source: "starter", updated_at: null, total: 4,
+      results: [
+        { symbol: "^GSPC", name: "S&P 500 Index", asset_type: "Index", exchange: "" },
+        { symbol: "FXAIX", name: "Fidelity 500 Index Fund", asset_type: "Mutual Fund", exchange: "" },
+      ],
+    });
+    expect(expanded.results.map((x) => x.asset_type)).toEqual(["Index", "Mutual Fund"]);
   });
 
   it("validates sync results and rejects malformed search data", () => {

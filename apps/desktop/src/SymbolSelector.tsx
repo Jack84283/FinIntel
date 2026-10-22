@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { searchSymbols, syncSymbols, type AssetFilter, type CatalogSymbol } from "./symbol-catalog-api";
+import { searchSymbols, syncSymbols, type AssetFilter, type AssetType, type CatalogSymbol } from "./symbol-catalog-api";
 
 interface SymbolSelectorProps {
   value: string;
-  onChange: (next: string) => void;
+  onChange: (next: string, type: AssetType | null) => void;
   keyConfigured: boolean;
   disabled: boolean;
 }
@@ -63,16 +63,16 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
   return (
     <div className="min-w-[225px] flex-[2] space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">Stock / ETF symbol</span>
+        <span className="text-xs font-medium text-muted-foreground">Financial instrument</span>
         <span className="text-[11px] text-muted-foreground">
           {catalogSource === "starter" ? "Starter directory" : "Provider directory"} · {catalogTotal.toLocaleString()} symbols
         </span>
       </div>
       <div className="flex flex-wrap gap-2">
         <input
-          aria-label="Search stocks and ETFs by symbol or name"
+          aria-label="Search instruments by symbol or name"
           type="search"
-          placeholder="Search symbol or company / fund"
+          placeholder="Search ticker, index or fund"
           className="h-9 min-w-[140px] flex-1 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           value={query}
           maxLength={80}
@@ -89,6 +89,8 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
           <option value="All">All</option>
           <option value="Stock">Stocks</option>
           <option value="ETF">ETFs</option>
+          <option value="Index">Indexes</option>
+          <option value="Mutual Fund">Mutual funds</option>
         </select>
       </div>
       {customTicker ? (
@@ -96,7 +98,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
           aria-label="Custom ticker symbol"
           type="text"
           value={value}
-          onChange={(event) => onChange(event.target.value.toUpperCase())}
+          onChange={(event) => onChange(event.target.value.toUpperCase(), null)}
           placeholder="Enter ticker"
           maxLength={15}
           autoComplete="off"
@@ -106,13 +108,17 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
         />
       ) : (
         <select
-          aria-label="Select a stock or ETF"
+          aria-label="Select a stock, ETF, index or mutual fund"
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => {
+            const ticker = event.target.value;
+            const chosen = results.find((entry) => entry.symbol === ticker);
+            onChange(ticker, chosen?.asset_type ?? null);
+          }}
           disabled={disabled || syncing}
           className="h-9 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <option value="">Select a stock or ETF…</option>
+          <option value="">Select an instrument…</option>
           {value && !selectedInResults && <option value={value}>{value} · Selected</option>}
           {results.map((entry) => (
             <option key={entry.symbol} value={entry.symbol}>
@@ -135,12 +141,12 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
         </Button>
       </div>
       {catalogSource === "starter" && (
-        <p className="text-[11px] text-muted-foreground">The offline starter directory is not a complete listing. Sync with Alpha Vantage to populate active US stocks and ETFs.</p>
+        <p className="text-[11px] text-muted-foreground">The offline directory contains example stocks, ETFs, indexes and mutual funds. Sync adds active US stocks and ETFs; index and mutual fund references stay local.</p>
       )}
       {notice && <p role="status" className="text-xs text-positive">{notice}</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       {syncError && <p role="alert" className="text-xs text-destructive">Symbol sync failed: {syncError}. Existing directory retained.</p>}
-      {!keyConfigured && <p className="text-[11px] text-muted-foreground">Sync requires the provider key in your local backend. You can browse starter symbols without a key.</p>}
+      {!keyConfigured && <p className="text-[11px] text-muted-foreground">Sync requires a backend provider key. All starter instrument types are saved locally.</p>}
     </div>
   );
 }

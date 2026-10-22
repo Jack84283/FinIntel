@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { acquireMarketDaily, fetchAcquisitionStatus, type AcquisitionResult, type AcquisitionStatus, type OutputSize } from "./market-acquisition-api";
 import { SymbolSelector } from "./SymbolSelector";
+import type { AssetType } from "./symbol-catalog-api";
 
 export function AcquisitionCard({
   selectedSymbol,
@@ -14,6 +15,7 @@ export function AcquisitionCard({
   onAcquired: (symbol: string) => void;
 }) {
   const [symbol, setSymbol] = useState(selectedSymbol);
+  const [selectedType, setSelectedType] = useState<AssetType | null>(null);
   const [outputsize, setOutputsize] = useState<OutputSize>("compact");
   const [status, setStatus] = useState<AcquisitionStatus | null>(null);
   const [statusError, setStatusError] = useState("");
@@ -23,7 +25,10 @@ export function AcquisitionCard({
   const [statusTick, setStatusTick] = useState(0);
 
   useEffect(() => {
-    if (selectedSymbol) setSymbol(selectedSymbol);
+    if (selectedSymbol) {
+      setSymbol(selectedSymbol);
+      setSelectedType(null);
+    }
   }, [selectedSymbol]);
 
   useEffect(() => {
@@ -44,7 +49,7 @@ export function AcquisitionCard({
 
   const acquire = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (pending) return;
+    if (pending || selectedType === "Index" || selectedType === "Mutual Fund") return;
     setResult(null);
     setError("");
     setPending(true);
@@ -74,7 +79,12 @@ export function AcquisitionCard({
       </CardHeader>
       <CardContent className="space-y-2">
         <form onSubmit={(event) => void acquire(event)} className="flex flex-wrap items-end gap-2">
-          <SymbolSelector value={symbol} onChange={setSymbol} keyConfigured={Boolean(status?.key_configured)} disabled={pending} />
+          <SymbolSelector
+            value={symbol}
+            onChange={(ticker, type) => { setSymbol(ticker); setSelectedType(type); }}
+            keyConfigured={Boolean(status?.key_configured)}
+            disabled={pending}
+          />
           <label className="grid min-w-[165px] flex-1 gap-1 text-xs text-muted-foreground">
             History
             <select
@@ -87,12 +97,17 @@ export function AcquisitionCard({
               <option value="full">Full history (premium only)</option>
             </select>
           </label>
-          <Button type="submit" disabled={pending || !status?.key_configured || !symbol.trim()} size="sm">
+          <Button type="submit" disabled={pending || !status?.key_configured || !symbol.trim() || selectedType === "Index" || selectedType === "Mutual Fund"} size="sm">
             {pending ? <RefreshCw aria-hidden="true" className="animate-spin" /> : <ArrowDownToLine aria-hidden="true" />}
             {pending ? "Fetching…" : "Fetch & store"}
           </Button>
           {statusError && <Button type="button" variant="secondary" size="sm" onClick={() => setStatusTick((value) => value + 1)}>Retry connection</Button>}
         </form>
+        {(selectedType === "Index" || selectedType === "Mutual Fund") && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {selectedType} instruments are saved in the local catalog, but this Alpha Vantage stock/ETF daily-price integration cannot fetch their history yet.
+          </p>
+        )}
         {status?.key_configured && (
           <p className="text-xs text-muted-foreground">One click makes one provider request (up to 3 attempts only for transient errors). Subject to provider quota and license; no automatic fetching.</p>
         )}
