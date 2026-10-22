@@ -90,7 +90,7 @@ async fn market_symbols(
     if limit == 0 || limit > 100 {
         return Err("Invalid symbol result limit.".to_string());
     }
-    if asset_type.as_deref().is_some_and(|value| value != "Stock" && value != "ETF") {
+    if asset_type.as_deref().is_some_and(|value| !matches!(value, "Stock" | "ETF" | "Index" | "Mutual Fund")) {
         return Err("Asset category must be Stock or ETF.".to_string());
     }
     let mut params = vec![("q", q), ("limit", limit.to_string())];

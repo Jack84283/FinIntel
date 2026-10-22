@@ -17,6 +17,7 @@ from finintel.market_data.provider import (
 )
 from finintel.market_data.symbol_catalog import fetch_active_listings
 from finintel.storage.db import (
+    lookup_symbol_type,
     StorageError,
     list_imports,
     list_instruments,
@@ -142,7 +143,7 @@ class CatalogEntry(BaseModel):
 
     symbol: str
     name: str
-    asset_type: Literal["Stock", "ETF"]
+    asset_type: Literal["Stock", "ETF", "Index", "Mutual Fund"]
     exchange: str
 
 
@@ -167,7 +168,7 @@ class CatalogSyncResult(BaseModel):
 @router.get("/symbols", response_model=SymbolSearchResponse)
 def get_symbols(
     q: str = Query(default="", max_length=80),
-    asset_type: Literal["Stock", "ETF"] | None = None,
+    asset_type: Literal["Stock", "ETF", "Index", "Mutual Fund"] | None = None,
     limit: int = Query(default=40, ge=1, le=100),
 ) -> dict[str, object]:
     try:
@@ -230,6 +231,12 @@ def acquisition_status() -> AcquisitionStatus:
 def acquire_market_data(payload: AcquisitionRequest, request: Request) -> dict[str, object]:
     """One explicit user request. No scheduled fetches and no input API keys."""
     _authorize_local_write(request)
+    asset_type = lookup_symbol_type(payload.symbol)
+    if asset_type in ("Index", "Mutual Fund"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{asset_type} history is not supported by the current stock/ETF price provider",
+        )
     if not key_configured():
         raise HTTPException(
             status_code=503,

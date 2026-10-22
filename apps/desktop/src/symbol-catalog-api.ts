@@ -2,7 +2,7 @@
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
-export type AssetType = "Stock" | "ETF";
+export type AssetType = "Stock" | "ETF" | "Index" | "Mutual Fund";
 export type AssetFilter = AssetType | "All";
 
 export interface CatalogSymbol {
@@ -51,10 +51,10 @@ export function parseSymbolSearch(value: unknown): SymbolSearchResponse {
       const row = object(entry);
       if (
         typeof row.symbol !== "string" ||
-        !/^[A-Z0-9][A-Z0-9.-]{0,14}$/.test(row.symbol) ||
+        !(/^\^?[A-Z0-9][A-Z0-9.-]{0,14}$/.test(row.symbol)) ||
         typeof row.name !== "string" ||
         typeof row.exchange !== "string" ||
-        (row.asset_type !== "Stock" && row.asset_type !== "ETF")
+        !["Stock", "ETF", "Index", "Mutual Fund"].includes(String(row.asset_type))
       ) {
         throw new Error("Invalid stock or ETF directory entry.");
       }
