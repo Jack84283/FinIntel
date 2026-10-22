@@ -22,11 +22,11 @@ SOURCE = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IB
 API = "/api/v1/market-data/symbols"
 HEADERS = {"x-finintel-client": "local-workstation"}
 LISTING = (
-    "symbol,name,exchange,assetType,ipoDate,delistingDate,status\n"
-    "AAPL,Apple Inc,NASDAQ,Stock,1980-12-12,null,Active\n"
-    "SPY,SPDR S&P 500 ETF,NYSE ARCA,ETF,1993-01-22,null,Active\n"
-    "ZZZ,Old Stock,NYSE,Stock,1990-01-01,2020-01-01,Delisted\n"
-).encode()
+    b"symbol,name,exchange,assetType,ipoDate,delistingDate,status\n"
+    b"AAPL,Apple Inc,NASDAQ,Stock,1980-12-12,null,Active\n"
+    b"SPY,SPDR S&P 500 ETF,NYSE ARCA,ETF,1993-01-22,null,Active\n"
+    b"ZZZ,Old Stock,NYSE,Stock,1990-01-01,2020-01-01,Delisted\n"
+)
 
 
 def test_starter_symbols_readable_without_database_or_key(tmp_path, monkeypatch):

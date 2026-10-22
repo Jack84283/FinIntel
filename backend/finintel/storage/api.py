@@ -8,7 +8,6 @@ from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from finintel.market_data.acquisition import acquire_and_store, key_configured
-from finintel.market_data.symbol_catalog import fetch_active_listings
 from finintel.market_data.provider import (
     SYMBOL_PATTERN,
     ProviderError,
@@ -16,6 +15,7 @@ from finintel.market_data.provider import (
     ProviderRateLimited,
     ProviderUnavailable,
 )
+from finintel.market_data.symbol_catalog import fetch_active_listings
 from finintel.storage.db import (
     StorageError,
     list_imports,
@@ -176,7 +176,7 @@ def get_symbols(
         raise _unavailable(exc) from exc
 
 
-
+class AcquisitionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     symbol: str = Field(min_length=1, max_length=15)
