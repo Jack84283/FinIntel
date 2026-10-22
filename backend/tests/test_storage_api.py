@@ -1,0 +1,95 @@
+"""Local API read routes; temporary databases, never the real user's storage."""
+
+import sqlite3
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from finintel.main import app
+from finintel.market_data.provider import parse_alpha_vantage_daily
+from finintel.storage.db import import_snapshot
+
+FIXTURE = Path(__file__).parent / "fixtures" / "alpha_vantage_daily_SYNTHETIC.json"
+SOURCE = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM"
+
+
+def _seed(tmp_path, monkeypatch):
+    db = tmp_path / "market.sqlite3"
+    monkeypatch.setenv("FININTEL_DB_PATH", str(db))
+    batch = parse_alpha_vantage_daily(FIXTURE.read_bytes(), symbol="IBM", source_url=SOURCE)
+    snap = tmp_path / "IBM.json"
+    snap.write_text(batch.model_dump_json())
+    import_snapshot(snap, db=db)
+    return db
+
+
+def test_api_uninitialized_storage_is_empty(tmp_path, monkeypatch):
+    db = tmp_path / "absent.sqlite3"
+    monkeypatch.setenv("FININTEL_DB_PATH", str(db))
+    with TestClient(app) as client:
+        assert client.get("/api/v1/market-data/instruments").json() == []
+        assert client.get("/api/v1/market-data/imports").json() == []
+        assert client.get("/api/v1/market-data/IBM/daily").status_code == 404
+    assert not db.exists()
+
+
+def test_api_catalog_prices_and_ingestion_history(tmp_path, monkeypatch):
+    _seed(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        catalog = client.get("/api/v1/market-data/instruments")
+        daily = client.get("/api/v1/market-data/ibm/daily?limit=2")
+        history = client.get("/api/v1/market-data/imports")
+
+    assert catalog.status_code == 200
+    assert catalog.json()[0]["symbol"] == "IBM"
+    assert catalog.json()[0]["sessions"] == 3
+    assert daily.status_code == 200
+    data = daily.json()
+    assert data["price_adjustment"] == "raw_unadjusted"
+    assert data["data_kind"] == "historical_eod"
+    assert data["has_more"] is True
+    assert data["observations"][0]["open"] == "98.25"
+    assert data["observations"][0]["session_date"] == "2026-10-16"
+    assert len(data["observations"]) == 2
+    assert history.status_code == 200
+    assert history.json()[0]["inserted"] == 3
+    assert "apikey" not in str(history.json())
+
+
+def test_api_date_filters_and_bad_inputs(tmp_path, monkeypatch):
+    _seed(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        result = client.get(
+            "/api/v1/market-data/IBM/daily?start_date=2026-10-19&end_date=2026-10-20"
+        )
+        assert result.status_code == 200
+        assert len(result.json()["observations"]) == 2
+        assert client.get("/api/v1/market-data/IBM/daily?limit=5000").status_code == 422
+        assert client.get("/api/v1/market-data/IBM/daily?limit=-1").status_code == 422
+        assert client.get("/api/v1/market-data/IBM/daily?start_date=nope").status_code == 422
+        assert (
+            client.get(
+                "/api/v1/market-data/IBM/daily?start_date=2026-10-21&end_date=2026-10-01"
+            ).status_code
+            == 422
+        )
+        assert client.get("/api/v1/market-data/INVALID!!!!/daily").status_code == 422
+        assert client.get("/api/v1/market-data/MISS/daily").status_code == 404
+
+
+def test_unsupported_schema_reports_503(tmp_path, monkeypatch):
+    db = tmp_path / "future.sqlite3"
+    with sqlite3.connect(db) as conn:
+        conn.execute("PRAGMA user_version = 99")
+    monkeypatch.setenv("FININTEL_DB_PATH", str(db))
+    with TestClient(app) as client:
+        assert client.get("/api/v1/market-data/instruments").status_code == 503
+        assert client.get("/api/v1/market-data/imports").status_code == 503
+
+
+def test_no_network_or_write_routes(tmp_path, monkeypatch):
+    _seed(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        assert client.post("/api/v1/market-data/IBM/daily").status_code == 405
+        assert client.post("/api/v1/market-data/imports").status_code == 405
+        assert client.get("/api/v1/market-data/IBM/daily").status_code == 200
