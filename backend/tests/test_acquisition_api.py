@@ -184,3 +184,16 @@ def test_provider_errors_do_not_expose_user_key(tmp_path, monkeypatch):
     with TestClient(app) as client:
         response = client.post(API, headers=HEADERS, json={"symbol": "IBM"})
     assert "SYNTHETIC_TEST_KEY" not in response.text
+
+
+
+def test_index_and_mutual_fund_are_not_sent_to_stock_price_provider(tmp_path, monkeypatch):
+    db, calls = _configure(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        index = client.post(API, headers=HEADERS, json={"symbol": "^GSPC"})
+        mutual = client.post(API, headers=HEADERS, json={"symbol": "FXAIX"})
+    assert index.status_code == 422
+    assert mutual.status_code == 422
+    assert "Mutual Fund history is not supported" in mutual.json()["detail"]
+    assert calls == []
+    assert not db.exists()

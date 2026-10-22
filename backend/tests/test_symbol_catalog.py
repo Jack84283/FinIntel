@@ -11,6 +11,7 @@ from finintel.market_data.provider import ProviderPayloadInvalid, ProviderRateLi
 from finintel.market_data.symbol_catalog import fetch_active_listings, parse_listing_csv
 from finintel.storage.db import (
     SCHEMA_V1,
+    SCHEMA_V2,
     import_snapshot,
     list_instruments,
     replace_symbol_catalog,
@@ -196,3 +197,43 @@ def test_remote_listing_uses_secure_request_without_logging_key(monkeypatch):
     assert captured[0].url.params["state"] == "active"
     assert captured[0].url.scheme == "https"
     assert captured[0].url.host == "www.alphavantage.co"
+
+
+
+def test_migration_of_provider_synced_v2_preserves_listing_and_index_types(tmp_path):
+    """Databases already synced by earlier PR #6 drafts must upgrade in place."""
+    db = tmp_path / "existing-v2.sqlite3"
+    with sqlite3.connect(db) as conn:
+        conn.executescript(SCHEMA_V1 + "\n" + SCHEMA_V2)
+        conn.execute(
+            "INSERT INTO symbol_catalog(symbol, name, asset_type, exchange, source, updated_at) "
+            "VALUES ('AAPL', 'Apple Incorporated', 'Stock', 'NASDAQ', "
+            "'alpha_vantage', '2026-10-21T12:00:00Z')"
+        )
+        conn.execute("PRAGMA user_version = 2")
+    results = search_symbols(query="AAPL", db=db)
+    assert results["source"] == "alpha_vantage"
+    assert results["results"][0]["name"] == "Apple Incorporated"
+    assert search_symbols(query="^GSPC", asset_type="Index", db=db)["results"][0][
+        "asset_type"
+    ] == "Index"
+    assert search_symbols(query="FXAIX", asset_type="Mutual Fund", db=db)["results"][0][
+        "asset_type"
+    ] == "Mutual Fund"
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0] == 11
+
+
+def test_sync_preserves_indexes_and_mutual_funds(tmp_path):
+    db = tmp_path / "catalog.sqlite3"
+    search_symbols(db=db)  # Seed durable references.
+    synced = replace_symbol_catalog(parse_listing_csv(LISTING), db=db)
+    assert synced["total"] == 12
+    indexes = search_symbols(asset_type="Index", db=db)
+    funds = search_symbols(asset_type="Mutual Fund", db=db)
+    assert len(indexes["results"]) == 6
+    assert len(funds["results"]) == 4
+    assert indexes["results"][0]["symbol"].startswith("^")
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 0
