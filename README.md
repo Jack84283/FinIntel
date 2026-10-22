@@ -2,7 +2,7 @@
 
 Private, local-first financial intelligence workstation.
 
-> **Implementation stage:** Native shell, historical provider, shadcn UI and SQLite persistence are merged. The read-only Market Data Explorer is being developed on GitHub PR #5.
+> **Implementation stage:** Native shell, validated historical data, shadcn/Tailwind UI, SQLite and the Market Data Explorer are merged. GitHub PR #6 adds explicit in-app provider acquisition to SQLite.
 
 ## Architecture
 
@@ -170,3 +170,52 @@ return the newest bounded records in chronological order. Existing clients omitt
 this parameter retain the original oldest-first response. Source data remains
 historical, unadjusted, and **not** a real-time quote. Automatic fetching/refresh
 and packaged Python sidecar support are separate follow-up milestones.
+
+## Integrated market data acquisition — GitHub PR #6
+
+FinIntel's **Markets → Data acquisition** card performs this single-click
+workflow: **Fetch → Validate → Transactional SQLite import → Reload Markets**.
+It works even when the instrument list is empty, allowing the first ticker
+to be added directly from the UI. Data is saved to the **same four SQLite
+tables**, with immutable ingestion history. No database migration is needed.
+
+Start the backend **from the repository root** with a key in the **backend's
+own environment**. The UI never receives the key; provider responses and
+keys are not checked into Git:
+
+```sh
+cd /path/to/FinIntel
+source .venv/bin/activate
+# Set FININTEL_ALPHA_VANTAGE_API_KEY in your local shell securely before launch.
+# Never paste the actual key into issues, PRs, screenshots or chat.
+python -m uvicorn finintel.main:app --host 127.0.0.1 --port 8765
+```
+
+In another terminal, run `npm run tauri:dev`; open **Markets** and choose
+a ticker and **Fetch & store**. Select **Latest ~100 sessions** unless your
+provider subscription entitles you to full history. One click can consume
+one provider API request (up to 3 attempts **only on transient errors**).
+The UI displays inserted, revised, unchanged and stale counts. The Markets
+catalog, charts, data table and import history refresh after success.
+
+The acquisition-status endpoint returns only a Boolean describing whether
+the backend has the key. If the card reports "API key needed" after setting
+it, **restart the Python backend process**; a key exported in another shell
+is not automatically visible to an already-running server.
+
+The validated response is written to a temporary, owner-private JSON file
+and loaded by the pre-existing transactional SQLite importer. The temporary
+file is removed; durable acquisition records and OHLCV rows remain in
+`data/finintel.sqlite3`. Users can still use PR #2's local JSON export and
+PR #4's manual import commands independently.
+
+The development write API accepts only loopback callers, JSON, a dedicated
+workstation header, and a constrained browser Origin. This mitigates basic
+cross-site browser requests but **does not provide authenticated remote
+access** or isolation from untrusted local processes. Do not expose the
+FastAPI development server to LAN or Internet. The secure multi-device
+gateway and native packaged Python sidecar remain future milestones.
+
+Acquisition is **manual only**, not a scheduler or a live quote. Invalid
+provider responses, quota notifications and import failures never replace
+previously committed price rows. There are no real-provider calls in CI.

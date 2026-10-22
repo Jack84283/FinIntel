@@ -77,3 +77,15 @@ Multi-provider normalization, authentication/authorization, native backend
 packaging, continuous ingestion scheduling, corporate-action adjustments,
 multi-year pagination/cursors, encryption and market charts/grids remain
 explicit follow-up scope.
+
+## Provider-to-SQLite integrated write path (GitHub PR #6)
+
+The Markets UI can now explicitly request an Alpha Vantage daily series.
+The backend validates provider output using PR #2's strict Pydantic contract,
+then reuses the PR #4 snapshot importer with a private temporary file.
+SQLite's unique daily-session keys and single transaction still protect
+the database against duplicated or partial price records. No schema
+changes or additional tables are introduced. The UI automatically refreshes
+after a successful commit. The legacy explicit JSON export/import tools
+remain supported for audit and offline workflows.
+

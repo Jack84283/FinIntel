@@ -73,3 +73,26 @@ M1.5: authenticated HTTPS gateway for the cross-device tablet PWA.
 
 This document does not claim any third-party dataset is public domain or freely
 redistributable. Provider plans, data policy and licensing require periodic review.
+
+## Integrated UI workflow (GitHub PR #6)
+
+In **Markets → Data acquisition**, enter a ticker and explicitly click
+**Fetch & store**. The backend alone reads its locally configured
+`FININTEL_ALPHA_VANTAGE_API_KEY`. One validated Alpha Vantage batch is
+staged briefly in a private temporary directory and then imported using
+the existing transaction-safe SQLite importer; the temporary JSON is
+deleted. The UI reloads the catalog, OHLCV chart, table and ingestion
+history on success. Repeating an explicit import is idempotent at the price
+row level, though each click consumes a provider request and creates a
+new audit entry. The card does not poll or fetch on mount.
+
+A full-history request is allowed in the UI only as a user-selected option
+and requires the appropriate provider subscription; local software cannot
+infer the account's entitlement from an API-key-presence check. Free access
+is quota-limited, and the UI should not bulk-refresh symbols automatically.
+
+The loopback development POST uses a strict JSON contract and workstation
+header plus Origin checks. These controls are not strong local-client
+authentication; never expose the dev Python API outside loopback. The
+future secure gateway must provide authentication and authorization.
+
