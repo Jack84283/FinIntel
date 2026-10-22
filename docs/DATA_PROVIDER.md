@@ -115,3 +115,19 @@ index identifiers, such as `^GSPC`, are not presented as Alpha Vantage
 daily-price symbols. The existing `TIME_SERIES_DAILY` acquisition
 supports stock and ETF entries only; index and mutual fund price history
 requires new, tested provider contracts.
+
+## Daily history length and entitlement
+
+Per Alpha Vantage's current `TIME_SERIES_DAILY` documentation
+(https://www.alphavantage.co/documentation/#daily), `outputsize=compact`
+returns the latest 100 trading-day points and is available with free and
+premium API keys. `outputsize=full` can return up to 25+ years of trading
+history where available, and **requires a premium API key**. The API has no
+native `outputsize=5y` or `outputsize=10y`.
+
+FinIntel's `Last 5 years` and `Last 10 years` selectors are **local
+time-window filters** over already-imported SQLite OHLCV data. Only
+`Fetch & store` initiates a provider call. After full-history import, users
+can freely change the local 1/5/10-year time range without consuming new
+provider quota. API reads are bounded at 4,000 observations, sufficient for
+ordinary ten-year daily price history; for older coverage use date filtering.

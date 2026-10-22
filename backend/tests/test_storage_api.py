@@ -103,3 +103,15 @@ def test_latest_limit_returns_newest_but_chronological(tmp_path, monkeypatch):
     data = result.json()
     assert data["has_more"] is True
     assert [row["session_date"] for row in data["observations"]] == ["2026-10-19", "2026-10-20"]
+
+
+
+def test_ten_year_query_limit_is_accepted(tmp_path, monkeypatch):
+    _seed(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/market-data/IBM/daily?latest=true&limit=4000&start_date=2016-10-22"
+        )
+    assert response.status_code == 200
+    assert len(response.json()["observations"]) == 3
+    assert response.json()["has_more"] is False

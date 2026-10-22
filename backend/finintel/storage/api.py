@@ -114,7 +114,7 @@ def get_daily(
     symbol: str = Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,14}$"),
     start_date: date | None = None,
     end_date: date | None = None,
-    limit: int = Query(default=250, ge=1, le=1000),
+    limit: int = Query(default=250, ge=1, le=4000),
     latest: bool = False,
 ) -> dict[str, object]:
     if start_date is not None and end_date is not None and start_date > end_date:

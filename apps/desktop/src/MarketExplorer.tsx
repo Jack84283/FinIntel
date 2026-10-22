@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { fetchMarketDaily, fetchMarketImports, fetchMarketInstruments } from "./market-api";
 import { AcquisitionCard } from "./AcquisitionCard";
 import { MarketCharts } from "./market-chart";
+import { yearsAgo, type HistoryPeriod } from "./history-range";
 import { sortableBars, type DailySeries, type ImportRecord, type MarketInstrument } from "./market";
 
 type LoadState = "loading" | "ready" | "error";
@@ -24,6 +25,7 @@ export function MarketExplorer() {
   const [draftStart, setDraftStart] = useState("");
   const [draftEnd, setDraftEnd] = useState("");
   const [range, setRange] = useState({ start: "", end: "" });
+  const [period, setPeriod] = useState<HistoryPeriod>("recent");
   const [validationError, setValidationError] = useState("");
   const [series, setSeries] = useState<DailySeries | null>(null);
   const [seriesState, setSeriesState] = useState<LoadState>("loading");
@@ -64,7 +66,7 @@ export function MarketExplorer() {
       symbol,
       startDate: range.start || undefined,
       endDate: range.end || undefined,
-      limit: 1000,
+      limit: period === "recent" ? 100 : 4000,
     })
       .then((data) => {
         if (ignore) return;
@@ -78,7 +80,7 @@ export function MarketExplorer() {
         setSeriesError(error instanceof Error ? error.message : String(error));
       });
     return () => { ignore = true; };
-  }, [symbol, range, reload, indexState]);
+  }, [symbol, range, reload, indexState, period]);
 
   const bars = series?.observations ?? [];
   const sorted = useMemo(() => sortableBars(bars, sortColumn, descending), [bars, sortColumn, descending]);
@@ -90,6 +92,18 @@ export function MarketExplorer() {
   const prior = bars.length > 1 ? bars[bars.length - 2] : null;
   const closeChange = last && prior ? Number(last.close) - Number(prior.close) : null;
 
+  const selectPeriod = (selected: HistoryPeriod) => {
+    setPeriod(selected);
+    setValidationError("");
+    if (selected === "custom") return;
+    const start = selected === "recent" ? "" : yearsAgo(
+      selected === "1y" ? 1 : selected === "5y" ? 5 : 10,
+    );
+    setDraftStart(start);
+    setDraftEnd("");
+    setRange({ start, end: "" });
+  };
+
   const applyRange = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (draftStart && draftEnd && draftStart > draftEnd) {
@@ -97,6 +111,7 @@ export function MarketExplorer() {
       return;
     }
     setValidationError("");
+    setPeriod("custom");
     setRange({ start: draftStart, end: draftEnd });
   };
 
@@ -173,6 +188,21 @@ export function MarketExplorer() {
                     {instruments.map((item) => <option key={item.symbol + item.provider} value={item.symbol}>{item.symbol} · {formatInteger(item.sessions)} sessions</option>)}
                   </select>
                 </label>
+                <label className="grid min-w-[150px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
+                  Display period
+                  <select
+                    aria-label="Historical time range"
+                    value={period}
+                    onChange={(event) => selectPeriod(event.target.value as HistoryPeriod)}
+                    className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="recent">Latest 100 sessions</option>
+                    <option value="1y">Last 1 year</option>
+                    <option value="5y">Last 5 years</option>
+                    <option value="10y">Last 10 years</option>
+                    <option value="custom">Custom dates</option>
+                  </select>
+                </label>
                 <label className="grid min-w-[155px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
                   From (optional)
                   <input type="date" value={draftStart} onChange={(e) => setDraftStart(e.target.value)} className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
@@ -183,7 +213,7 @@ export function MarketExplorer() {
                 </label>
                 <Button type="submit" size="lg">Apply range</Button>
                 <Button type="button" size="lg" variant="ghost" onClick={() => {
-                  setDraftStart(""); setDraftEnd(""); setRange({ start: "", end: "" }); setValidationError("");
+                  setDraftStart(""); setDraftEnd(""); setRange({ start: "", end: "" }); setValidationError(""); setPeriod("recent");
                 }}>Clear</Button>
               </form>
               {validationError && <p role="alert" className="mt-3 text-sm text-destructive">{validationError}</p>}
@@ -206,8 +236,19 @@ export function MarketExplorer() {
                 <Metric label="Instrument" value={series.symbol} note={currentInstrument ? formatInteger(currentInstrument.sessions) + " stored sessions" : series.provider} />
                 <Metric label="Last close" value={last ? price(last.close) : "—"} note={last?.session_date ?? "No trading sessions"} />
                 <Metric label="Daily change" value={closeChange === null ? "—" : (closeChange >= 0 ? "+" : "") + price(String(closeChange))} note="Compared with prior loaded session" />
-                <Metric label="Loaded observations" value={formatInteger(bars.length)} note={series.has_more ? "Latest 1,000 only · more stored" : "Complete selected range"} />
+                <Metric label="Loaded observations" value={formatInteger(bars.length)} note={series.has_more ? "Bounded result · more stored" : "Available stored data"} />
               </div>
+
+              {period !== "recent" && bars.length > 0 && bars.length < (period === "10y" ? 1200 : period === "5y" ? 600 : 120) && !series.has_more && (
+                <p role="status" className="text-xs text-muted-foreground">
+                  Only {formatInteger(bars.length)} sessions are stored for this selection. More history may require a premium full-history import, or the instrument may have a shorter trading history. This selector never downloads data automatically.
+                </p>
+              )}
+              {series.has_more && (
+                <p role="status" className="text-xs text-muted-foreground">
+                  Display is limited to 4,000 latest records. Use date filters to examine older stored sessions.
+                </p>
+              )}
 
               <Card>
                 <CardHeader>
@@ -215,7 +256,7 @@ export function MarketExplorer() {
                   <CardAction><Badge variant="outline">{series.price_adjustment.replaceAll("_", " ")}</Badge></CardAction>
                   <CardDescription className="col-span-2 mt-2">{first && last ? first.session_date + " – " + last.session_date : "No sessions in selected range"} · historical end-of-day data</CardDescription>
                 </CardHeader>
-                <CardContent><MarketCharts bars={bars} /></CardContent>
+                <CardContent><MarketCharts bars={bars} period={period} /></CardContent>
               </Card>
 
               <Card>

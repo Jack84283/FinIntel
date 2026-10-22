@@ -93,8 +93,8 @@ export function AcquisitionCard({
               onChange={(event) => setOutputsize(event.target.value as OutputSize)}
               className="h-9 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <option value="compact">Latest ~100 sessions</option>
-              <option value="full">Full history (premium only)</option>
+              <option value="compact">Latest 100 sessions (free)</option>
+              <option value="full">Full 25+ years, if available (premium)</option>
             </select>
           </label>
           <Button type="submit" disabled={pending || !status?.key_configured || !symbol.trim() || selectedType === "Index" || selectedType === "Mutual Fund"} size="sm">
@@ -109,7 +109,7 @@ export function AcquisitionCard({
           </p>
         )}
         {status?.key_configured && (
-          <p className="text-xs text-muted-foreground">One click makes one provider request (up to 3 attempts only for transient errors). Subject to provider quota and license; no automatic fetching.</p>
+          <p className="text-xs text-muted-foreground">Alpha Vantage offers 100 daily records on free keys or full history on premium keys. Choose 5 or 10 years in the Explorer after full data has been stored. One click may retry transient errors; provider quotas and license apply.</p>
         )}
         {status && !status.key_configured && (
           <p role="status" className="text-xs text-muted-foreground">

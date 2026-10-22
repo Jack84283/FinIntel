@@ -59,3 +59,23 @@ describe("historical market API contracts", () => {
     expect(() => parseInstruments([{ symbol: "IBM", sessions: "2" }])).toThrow();
   });
 });
+
+
+describe("long-horizon daily records", () => {
+  it("accepts a chronological 10-year-sized response without truncating", () => {
+    const entries = Array.from({ length: 2520 }, (_, index) => {
+      const d = new Date(Date.UTC(2016, 0, 1 + index * 1.45));
+      return {
+        session_date: d.toISOString().slice(0, 10),
+        open: "100", high: "110", low: "90", close: "105", volume: 1000,
+      };
+    });
+    // The synthetic calendar is for contract sizing only, not market history.
+    const data = parseDaily({ ...observed, observations: entries });
+    expect(data.observations).toHaveLength(2520);
+    expect(() => parseDaily({
+      ...observed,
+      observations: [...entries, ...entries],
+    })).toThrow();
+  });
+});

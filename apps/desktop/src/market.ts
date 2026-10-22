@@ -115,7 +115,7 @@ export function parseDaily(value: unknown): DailySeries {
   const item = record(value);
   if (typeof item.has_more !== "boolean") throw new Error("Invalid market history metadata.");
   let previousDate = "";
-  const observations = rows(item.observations, 1000).map((entry) => {
+  const observations = rows(item.observations, 4000).map((entry) => {
     const bar = record(entry);
     const parsed: DailyBar = {
       session_date: date(bar.session_date),

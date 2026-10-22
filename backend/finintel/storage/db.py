@@ -406,8 +406,8 @@ def read_daily(
     latest: bool = False,
 ) -> dict[str, object] | None:
     """Bounded, chronological read of stored daily prices; no live provider calls."""
-    if limit < 1 or limit > 1000:
-        raise ValueError("Daily price limit must be 1–1000")
+    if limit < 1 or limit > 4000:
+        raise ValueError("Daily price limit must be 1–4000")
     path = db if db is not None else database_path()
     conn = _read_connection(path)
     if conn is None:

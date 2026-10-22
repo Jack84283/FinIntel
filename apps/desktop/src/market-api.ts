@@ -33,8 +33,8 @@ export async function fetchMarketDaily(query: DailyQuery): Promise<DailySeries> 
   if (!/^[A-Za-z0-9][A-Za-z0-9.-]{0,14}$/.test(query.symbol)) {
     throw new Error("Enter a valid stock ticker.");
   }
-  if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
-    throw new Error("History limit must be 1–1000.");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 4000) {
+    throw new Error("History limit must be 1–4000.");
   }
   if (query.startDate && query.endDate && query.startDate > query.endDate) {
     throw new Error("Start date must not exceed end date.");

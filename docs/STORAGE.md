@@ -123,3 +123,14 @@ SQLite searches, rather than loading the full directory in the webview.
 
 Before a migration, make a private backup of `data/finintel.sqlite3` using
 SQLite's backup API or while all writers are stopped.
+
+## Reading up to ten years in Markets
+
+The local historical-price GET now accepts a maximum `limit=4000` (formerly
+1000) to support approximately 2,520 daily observations over ten calendar
+years. `latest=true` maintains chronological output after selecting the
+newest bounded records. Search of older or broader archives still requires
+date filters, not an unlimited response. The underlying daily_prices and
+ingestion_runs schema and raw decimal-text persistence are unchanged.
+Charts use weekly/monthly/quarterly aggregates only in the frontend; daily
+rows are never overwritten with aggregated observations.

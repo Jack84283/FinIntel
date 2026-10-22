@@ -259,3 +259,35 @@ To inspect your local records:
 sqlite3 data/finintel.sqlite3 "SELECT asset_type, COUNT(*) FROM symbol_catalog GROUP BY asset_type ORDER BY asset_type;"
 sqlite3 data/finintel.sqlite3 "SELECT symbol, name, asset_type, source FROM symbol_catalog WHERE asset_type='Index' ORDER BY symbol;"
 ```
+
+## Multi-year historical research (PR #6)
+
+Alpha Vantage's `TIME_SERIES_DAILY` endpoint supports **compact** (last 100
+trading sessions; free or premium) and **full** (up to 25+ years where an
+instrument has traded; premium key required). It does not accept a direct
+five-year or ten-year response-size option. FinIntel imports the provider's
+full validated dataset when explicitly requested and retains it in SQLite.
+
+The Markets Explorer now offers **Latest 100 sessions, Last 1 year, Last 5
+years, Last 10 years, and Custom dates**. Those are local stored-history
+filters, not additional provider requests. The date range is based on
+calendar years, while actual trading-day counts vary. 5 and 10 years typically
+contain about 1,260 and 2,520 daily records.
+
+To support this, the local daily-read endpoint remains bounded but now allows
+up to **4,000 rows** per request (formerly 1,000). The React/Tauri bridge and
+validation are aligned with this limit, so ten-year history can be inspected
+in the table. Custom requests beyond 4,000 available observations are
+explicitly marked as bounded; date filtering can access older sessions.
+
+Charts aggregate stored daily prices into genuine OHLCV weekly candles for
+1 year, monthly candles for 5 years, and quarterly candles for 10 years,
+preserving open/high/low/close/total volume per interval. This is solely a
+chart-resolution choice: **daily** observations remain unchanged in SQLite
+and are visible in the table. Raw/as-traded prices are not adjusted for
+splits or dividends, which matters especially over a decade.
+
+Free Alpha Vantage keys cannot fetch five or ten years of **daily** records
+from this endpoint. A longer selected period will only display history
+already stored locally; choosing it does not bypass premium entitlements or
+fabricate missing dates.

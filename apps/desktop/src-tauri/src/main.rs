@@ -165,8 +165,8 @@ async fn market_daily(
     if !valid_symbol(&symbol) {
         return Err("Invalid ticker symbol.".to_string());
     }
-    if limit == 0 || limit > 1000 {
-        return Err("Daily history limit must be 1–1000.".to_string());
+    if limit == 0 || limit > 4000 {
+        return Err("Daily history limit must be 1–4000.".to_string());
     }
     if start_date.as_deref().is_some_and(|value| !valid_date(value))
         || end_date.as_deref().is_some_and(|value| !valid_date(value))
