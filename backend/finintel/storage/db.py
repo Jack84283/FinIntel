@@ -14,8 +14,9 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from finintel.market_data.models import HistoricalBatch
+from finintel.market_data.symbol_catalog import STARTER_SYMBOLS, search_starter, synchronized_rows
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -68,6 +69,21 @@ CREATE INDEX daily_prices_by_session ON daily_prices(session_date);
 """
 
 
+# Asset discovery is deliberately separate from observed historical price series:
+# a symbol appearing here does not mean prices have been downloaded.
+SCHEMA_V2 = """
+CREATE TABLE symbol_catalog (
+    symbol TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    asset_type TEXT NOT NULL CHECK(asset_type IN ('Stock', 'ETF')),
+    exchange TEXT NOT NULL,
+    source TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX symbol_catalog_by_type ON symbol_catalog(asset_type, symbol);
+"""
+
+
 class StorageError(Exception):
     """Safe failure message for local CLI or API consumers."""
 
@@ -81,7 +97,7 @@ def _ensure_version(conn: sqlite3.Connection, *, allow_missing: bool) -> bool:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == 0 and allow_missing:
         return False
-    if version != SCHEMA_VERSION:
+    if version not in (1, SCHEMA_VERSION):
         raise StorageError(
             "SQLite schema version is unsupported; expected version "
             + str(SCHEMA_VERSION)
@@ -97,19 +113,38 @@ def _migrate(conn: sqlite3.Connection) -> None:
         raise StorageError("Database uses a newer schema; upgrade FinIntel before importing")
     if version == SCHEMA_VERSION:
         return
-    if version != 0:
+    if version == 0:
+        existing = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        if existing:
+            raise StorageError("Refusing to initialize a nonempty unversioned database")
+        try:
+            conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA_V1 + "\nPRAGMA user_version = 1;\nCOMMIT;")
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to initialize the SQLite schema") from exc
+        version = 1
+    if version != 1:
         raise StorageError("No migration exists for this SQLite schema version")
-    existing = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-    ).fetchall()
-    if existing:
-        raise StorageError("Refusing to initialize a nonempty unversioned database")
+    # Explicit 1 -> 2 migration: existing prices and ingestion runs are untouched.
     try:
-        conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA_V1 + "\nPRAGMA user_version = 1;\nCOMMIT;")
+        conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA_V2)
+        conn.executemany(
+            "INSERT INTO symbol_catalog(symbol, name, asset_type, exchange, source, updated_at) "
+            "VALUES (?, ?, ?, ?, 'starter', '')",
+            (
+                (item["symbol"], item["name"], item["asset_type"], item["exchange"])
+                for item in STARTER_SYMBOLS
+            ),
+        )
+        conn.execute("PRAGMA user_version = 2")
+        conn.commit()
     except sqlite3.Error as exc:
         if conn.in_transaction:
             conn.rollback()
-        raise StorageError("Unable to initialize the SQLite schema") from exc
+        raise StorageError("Unable to migrate the SQLite symbol catalog") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:
@@ -414,5 +449,84 @@ def list_imports(*, db: Path | None = None, limit: int = 25) -> list[dict[str, o
         return [dict(row) for row in rows]
     except sqlite3.Error as exc:
         raise StorageError("Could not read local import history") from exc
+    finally:
+        conn.close()
+
+
+def search_symbols(
+    *,
+    query: str = "",
+    asset_type: str | None = None,
+    limit: int = 50,
+    db: Path | None = None,
+) -> dict[str, object]:
+    """Read-only bounded catalog search, even on legacy v1 or fresh installs."""
+    if limit < 1 or limit > 100:
+        raise ValueError("Symbol search limit must be 1–100")
+    if asset_type not in (None, "Stock", "ETF"):
+        raise ValueError("Invalid asset-type filter")
+    if len(query) > 80:
+        raise ValueError("Search query is too long")
+    path = db if db is not None else database_path()
+    conn = _read_connection(path)
+    if conn is None:
+        data = search_starter(query, asset_type, limit)
+        return {"source": "starter", "total": len(STARTER_SYMBOLS), "updated_at": None, "results": data}
+    try:
+        if conn.execute("PRAGMA user_version").fetchone()[0] == 1:
+            data = search_starter(query, asset_type, limit)
+            return {
+                "source": "starter",
+                "total": len(STARTER_SYMBOLS),
+                "updated_at": None,
+                "results": data,
+            }
+        count = conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0]
+        source_row = conn.execute(
+            "SELECT source, MAX(updated_at) AS updated_at FROM symbol_catalog "
+            "GROUP BY source ORDER BY updated_at DESC LIMIT 1"
+        ).fetchone()
+        pattern = "%" + query.strip().upper().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        prefix = query.strip().upper() + "%"
+        records = conn.execute(
+            "SELECT symbol, name, asset_type, exchange FROM symbol_catalog "
+            "WHERE (? IS NULL OR asset_type=?) "
+            "AND (symbol LIKE ? ESCAPE '\\' OR UPPER(name) LIKE ? ESCAPE '\\') "
+            "ORDER BY CASE WHEN symbol LIKE ? THEN 0 ELSE 1 END, symbol LIMIT ?",
+            (asset_type, asset_type, pattern, pattern, prefix, limit),
+        ).fetchall()
+        return {
+            "source": source_row["source"] if source_row else "starter",
+            "total": count,
+            "updated_at": source_row["updated_at"] or None if source_row else None,
+            "results": [dict(row) for row in records],
+        }
+    except sqlite3.Error as exc:
+        raise StorageError("Could not read the local symbol catalog") from exc
+    finally:
+        conn.close()
+
+
+def replace_symbol_catalog(
+    records: list[dict[str, str]], *, db: Path | None = None
+) -> dict[str, object]:
+    """Atomically replace only the symbol *directory*, never daily price rows."""
+    if not records:
+        raise StorageError("Refusing an empty symbol catalog")
+    rows, timestamp = synchronized_rows(records)
+    path = db if db is not None else database_path()
+    conn = _write_connection(path)
+    try:
+        with conn:
+            conn.execute("DELETE FROM symbol_catalog")
+            conn.executemany(
+                "INSERT INTO symbol_catalog"
+                "(symbol, name, asset_type, exchange, source, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+        return {"status": "synced", "total": len(rows), "updated_at": timestamp, "source": "alpha_vantage"}
+    except sqlite3.Error as exc:
+        raise StorageError("Could not update the local symbol catalog") from exc
     finally:
         conn.close()

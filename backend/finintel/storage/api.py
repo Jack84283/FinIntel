@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from finintel.market_data.acquisition import acquire_and_store, key_configured
+from finintel.market_data.symbol_catalog import fetch_active_listings
 from finintel.market_data.provider import (
     SYMBOL_PATTERN,
     ProviderError,
@@ -15,7 +16,14 @@ from finintel.market_data.provider import (
     ProviderRateLimited,
     ProviderUnavailable,
 )
-from finintel.storage.db import StorageError, list_imports, list_instruments, read_daily
+from finintel.storage.db import (
+    StorageError,
+    list_imports,
+    list_instruments,
+    read_daily,
+    replace_symbol_catalog,
+    search_symbols,
+)
 
 router = APIRouter(prefix="/api/v1/market-data", tags=["historical-market-data"])
 
@@ -129,7 +137,46 @@ _ACQUIRE_LOCK = threading.Lock()
 _ALLOWED_ORIGINS = {"http://127.0.0.1:1420", "http://localhost:1420"}
 
 
-class AcquisitionRequest(BaseModel):
+class CatalogEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    name: str
+    asset_type: Literal["Stock", "ETF"]
+    exchange: str
+
+
+class SymbolSearchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["starter", "alpha_vantage"]
+    updated_at: str | None
+    total: int
+    results: list[CatalogEntry]
+
+
+class CatalogSyncResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["synced"]
+    total: int
+    updated_at: str
+    source: Literal["alpha_vantage"]
+
+
+@router.get("/symbols", response_model=SymbolSearchResponse)
+def get_symbols(
+    q: str = Query(default="", max_length=80),
+    asset_type: Literal["Stock", "ETF"] | None = None,
+    limit: int = Query(default=40, ge=1, le=100),
+) -> dict[str, object]:
+    try:
+        return search_symbols(query=q, asset_type=asset_type, limit=limit)
+    except StorageError as exc:
+        raise _unavailable(exc) from exc
+
+
+
     model_config = ConfigDict(extra="forbid")
 
     symbol: str = Field(min_length=1, max_length=15)
@@ -182,15 +229,7 @@ def acquisition_status() -> AcquisitionStatus:
 @router.post("/acquisition", response_model=AcquisitionResult)
 def acquire_market_data(payload: AcquisitionRequest, request: Request) -> dict[str, object]:
     """One explicit user request. No scheduled fetches and no input API keys."""
-    if (
-        request.client is None
-        or request.client.host not in {"127.0.0.1", "::1", "testclient"}
-        or request.headers.get("x-finintel-client") != "local-workstation"
-        or request.headers.get("origin") not in (None, *_ALLOWED_ORIGINS)
-        or request.headers.get("content-type", "").split(";")[0].strip().lower()
-        != "application/json"
-    ):
-        raise HTTPException(status_code=403, detail="Local workstation request required")
+    _authorize_local_write(request)
     if not key_configured():
         raise HTTPException(
             status_code=503,
@@ -213,3 +252,46 @@ def acquire_market_data(payload: AcquisitionRequest, request: Request) -> dict[s
             raise HTTPException(status_code=503, detail="Local SQLite import failed") from exc
     finally:
         _ACQUIRE_LOCK.release()
+
+
+
+@router.post("/symbols/sync", response_model=CatalogSyncResult)
+def sync_symbols(request: Request) -> dict[str, object]:
+    """Explicit provider listing refresh; SQLite change is all-or-nothing."""
+    _authorize_local_write(request, require_json=False)
+    if not key_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Configure FININTEL_ALPHA_VANTAGE_API_KEY and restart the Python backend",
+        )
+    if not _ACQUIRE_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Another acquisition is in progress")
+    try:
+        try:
+            rows = fetch_active_listings()
+            return replace_symbol_catalog(rows)
+        except ProviderRateLimited as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except (ProviderUnavailable, ProviderPayloadInvalid) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ProviderError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (StorageError, OSError) as exc:
+            raise HTTPException(status_code=503, detail="Unable to update local symbol catalog") from exc
+    finally:
+        _ACQUIRE_LOCK.release()
+
+
+def _authorize_local_write(request: Request, *, require_json: bool = True) -> None:
+    if (
+        request.client is None
+        or request.client.host not in {"127.0.0.1", "::1", "testclient"}
+        or request.headers.get("x-finintel-client") != "local-workstation"
+        or request.headers.get("origin") not in (None, *_ALLOWED_ORIGINS)
+        or (
+            require_json
+            and request.headers.get("content-type", "").split(";")[0].strip().lower()
+            != "application/json"
+        )
+    ):
+        raise HTTPException(status_code=403, detail="Local workstation request required")

@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { acquireMarketDaily, fetchAcquisitionStatus, type AcquisitionResult, type AcquisitionStatus, type OutputSize } from "./market-acquisition-api";
+import { SymbolSelector } from "./SymbolSelector";
 
 export function AcquisitionCard({
   selectedSymbol,
@@ -73,20 +74,7 @@ export function AcquisitionCard({
       </CardHeader>
       <CardContent className="space-y-2">
         <form onSubmit={(event) => void acquire(event)} className="flex flex-wrap items-end gap-2">
-          <label className="grid min-w-[160px] flex-1 gap-1 text-xs text-muted-foreground">
-            Ticker
-            <input
-              type="text"
-              aria-label="Ticker to acquire"
-              autoComplete="off"
-              spellCheck={false}
-              maxLength={15}
-              placeholder="AAPL"
-              value={symbol}
-              onChange={(event) => setSymbol(event.target.value.toUpperCase())}
-              className="h-9 rounded-md border border-input bg-muted px-3 text-sm uppercase text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          </label>
+          <SymbolSelector value={symbol} onChange={setSymbol} keyConfigured={Boolean(status?.key_configured)} disabled={pending} />
           <label className="grid min-w-[165px] flex-1 gap-1 text-xs text-muted-foreground">
             History
             <select

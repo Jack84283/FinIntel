@@ -78,6 +78,56 @@ async fn market_acquire_daily(
     Ok(payload)
 }
 
+#[tauri::command]
+async fn market_symbols(
+    q: String,
+    asset_type: Option<String>,
+    limit: u8,
+) -> Result<serde_json::Value, String> {
+    if q.len() > 80 || q.chars().any(|ch| ch.is_control()) {
+        return Err("Symbol search query is invalid.".to_string());
+    }
+    if limit == 0 || limit > 100 {
+        return Err("Invalid symbol result limit.".to_string());
+    }
+    if asset_type.as_deref().is_some_and(|value| value != "Stock" && value != "ETF") {
+        return Err("Asset category must be Stock or ETF.".to_string());
+    }
+    let mut params = vec![("q", q), ("limit", limit.to_string())];
+    if let Some(kind) = asset_type {
+        params.push(("asset_type", kind));
+    }
+    read_backend("/api/v1/market-data/symbols", &params).await
+}
+
+#[tauri::command]
+async fn market_sync_symbols() -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(50))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize local HTTP client.".to_string())?;
+    let response = client
+        .post(format!("{BACKEND}/api/v1/market-data/symbols/sync"))
+        .header("x-finintel-client", "local-workstation")
+        .send()
+        .await
+        .map_err(|_| "Local listing sync backend is unreachable or timed out.".to_string())?;
+    let status = response.status();
+    let payload = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|_| "Listing sync returned malformed JSON.".to_string())?;
+    if !status.is_success() {
+        let detail = payload
+            .get("detail")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Listing sync failed.");
+        return Err(format!("HTTP {}: {detail}", status.as_u16()));
+    }
+    Ok(payload)
+}
+
 fn valid_symbol(symbol: &str) -> bool {
     (1..=15).contains(&symbol.len())
         && symbol.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric())
@@ -162,7 +212,9 @@ fn main() {
             market_daily,
             market_imports,
             market_acquisition_status,
-            market_acquire_daily
+            market_acquire_daily,
+            market_symbols,
+            market_sync_symbols
         ])
         .run(tauri::generate_context!())
         .expect("failed to run FinIntel");
