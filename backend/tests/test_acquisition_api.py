@@ -186,7 +186,6 @@ def test_provider_errors_do_not_expose_user_key(tmp_path, monkeypatch):
     assert "SYNTHETIC_TEST_KEY" not in response.text
 
 
-
 def test_index_and_mutual_fund_are_not_sent_to_stock_price_provider(tmp_path, monkeypatch):
     db, calls = _configure(tmp_path, monkeypatch)
     with TestClient(app) as client:

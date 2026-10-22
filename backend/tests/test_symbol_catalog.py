@@ -199,7 +199,6 @@ def test_remote_listing_uses_secure_request_without_logging_key(monkeypatch):
     assert captured[0].url.host == "www.alphavantage.co"
 
 
-
 def test_migration_of_provider_synced_v2_preserves_listing_and_index_types(tmp_path):
     """Databases already synced by earlier PR #6 drafts must upgrade in place."""
     db = tmp_path / "existing-v2.sqlite3"
@@ -214,12 +213,14 @@ def test_migration_of_provider_synced_v2_preserves_listing_and_index_types(tmp_p
     results = search_symbols(query="AAPL", db=db)
     assert results["source"] == "alpha_vantage"
     assert results["results"][0]["name"] == "Apple Incorporated"
-    assert search_symbols(query="^GSPC", asset_type="Index", db=db)["results"][0][
-        "asset_type"
-    ] == "Index"
-    assert search_symbols(query="FXAIX", asset_type="Mutual Fund", db=db)["results"][0][
-        "asset_type"
-    ] == "Mutual Fund"
+    assert (
+        search_symbols(query="^GSPC", asset_type="Index", db=db)["results"][0]["asset_type"]
+        == "Index"
+    )
+    assert (
+        search_symbols(query="FXAIX", asset_type="Mutual Fund", db=db)["results"][0]["asset_type"]
+        == "Mutual Fund"
+    )
     with sqlite3.connect(db) as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0] == 11
