@@ -14,9 +14,9 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from finintel.market_data.models import HistoricalBatch
-from finintel.market_data.symbol_catalog import STARTER_SYMBOLS, search_starter, synchronized_rows
+from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -84,6 +84,23 @@ CREATE INDEX symbol_catalog_by_type ON symbol_catalog(asset_type, symbol);
 """
 
 
+# Version 3 expands the directory taxonomy without modifying price-series tables.
+SCHEMA_V3 = """
+CREATE TABLE symbol_catalog_v3 (
+    symbol TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    asset_type TEXT NOT NULL CHECK(asset_type IN ('Stock', 'ETF', 'Index', 'Mutual Fund')),
+    exchange TEXT NOT NULL,
+    source TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+INSERT INTO symbol_catalog_v3 SELECT * FROM symbol_catalog;
+DROP TABLE symbol_catalog;
+ALTER TABLE symbol_catalog_v3 RENAME TO symbol_catalog;
+CREATE INDEX symbol_catalog_by_type ON symbol_catalog(asset_type, symbol);
+"""
+
+
 class StorageError(Exception):
     """Safe failure message for local CLI or API consumers."""
 
@@ -97,7 +114,7 @@ def _ensure_version(conn: sqlite3.Connection, *, allow_missing: bool) -> bool:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == 0 and allow_missing:
         return False
-    if version not in (1, SCHEMA_VERSION):
+    if version not in (1, 2, SCHEMA_VERSION):
         raise StorageError(
             "SQLite schema version is unsupported; expected version "
             + str(SCHEMA_VERSION)
@@ -128,25 +145,44 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 conn.rollback()
             raise StorageError("Unable to initialize the SQLite schema") from exc
         version = 1
-    if version != 1:
-        raise StorageError("No migration exists for this SQLite schema version")
-    # Explicit 1 -> 2 migration: existing prices and ingestion runs are untouched.
-    try:
-        conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA_V2)
-        conn.executemany(
-            "INSERT INTO symbol_catalog(symbol, name, asset_type, exchange, source, updated_at) "
-            "VALUES (?, ?, ?, ?, 'starter', '')",
-            (
-                (item["symbol"], item["name"], item["asset_type"], item["exchange"])
-                for item in STARTER_SYMBOLS
-            ),
-        )
-        conn.execute("PRAGMA user_version = 2")
-        conn.commit()
-    except sqlite3.Error as exc:
-        if conn.in_transaction:
-            conn.rollback()
-        raise StorageError("Unable to migrate the SQLite symbol catalog") from exc
+    if version == 1:
+        try:
+            conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA_V2)
+            conn.executemany(
+                "INSERT INTO symbol_catalog(symbol, name, asset_type, exchange, source, updated_at) "
+                "VALUES (?, ?, ?, ?, 'starter', '')",
+                (
+                    (item["symbol"], item["name"], item["asset_type"], item["exchange"])
+                    for item in STARTER_SYMBOLS
+                    if item["asset_type"] in ("Stock", "ETF")
+                ),
+            )
+            conn.execute("PRAGMA user_version = 2")
+            conn.commit()
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate SQLite historical schema to v2") from exc
+        version = 2
+    if version == 2:
+        try:
+            conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA_V3)
+            conn.executemany(
+                "INSERT OR IGNORE INTO symbol_catalog"
+                "(symbol, name, asset_type, exchange, source, updated_at) "
+                "VALUES (?, ?, ?, ?, 'starter', '')",
+                (
+                    (item["symbol"], item["name"], item["asset_type"], item["exchange"])
+                    for item in STARTER_SYMBOLS
+                    if item["asset_type"] in ("Index", "Mutual Fund")
+                ),
+            )
+            conn.execute("PRAGMA user_version = 3")
+            conn.commit()
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate SQLite symbol catalog to v3") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:
@@ -462,32 +498,22 @@ def search_symbols(
     limit: int = 50,
     db: Path | None = None,
 ) -> dict[str, object]:
-    """Read-only bounded catalog search, even on legacy v1 or fresh installs."""
+    """Initialize the durable local catalog on first search, then read it."""
     if limit < 1 or limit > 100:
         raise ValueError("Symbol search limit must be 1–100")
-    if asset_type not in (None, "Stock", "ETF"):
+    if asset_type not in (None, *ASSET_TYPES):
         raise ValueError("Invalid asset-type filter")
     if len(query) > 80:
         raise ValueError("Search query is too long")
     path = db if db is not None else database_path()
+    # Catalog access is the one intentional initializing GET: user explicitly
+    # requested persistent offline symbol master data, even before price fetch.
+    write_conn = _write_connection(path)
+    write_conn.close()
     conn = _read_connection(path)
     if conn is None:
-        data = search_starter(query, asset_type, limit)
-        return {
-            "source": "starter",
-            "total": len(STARTER_SYMBOLS),
-            "updated_at": None,
-            "results": data,
-        }
+        raise StorageError("Could not open the newly initialized symbol catalog")
     try:
-        if conn.execute("PRAGMA user_version").fetchone()[0] == 1:
-            data = search_starter(query, asset_type, limit)
-            return {
-                "source": "starter",
-                "total": len(STARTER_SYMBOLS),
-                "updated_at": None,
-                "results": data,
-            }
         count = conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0]
         source_row = conn.execute(
             "SELECT source, MAX(updated_at) AS updated_at FROM symbol_catalog "
@@ -518,6 +544,32 @@ def search_symbols(
         conn.close()
 
 
+def lookup_symbol_type(symbol: str, *, db: Path | None = None) -> str | None:
+    """Find the instrument class before attempting a provider-price request."""
+    path = db if db is not None else database_path()
+    conn = _read_connection(path)
+    if conn is None:
+        return next(
+            (row["asset_type"] for row in STARTER_SYMBOLS if row["symbol"] == symbol),
+            None,
+        )
+    try:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version == 1:
+            return next(
+                (row["asset_type"] for row in STARTER_SYMBOLS if row["symbol"] == symbol),
+                None,
+            )
+        result = conn.execute(
+            "SELECT asset_type FROM symbol_catalog WHERE symbol=?", (symbol,)
+        ).fetchone()
+        return result["asset_type"] if result else None
+    except sqlite3.Error as exc:
+        raise StorageError("Could not check symbol asset type") from exc
+    finally:
+        conn.close()
+
+
 def replace_symbol_catalog(
     records: list[dict[str, str]], *, db: Path | None = None
 ) -> dict[str, object]:
@@ -529,16 +581,17 @@ def replace_symbol_catalog(
     conn = _write_connection(path)
     try:
         with conn:
-            conn.execute("DELETE FROM symbol_catalog")
+            conn.execute("DELETE FROM symbol_catalog WHERE asset_type IN ('Stock', 'ETF')")
             conn.executemany(
                 "INSERT INTO symbol_catalog"
                 "(symbol, name, asset_type, exchange, source, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 rows,
             )
+        total = conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0]
         return {
             "status": "synced",
-            "total": len(rows),
+            "total": total,
             "updated_at": timestamp,
             "source": "alpha_vantage",
         }

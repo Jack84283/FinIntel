@@ -88,12 +88,26 @@ _STARTER: tuple[tuple[str, str, str], ...] = (
     ("XLF", "Financial Select Sector SPDR Fund", "ETF"),
     ("XLK", "Technology Select Sector SPDR Fund", "ETF"),
     ("XLV", "Health Care Select Sector SPDR Fund", "ETF"),
+    # Index identifiers follow common ^-prefixed reference symbols, NOT AV daily tickers.
+    ("^GSPC", "S&P 500 Index", "Index"),
+    ("^DJI", "Dow Jones Industrial Average", "Index"),
+    ("^IXIC", "NASDAQ Composite Index", "Index"),
+    ("^RUT", "Russell 2000 Index", "Index"),
+    ("^NDX", "NASDAQ 100 Index", "Index"),
+    ("^VIX", "CBOE Volatility Index", "Index"),
+    ("FXAIX", "Fidelity 500 Index Fund", "Mutual Fund"),
+    ("VFIAX", "Vanguard 500 Index Fund Admiral Shares", "Mutual Fund"),
+    ("VTSAX", "Vanguard Total Stock Market Index Fund Admiral Shares", "Mutual Fund"),
+    ("SWPPX", "Schwab S&P 500 Index Fund", "Mutual Fund"),
 )
 
 STARTER_SYMBOLS = tuple(
     {"symbol": symbol, "name": name, "asset_type": kind, "exchange": ""}
     for symbol, name, kind in _STARTER
 )
+ASSET_TYPES = ("Stock", "ETF", "Index", "Mutual Fund")
+PRICE_FETCH_SUPPORTED = ("Stock", "ETF")
+
 MAX_LISTING_BYTES = 16 * 1024 * 1024
 MAX_LISTING_ROWS = 100_000
 
