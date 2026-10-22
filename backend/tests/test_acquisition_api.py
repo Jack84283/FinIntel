@@ -35,9 +35,7 @@ def _configure(tmp_path, monkeypatch, *, provider_error=None):
                 raise provider_error
             return batch
 
-    monkeypatch.setattr(
-        "finintel.market_data.acquisition.AlphaVantageDailyProvider", FakeProvider
-    )
+    monkeypatch.setattr("finintel.market_data.acquisition.AlphaVantageDailyProvider", FakeProvider)
     return db, calls
 
 
@@ -129,8 +127,9 @@ def test_bad_request_csrf_and_invalid_entitlements_do_not_fetch(tmp_path, monkey
         assert client.post(API, json={"symbol": "IBM"}).status_code == 403
         assert (
             client.post(
-                API, headers={**HEADERS, "origin": "https://untrusted.example"},
-                json={"symbol": "IBM"}
+                API,
+                headers={**HEADERS, "origin": "https://untrusted.example"},
+                json={"symbol": "IBM"},
             ).status_code
             == 403
         )
@@ -143,10 +142,14 @@ def test_bad_request_csrf_and_invalid_entitlements_do_not_fetch(tmp_path, monkey
             == 422
         )
         assert client.post(API, headers=HEADERS, json={"symbol": "../abc"}).status_code == 422
-        assert client.post(API, headers=HEADERS, json={"symbol": "IBM", "apikey": "BAD"}).status_code == 422
+        assert (
+            client.post(API, headers=HEADERS, json={"symbol": "IBM", "apikey": "BAD"}).status_code
+            == 422
+        )
         assert (
             client.post(
-                API, headers={"x-finintel-client": "local-workstation", "content-type": "text/plain"},
+                API,
+                headers={"x-finintel-client": "local-workstation", "content-type": "text/plain"},
                 content='{"symbol":"IBM"}',
             ).status_code
             == 403
