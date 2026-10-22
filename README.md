@@ -176,8 +176,7 @@ and packaged Python sidecar support are separate follow-up milestones.
 FinIntel's **Markets → Data acquisition** card performs this single-click
 workflow: **Fetch → Validate → Transactional SQLite import → Reload Markets**.
 It works even when the instrument list is empty, allowing the first ticker
-to be added directly from the UI. Data is saved to the **same four SQLite
-tables**, with immutable ingestion history. No database migration is needed.
+to be added directly from the UI. Historical OHLCV and import history remain in the original four tables. A new **symbol_catalog** master-data table is added in SQLite schema v2. A catalog symbol does not imply its historical prices have been downloaded.
 
 Start the backend **from the repository root** with a key in the **backend's
 own environment**. The UI never receives the key; provider responses and
@@ -219,3 +218,12 @@ gateway and native packaged Python sidecar remain future milestones.
 Acquisition is **manual only**, not a scheduler or a live quote. Invalid
 provider responses, quota notifications and import failures never replace
 previously committed price rows. There are no real-provider calls in CI.
+
+
+## Stock / ETF symbol selector (GitHub PR #6)
+
+The Markets Data acquisition form now has a searchable **Stock / ETF** selector. Search by ticker or name, filter All / Stocks / ETFs, select a symbol, and explicitly click Fetch & store to acquire prices. Selection and local search do not contact Alpha Vantage.
+
+An offline starter directory of **63 curated stock and ETF symbols** is available before configuring an API key; it is an incomplete set of examples, not an exchange-wide or live listing. Use **Sync symbols** to explicitly download Alpha Vantage LISTING_STATUS active US stocks and ETFs into the separate local symbol_catalog table. This consumes a provider request and uses only the Python backend's private key. A full directory remains searchable locally and is returned in bounded pages of results rather than loaded into the UI all at once. The selector offers a manual ticker option when an instrument is not listed.
+
+The sync is transactional: a failed or malformed provider listing cannot replace the existing directory, and updating symbols never deletes price observations. GET /api/v1/market-data/symbols?q=AAPL&asset_type=Stock&limit=40 is read-only. POST /api/v1/market-data/symbols/sync is a restricted local development action. The migration from SQLite v1 to v2 happens on a database write, not during a search. **Back up your SQLite file before testing a schema upgrade.**

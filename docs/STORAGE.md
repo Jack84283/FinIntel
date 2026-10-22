@@ -7,7 +7,7 @@ provider data from an API request. It is safe to start the backend without a
 database. The React UI is deliberately unchanged: market-data charts/grid
 are a later milestone.
 
-## Version 1 schema
+## Version 1 schema — original historical price tables
 - `instruments`: uppercase ticker symbol.
 - `series`: unique (symbol, provider, frequency, price adjustment); currently
   Alpha Vantage / 1d / raw_unadjusted.
@@ -84,8 +84,18 @@ The Markets UI can now explicitly request an Alpha Vantage daily series.
 The backend validates provider output using PR #2's strict Pydantic contract,
 then reuses the PR #4 snapshot importer with a private temporary file.
 SQLite's unique daily-session keys and single transaction still protect
-the database against duplicated or partial price records. No schema
-changes or additional tables are introduced. The UI automatically refreshes
+the database against duplicated or partial price records. The original market-price tables remain unchanged. A fifth application table, symbol_catalog, is added by the v1-to-v2 migration. The UI automatically refreshes
 after a successful commit. The legacy explicit JSON export/import tools
 remain supported for audit and offline workflows.
 
+
+
+## SQLite schema v2 — Symbol catalog (GitHub PR #6)
+
+A versioned, additive migration creates the **fifth application table**, symbol_catalog, with columns: symbol (primary key), name, asset_type (Stock or ETF), exchange, source (starter or alpha_vantage), and updated_at (UTC sync time). All four historical price and ingestion tables remain intact.
+
+New installations initialize v1 market data and then upgrade to v2; existing v1 installations migrate on the next explicit database write. Existing v1 data stays readable without automatic write migration on GET. The catalog lists discoverable securities and is independent from historical price series; a symbol in the catalog does not imply a market price history has been imported.
+
+The offline catalog starts with 63 common tickers. An explicit LISTING_STATUS request, using the privately stored provider key, retrieves active US stocks and ETFs as CSV and replaces the local symbol directory atomically after complete validation. Failed sync cannot change the existing directory or prices. The frontend uses GET /api/v1/market-data/symbols for bounded search and POST /api/v1/market-data/symbols/sync for an explicit update.
+
+Before testing a version upgrade, back up data/finintel.sqlite3 using the SQLite backup API or while all writers are stopped.
