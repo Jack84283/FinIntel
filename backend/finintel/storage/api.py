@@ -254,7 +254,6 @@ def acquire_market_data(payload: AcquisitionRequest, request: Request) -> dict[s
         _ACQUIRE_LOCK.release()
 
 
-
 @router.post("/symbols/sync", response_model=CatalogSyncResult)
 def sync_symbols(request: Request) -> dict[str, object]:
     """Explicit provider listing refresh; SQLite change is all-or-nothing."""
@@ -277,7 +276,9 @@ def sync_symbols(request: Request) -> dict[str, object]:
         except ProviderError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except (StorageError, OSError) as exc:
-            raise HTTPException(status_code=503, detail="Unable to update local symbol catalog") from exc
+            raise HTTPException(
+                status_code=503, detail="Unable to update local symbol catalog"
+            ) from exc
     finally:
         _ACQUIRE_LOCK.release()
 

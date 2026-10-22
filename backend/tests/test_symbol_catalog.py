@@ -117,8 +117,9 @@ def test_symbol_sync_rejects_cross_origin_and_missing_key(tmp_path, monkeypatch)
     with TestClient(app) as client:
         assert client.post(API + "/sync").status_code == 403
         assert (
-            client.post(API + "/sync", headers={**HEADERS, "origin": "https://bad.invalid"})
-            .status_code
+            client.post(
+                API + "/sync", headers={**HEADERS, "origin": "https://bad.invalid"}
+            ).status_code
             == 403
         )
         assert client.get(API + "?asset_type=Crypto").status_code == 422
@@ -132,7 +133,8 @@ def test_symbol_sync_rejects_cross_origin_and_missing_key(tmp_path, monkeypatch)
 def test_csv_checks_active_type_and_duplicate_conflicts():
     rows = parse_listing_csv(LISTING)
     assert [(row["symbol"], row["asset_type"]) for row in rows] == [
-        ("AAPL", "Stock"), ("SPY", "ETF")
+        ("AAPL", "Stock"),
+        ("SPY", "ETF"),
     ]
     assert all(row["symbol"] != "ZZZ" for row in rows)
     duplicate = LISTING + b"AAPL,Someone Else,NASDAQ,Stock,2000-01-01,null,Active\n"

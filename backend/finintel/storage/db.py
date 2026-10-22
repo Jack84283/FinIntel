@@ -120,7 +120,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if existing:
             raise StorageError("Refusing to initialize a nonempty unversioned database")
         try:
-            conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA_V1 + "\nPRAGMA user_version = 1;\nCOMMIT;")
+            conn.executescript(
+                "BEGIN IMMEDIATE;\n" + SCHEMA_V1 + "\nPRAGMA user_version = 1;\nCOMMIT;"
+            )
         except sqlite3.Error as exc:
             if conn.in_transaction:
                 conn.rollback()
@@ -471,7 +473,12 @@ def search_symbols(
     conn = _read_connection(path)
     if conn is None:
         data = search_starter(query, asset_type, limit)
-        return {"source": "starter", "total": len(STARTER_SYMBOLS), "updated_at": None, "results": data}
+        return {
+            "source": "starter",
+            "total": len(STARTER_SYMBOLS),
+            "updated_at": None,
+            "results": data,
+        }
     try:
         if conn.execute("PRAGMA user_version").fetchone()[0] == 1:
             data = search_starter(query, asset_type, limit)
@@ -486,7 +493,11 @@ def search_symbols(
             "SELECT source, MAX(updated_at) AS updated_at FROM symbol_catalog "
             "GROUP BY source ORDER BY updated_at DESC LIMIT 1"
         ).fetchone()
-        pattern = "%" + query.strip().upper().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        pattern = (
+            "%"
+            + query.strip().upper().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            + "%"
+        )
         prefix = query.strip().upper() + "%"
         records = conn.execute(
             "SELECT symbol, name, asset_type, exchange FROM symbol_catalog "
@@ -525,7 +536,12 @@ def replace_symbol_catalog(
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 rows,
             )
-        return {"status": "synced", "total": len(rows), "updated_at": timestamp, "source": "alpha_vantage"}
+        return {
+            "status": "synced",
+            "total": len(rows),
+            "updated_at": timestamp,
+            "source": "alpha_vantage",
+        }
     except sqlite3.Error as exc:
         raise StorageError("Could not update the local symbol catalog") from exc
     finally:
