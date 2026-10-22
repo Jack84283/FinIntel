@@ -330,6 +330,7 @@ def read_daily(
     end: date | None = None,
     limit: int = 250,
     db: Path | None = None,
+    latest: bool = False,
 ) -> dict[str, object] | None:
     """Bounded, chronological read of stored daily prices; no live provider calls."""
     if limit < 1 or limit > 1000:
@@ -359,9 +360,12 @@ def read_daily(
             "SELECT session_date, open, high, low, close, volume "
             "FROM daily_prices WHERE "
             + " AND ".join(clauses)
-            + " ORDER BY session_date ASC LIMIT ?"
+            + (" ORDER BY session_date DESC LIMIT ?" if latest else " ORDER BY session_date ASC LIMIT ?")
         )
         rows = conn.execute(query, (*params, limit + 1)).fetchall()
+        shown = rows[:limit]
+        if latest:
+            shown = list(reversed(shown))
         recent = conn.execute(
             "SELECT retrieved_at, provider_last_refreshed, source_url, provider_terms_url "
             "FROM ingestion_runs WHERE series_id=? "
@@ -379,7 +383,7 @@ def read_daily(
             "retrieved_at": recent["retrieved_at"] if recent else None,
             "provider_last_refreshed": recent["provider_last_refreshed"] if recent else None,
             "has_more": len(rows) > limit,
-            "observations": [dict(row) for row in rows[:limit]],
+            "observations": [dict(row) for row in shown],
         }
     except sqlite3.Error as exc:
         raise StorageError("Could not read local historical prices") from exc

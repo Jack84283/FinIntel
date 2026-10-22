@@ -93,3 +93,15 @@ def test_no_network_or_write_routes(tmp_path, monkeypatch):
         assert client.post("/api/v1/market-data/IBM/daily").status_code == 405
         assert client.post("/api/v1/market-data/imports").status_code == 405
         assert client.get("/api/v1/market-data/IBM/daily").status_code == 200
+
+
+def test_latest_limit_returns_newest_but_chronological(tmp_path, monkeypatch):
+    _seed(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        result = client.get("/api/v1/market-data/IBM/daily?latest=true&limit=2")
+    assert result.status_code == 200
+    data = result.json()
+    assert data["has_more"] is True
+    assert [row["session_date"] for row in data["observations"]] == [
+        "2026-10-19", "2026-10-20"
+    ]
