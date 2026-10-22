@@ -59,12 +59,12 @@ def _daily_bar(day: str, values: Any) -> DailyOHLCV:
     if not isinstance(day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
         raise ValueError("Provider returned an invalid session date")
     if not isinstance(values, dict):
-        raise ValueError("Provider returned invalid daily price fields")
+        raise TypeError("Provider returned invalid daily price fields")
 
     def price(field: str) -> Decimal:
         original = values[field]
         if not isinstance(original, str):
-            raise ValueError("Provider price must be a decimal string")
+            raise TypeError("Provider price must be a decimal string")
         try:
             return Decimal(original)
         except InvalidOperation as exc:
@@ -117,7 +117,7 @@ def parse_alpha_vantage_daily(
         metadata = payload["Meta Data"]
         observations = payload["Time Series (Daily)"]
         if not isinstance(metadata, dict) or not isinstance(observations, dict):
-            raise ValueError("Invalid metadata or series object")
+            raise TypeError("Invalid metadata or series object")
         actual_symbol = metadata["2. Symbol"]
         if not isinstance(actual_symbol, str) or actual_symbol.upper() != symbol:
             raise ValueError("Returned instrument does not match the requested symbol")

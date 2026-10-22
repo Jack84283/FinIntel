@@ -1,6 +1,6 @@
 """Typed historical price data. Prices are decimals, never binary floats."""
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -48,7 +48,7 @@ class HistoricalBatch(BaseModel):
     source_url: str
     provider_terms_url: str
     provider_last_refreshed: str | None = None
-    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     observations: list[DailyOHLCV] = Field(min_length=1)
 
     @model_validator(mode="after")

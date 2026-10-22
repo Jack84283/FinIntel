@@ -23,6 +23,7 @@ jobs:
       - name: Python lint
         run: |
           ruff check backend
+          ruff format --diff backend
           ruff format --check backend
       - name: Unit tests
         run: python -m pytest backend/tests -q
