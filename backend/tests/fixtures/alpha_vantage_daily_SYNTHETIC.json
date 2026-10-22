@@ -1,0 +1,33 @@
+{
+  "_fixture_notice": "SYNTHETIC TEST RECORDS. Not real IBM prices. Never use for investment decisions.",
+  "Meta Data": {
+    "1. Information": "Daily Prices (open, high, low, close) and Volumes",
+    "2. Symbol": "IBM",
+    "3. Last Refreshed": "2026-10-20",
+    "4. Output Size": "Compact",
+    "5. Time Zone": "US/Eastern"
+  },
+  "Time Series (Daily)": {
+    "2026-10-20": {
+      "1. open": "101.50",
+      "2. high": "105.75",
+      "3. low": "100.25",
+      "4. close": "104.10",
+      "5. volume": "1000000"
+    },
+    "2026-10-19": {
+      "1. open": "99.00",
+      "2. high": "102.00",
+      "3. low": "98.80",
+      "4. close": "101.20",
+      "5. volume": "750000"
+    },
+    "2026-10-16": {
+      "1. open": "98.25",
+      "2. high": "99.00",
+      "3. low": "97.50",
+      "4. close": "98.50",
+      "5. volume": "450000"
+    }
+  }
+}

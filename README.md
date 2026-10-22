@@ -2,7 +2,7 @@
 
 Private, local-first financial intelligence workstation.
 
-> **Implementation stage:** PR #1 bootstrap only. No financial data acquisition, persistent market database, charting or AI is included in this PR.
+> **Implementation stage:** PR #1 desktop bootstrap is merged. PR #2 adds optional Alpha Vantage daily historical-price acquisition and local validated JSON snapshots. SQLite persistence, dashboards and AI remain future phases.
 
 ## Architecture
 
@@ -76,9 +76,32 @@ Project specifications are maintained in the FinIntel Google Drive: [ENG-0002 Im
 
 ## Next implementation milestones
 
-- **PR #2:** Public historical-source adapters and ingestion with known-good fixtures.
+- **PR #2:** Alpha Vantage historical OHLCV adapter, integrity tests, privacy-safe provenance and a one-shot local snapshot CLI (see below).
 - **PR #3:** SQLite migrations, idempotent persistence, and historical-data API.
 - **PR #4:** Chart/grid workspace backed by the local API.
 - **PR #5:** Bundle/manage the authenticated Python sidecar, offline/resume behavior and native packaging.
 
 This repository uses an independent FinIntel interface inspired by financial workstation workflows; it does not include Bloomberg intellectual property or licensed datasets.
+
+## Historical daily market-data acquisition — PR #2
+
+This is **historical end-of-day** data, not a real-time quote service. The first provider is [Alpha Vantage TIME_SERIES_DAILY](https://www.alphavantage.co/documentation/#daily). It returns **raw / unadjusted** OHLCV. The free compact endpoint returns **up to the latest 100 trading observations**; the full-history option requires a premium entitlement. Do not mix raw series with corporate-action-adjusted prices without explicit adjustment metadata.
+
+Get your **own** API key from https://www.alphavantage.co/support/#api-key after reviewing its terms for private non-commercial research. The key is not stored in GitHub or printed to the console. With your backend venv active:
+
+```bash
+export FININTEL_ALPHA_VANTAGE_API_KEY="YOUR_OWN_KEY"
+python -m finintel.market_data --symbol AAPL
+python -m finintel.market_data --symbol MSFT
+python -m finintel.market_data --symbol NVDA
+python -m finintel.market_data --symbol SPY
+unset FININTEL_ALPHA_VANTAGE_API_KEY
+```
+
+The CLI saves locally to `data/raw/<SYMBOL>.json` (ignored by git). Override with `--output /private/path/snapshot.json` or request `--outputsize full` only with a premium key. The output stores provider identity, requested instrument, source URL **without an API key**, download time, session range (from observations), and validated decimal OHLCV. It refuses malformed data and writes via a temporary file + atomic replacement.
+
+One CLI call normally consumes one provider API request; transient server/network failures may make up to three attempts. Quota/limit notifications are **not retried**. Free accounts have limited daily access; monitor your account's quota and don't loop through many symbols. No automatic scheduler is included.
+
+**Important:** CI uses a clearly **synthetic** IBM API-shaped fixture for deterministic parser tests. Fixture observations are not market prices and must never be used for analysis. Live smoke tests are opt-in, require your own key and do not run in CI. PR #3 will implement persistent SQLite ingestion; these JSON snapshots are a PR #2 staging format, not the final database.
+
+See [Data provider policy](docs/DATA_PROVIDER.md) for terms, rate-limit behavior, failure recovery and provenance. Do not expose the Python development API over your LAN or Internet; the secure tablet gateway is a separate M1.5 milestone.
