@@ -100,9 +100,7 @@ def get_daily(
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(status_code=422, detail="start_date must not exceed end_date")
     try:
-        result = read_daily(
-            symbol.upper(), start=start_date, end=end_date, limit=limit
-        )
+        result = read_daily(symbol.upper(), start=start_date, end=end_date, limit=limit)
     except StorageError as exc:
         raise _unavailable(exc) from exc
     if result is None:

@@ -105,9 +105,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if existing:
         raise StorageError("Refusing to initialize a nonempty unversioned database")
     try:
-        conn.executescript(
-            "BEGIN IMMEDIATE;\n" + SCHEMA_V1 + "\nPRAGMA user_version = 1;\nCOMMIT;"
-        )
+        conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA_V1 + "\nPRAGMA user_version = 1;\nCOMMIT;")
     except sqlite3.Error as exc:
         if conn.in_transaction:
             conn.rollback()
@@ -298,7 +296,9 @@ def import_snapshot(snapshot: Path, *, db: Path | None = None) -> dict[str, obje
             "source_sha256": digest,
         }
     except sqlite3.Error as exc:
-        raise StorageError("SQLite import transaction failed; no partial data was committed") from exc
+        raise StorageError(
+            "SQLite import transaction failed; no partial data was committed"
+        ) from exc
     finally:
         conn.close()
 

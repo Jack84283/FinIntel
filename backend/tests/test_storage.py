@@ -25,9 +25,7 @@ def snapshot_at(tmp_path, *, shift_days=0, changes=None, filename="snapshot.json
     raw = json.loads(FIXTURE.read_text())
     if changes:
         changes(raw)
-    batch = parse_alpha_vantage_daily(
-        json.dumps(raw).encode(), symbol="IBM", source_url=SOURCE
-    )
+    batch = parse_alpha_vantage_daily(json.dumps(raw).encode(), symbol="IBM", source_url=SOURCE)
     if shift_days:
         batch = batch.model_copy(
             update={"retrieved_at": batch.retrieved_at + timedelta(days=shift_days)}
@@ -69,9 +67,7 @@ def test_updates_and_stale_snapshot_does_not_overwrite(tmp_path):
     changed = snapshot_at(
         tmp_path,
         shift_days=1,
-        changes=lambda p: p["Time Series (Daily)"]["2026-10-20"].update(
-            {"4. close": "105.00"}
-        ),
+        changes=lambda p: p["Time Series (Daily)"]["2026-10-20"].update({"4. close": "105.00"}),
         filename="new.json",
     )
     result = import_snapshot(changed, db=db)
@@ -126,9 +122,7 @@ def test_date_filter_and_page_limit(tmp_path):
     limited = read_daily("IBM", db=db, limit=1)
     assert limited["has_more"] is True
     assert limited["observations"][0]["session_date"] == "2026-10-16"
-    filtered = read_daily(
-        "IBM", db=db, start=date(2026, 10, 19), end=date(2026, 10, 20)
-    )
+    filtered = read_daily("IBM", db=db, start=date(2026, 10, 19), end=date(2026, 10, 20))
     assert len(filtered["observations"]) == 2
     assert filtered["has_more"] is False
 
