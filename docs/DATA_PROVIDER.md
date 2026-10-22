@@ -100,6 +100,18 @@ future secure gateway must provide authentication and authorization.
 
 ## Stock / ETF directory and selector (GitHub PR #6)
 
-Alpha Vantage's LISTING_STATUS API provides a CSV of US active stock and ETF listings. The UI does not fetch that directory on page load or when searching. The first-launch **63-symbol starter catalog** is incomplete and marked as such; stock and ETF filters, name/ticker search, and manual ticker entry are available. The user may explicitly choose Sync symbols (one provider request subject to quota and license) to store the full validated listing into SQLite symbol_catalog without affecting historical price tables.
+Alpha Vantage's LISTING_STATUS API provides a CSV of US active stock and ETF listings. The UI does not fetch that directory on page load or when searching. The first-launch **73-record locally persisted starter catalog** is incomplete and marked as such; stock and ETF filters, name/ticker search, and manual ticker entry are available. The user may explicitly choose Sync symbols (one provider request subject to quota and license) to store the full validated listing into SQLite symbol_catalog without affecting historical price tables.
 
 Provider feed URL: https://www.alphavantage.co/documentation/#listing-status . Only active rows of Stock or ETF type with supported symbols are retained; malformed or conflicting duplicate rows abort ingestion. Catalog selection alone never fetches prices. Successful refresh records a local UTC update timestamp; no API key, historical prices, or full provider payload is published to GitHub.
+
+
+### Instrument-type restrictions
+
+The local catalog distinguishes individual Stock, ETF, Index, and Mutual Fund
+classes, including first-launch index and fund reference records. The
+`LISTING_STATUS` provider synchronizes **only active stock and ETF**
+classes; its refresh preserves all local Index/Mutual Fund rows. Reference
+index identifiers, such as `^GSPC`, are not presented as Alpha Vantage
+daily-price symbols. The existing `TIME_SERIES_DAILY` acquisition
+supports stock and ETF entries only; index and mutual fund price history
+requires new, tested provider contracts.

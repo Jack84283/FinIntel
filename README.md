@@ -220,10 +220,42 @@ provider responses, quota notifications and import failures never replace
 previously committed price rows. There are no real-provider calls in CI.
 
 
-## Stock / ETF symbol selector (GitHub PR #6)
+## Persistent instrument directory (PR #6)
 
-The Markets Data acquisition form now has a searchable **Stock / ETF** selector. Search by ticker or name, filter All / Stocks / ETFs, select a symbol, and explicitly click Fetch & store to acquire prices. Selection and local search do not contact Alpha Vantage.
+The Markets Data acquisition form now offers a searchable **instrument selector**
+with four explicit classes: **Individual stocks, ETFs, market indexes, and
+mutual funds**. Search by symbol or instrument name, filter by class and choose
+a record. The catalog is separate from OHLCV observations: seeing a symbol
+in the directory **does not mean historical data is downloaded**.
 
-An offline starter directory of **63 curated stock and ETF symbols** is available before configuring an API key; it is an incomplete set of examples, not an exchange-wide or live listing. Use **Sync symbols** to explicitly download Alpha Vantage LISTING_STATUS active US stocks and ETFs into the separate local symbol_catalog table. This consumes a provider request and uses only the Python backend's private key. A full directory remains searchable locally and is returned in bounded pages of results rather than loaded into the UI all at once. The selector offers a manual ticker option when an instrument is not listed.
+The local SQLite database `data/finintel.sqlite3` contains a fifth application
+table, `symbol_catalog`, whose main columns are `symbol`, `name`,
+`asset_type`, `exchange`, `source` and `updated_at`. The first
+instrument search initializes the database and saves **73 starter instrument
+records** locally, including 63 stocks/ETFs and 10 index/mutual-fund references.
+There is no provider request for this initial seed, and records persist after
+restarting FinIntel. Existing SQLite v1/v2 databases are upgraded to
+**schema v3** on the first instrument search or next database write. Back up
+your local database before testing any schema migration.
 
-The sync is transactional: a failed or malformed provider listing cannot replace the existing directory, and updating symbols never deletes price observations. GET /api/v1/market-data/symbols?q=AAPL&asset_type=Stock&limit=40 is read-only. POST /api/v1/market-data/symbols/sync is a restricted local development action. The migration from SQLite v1 to v2 happens on a database write, not during a search. **Back up your SQLite file before testing a schema upgrade.**
+**Sync symbols** explicitly fetches the Alpha Vantage `LISTING_STATUS`
+active US stocks and ETFs, and transactionally updates only those two classes
+in the local catalog. It **preserves** index/mutual-fund references and all
+historical price/import records. Sync uses the backend API key and can consume
+provider quota. Symbols may also be entered manually for instruments absent
+from the directory, but classification is preserved when selecting entries.
+
+**Provider capability boundary:** the current Alpha Vantage
+`TIME_SERIES_DAILY` adapter handles only stock/ETF symbols. Selecting an
+Index or Mutual Fund shows its reference metadata but disables Fetch & store;
+the backend also rejects unsupported types. Index identifiers such as
+`^GSPC` are display/reference IDs, **not** validated Alpha Vantage daily
+ticker mappings. Dedicated index and mutual-fund data adapters are future
+work, and the directory is not a live listing feed.
+
+To inspect your local records:
+
+```sh
+sqlite3 data/finintel.sqlite3 "SELECT asset_type, COUNT(*) FROM symbol_catalog GROUP BY asset_type ORDER BY asset_type;"
+sqlite3 data/finintel.sqlite3 "SELECT symbol, name, asset_type, source FROM symbol_catalog WHERE asset_type='Index' ORDER BY symbol;"
+```

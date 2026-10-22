@@ -1,4 +1,4 @@
-"""US stock/ETF starter catalog and validated Alpha Vantage listing ingestion.
+"""Persistent instrument starter catalog and validated Alpha Vantage listing ingestion.
 
 Only explicit user actions contact the listing-status provider. The starter
 catalog is deliberately small and is not a complete or real-time listing.

@@ -84,18 +84,42 @@ The Markets UI can now explicitly request an Alpha Vantage daily series.
 The backend validates provider output using PR #2's strict Pydantic contract,
 then reuses the PR #4 snapshot importer with a private temporary file.
 SQLite's unique daily-session keys and single transaction still protect
-the database against duplicated or partial price records. The original market-price tables remain unchanged. A fifth application table, symbol_catalog, is added by the v1-to-v2 migration. The UI automatically refreshes
+the database against duplicated or partial price records. The original market-price tables remain unchanged. A fifth table, symbol_catalog, is added in v2 and expanded to four instrument classes in v3. The UI automatically refreshes
 after a successful commit. The legacy explicit JSON export/import tools
 remain supported for audit and offline workflows.
 
 
 
-## SQLite schema v2 — Symbol catalog (GitHub PR #6)
+## SQLite schema v3 — Persistent instrument catalog (PR #6)
 
-A versioned, additive migration creates the **fifth application table**, symbol_catalog, with columns: symbol (primary key), name, asset_type (Stock or ETF), exchange, source (starter or alpha_vantage), and updated_at (UTC sync time). All four historical price and ingestion tables remain intact.
+The database keeps the existing four historical-market tables and adds
+`symbol_catalog` as a **fifth table**. Its columns are `symbol` (primary
+key), `name`, `asset_type`, `exchange`, `source`, and `updated_at`.
+The valid classifications are `Stock`, `ETF`, `Index`, and
+`Mutual Fund`. An instrument's directory record is independent from
+`series` and `daily_prices`, which exist only after historical data import.
 
-New installations initialize v1 market data and then upgrade to v2; existing v1 installations migrate on the next explicit database write. Existing v1 data stays readable without automatic write migration on GET. The catalog lists discoverable securities and is independent from historical price series; a symbol in the catalog does not imply a market price history has been imported.
+The migrations run sequentially: v1 initializes the historical tables;
+v1 → v2 adds stock/ETF catalog rows; v2 → v3 safely expands the catalog
+classification to include indexes and mutual funds without changing
+historical price or ingestion tables. The 73 starter records are seeded in
+SQLite on first symbol-search access, **even without an API key**, so they
+survive subsequent app restarts. Unlike the historical-price GET routes,
+the symbol-directory GET intentionally initializes/migrates its local table.
 
-The offline catalog starts with 63 common tickers. An explicit LISTING_STATUS request, using the privately stored provider key, retrieves active US stocks and ETFs as CSV and replaces the local symbol directory atomically after complete validation. Failed sync cannot change the existing directory or prices. The frontend uses GET /api/v1/market-data/symbols for bounded search and POST /api/v1/market-data/symbols/sync for an explicit update.
+The initial classifications include 63 stock/ETF examples, six index
+references (`^GSPC`, `^DJI`, `^IXIC`, `^RUT`, `^NDX`, `^VIX`),
+and four mutual funds (`FXAIX`, `VFIAX`, `VTSAX`, `SWPPX`).
+The index IDs are reference labels, not guaranteed Alpha Vantage mappings.
+The current daily-price adapter fetches only individual stocks/ETFs;
+unsupported index and mutual-fund acquisitions are blocked until separately
+validated provider adapters exist.
 
-Before testing a version upgrade, back up data/finintel.sqlite3 using the SQLite backup API or while all writers are stopped.
+An explicit `LISTING_STATUS` sync replaces only **Stock/ETF catalog rows**
+after complete CSV validation. Reference indexes and mutual funds are
+retained, as are all imported daily prices and provenance. Failed provider
+syncs do not change the previous saved catalog. The UI performs bounded
+SQLite searches, rather than loading the full directory in the webview.
+
+Before a migration, make a private backup of `data/finintel.sqlite3` using
+SQLite's backup API or while all writers are stopped.
