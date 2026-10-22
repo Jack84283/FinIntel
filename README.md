@@ -2,13 +2,13 @@
 
 Private, local-first financial intelligence workstation.
 
-> **Implementation stage:** PR #1 native bootstrap, PR #2 historical-data acquisition and UI foundation are merged. This PR adds SQLite persistence and read-only historical-data APIs. Market charts and local AI remain future phases.
+> **Implementation stage:** Native shell, historical provider, shadcn UI and SQLite persistence are merged. The read-only Market Data Explorer is being developed on GitHub PR #5.
 
 ## Architecture
 
 - **Desktop:** Tauri 2 (Rust) + React / TypeScript / Vite.
 - **Backend:** FastAPI / Pydantic, run as a separate **development** process.
-- **Transport:** React calls a typed Tauri command. Rust forwards a bounded health request to the Python backend bound on `127.0.0.1:8765`. In browser-only development, Vite proxies `/api` to that same local service.
+- **Transport:** React invokes fixed allowlisted Tauri commands for health and local market-data reads; Rust calls Python bound on `127.0.0.1:8765`. Browser-only Vite development proxies `/api` to the same service.
 - **Data storage:** validated snapshot JSON is imported into the versioned local SQLite database (M1 storage milestone, GitHub PR #4). The Python sidecar lifecycle and authentication remain a later delivery phase.
 
 ## Prerequisites
@@ -152,3 +152,21 @@ validation leaves the existing local database untouched.
 See [SQLite data storage design](docs/STORAGE.md) for schema, provenance,
 backups, security boundaries and verification. A dedicated market-data
 **frontend** is still a separate planned dashboard milestone.
+
+## Read-only Market Data Explorer (GitHub PR #5)
+
+After importing historical prices into the SQLite database and starting the Python service,
+launch the Mac app with `npm run tauri:dev` and choose **Markets**. You can select a locally
+stored ticker, apply a session-date range, inspect the most recent 1,000 records,
+view a candlestick and volume chart based on the most recent 70 loaded sessions,
+sort and page through a history table, and review source/ingestion metadata.
+No provider API requests, file writes or synthetic prices occur on this screen.
+If no instruments are available, run `python -m finintel.storage import data/raw/AAPL.json`
+and use **Reload local data**. The Python backend and UI must use the same
+`FININTEL_DB_PATH` (default: `data/finintel.sqlite3`) and working directory.
+
+For recently loaded data, the read-only history API now supports `latest=true` to
+return the newest bounded records in chronological order. Existing clients omitting
+this parameter retain the original oldest-first response. Source data remains
+historical, unadjusted, and **not** a real-time quote. Automatic fetching/refresh
+and packaged Python sidecar support are separate follow-up milestones.

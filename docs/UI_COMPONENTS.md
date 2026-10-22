@@ -12,7 +12,38 @@ The Mac desktop window (Tauri 2) and future iPad/Android PWA share React/TypeScr
 
 This is a real source-owned shadcn/ui integration, not a linked third-party stylesheet or an embedded demo. The installed component code is part of this repository and may be reviewed/customized. Base-nova CLI configuration lives in `apps/desktop/components.json`.
 
-## Adding UI components
+## Shared page layout and gutters
+
+Use the single shared `<main>` container in `src/App.tsx` for both Overview and Markets. **Keep page-edge spacing separate from shadcn Card internals**:
+
+- Compact screens: `px-3` (**12px** horizontal page gutter).
+- Tablet and desktop: `sm:px-4` (**16px** horizontal page gutter), including wide desktop windows.
+- Vertical: `py-4` (**16px**), increasing to `lg:py-5` (**20px**) on desktop.
+- Use `w-full min-w-0` without an arbitrary `max-w` cap, so market tables and charts can use the full content area beside the fixed navigation rail.
+- Do not add page gutters again in individual screens. Component padding (`CardContent`, `CardHeader`) remains source-owned shadcn styling; tighter page edges must not compromise card legibility, keyboard focus or responsive layout.
+
+The Overview intro uses `py-6 lg:py-8` to preserve hierarchy with less unused vertical space.
+
+## Dense card layout
+
+FinIntel is a **data-dense financial workstation**. Keep the shared card-to-card
+spacing predictable and compact, rather than adding new margins inside
+individual page sections:
+
+- Markets' top-level card/section stack uses `space-y-2` (**8px**) instead
+  of `space-y-5` (20px).
+- The Overview two-card grid and the Markets KPI card grid both use `gap-2`
+  (**8px**) instead of `gap-4` (16px).
+- Candlestick and volume chart sections use `space-y-2` (**8px**) instead
+  of `space-y-4` (16px).
+- Keep all `Card`, `CardHeader`, and `CardContent` **internal** padding,
+  chart legibility, control hit targets, keyboard focus, and responsive
+  wrapping unchanged. These rules only adjust the **space between** peers.
+- Extend this 8px inter-card spacing convention to new market, research and
+  dashboard pages; do not alter field-to-field or table-row spacing merely
+  to reduce card gutters.
+
+
 
 Work in the desktop workspace:
 ```sh

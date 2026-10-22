@@ -96,11 +96,14 @@ def get_daily(
     start_date: date | None = None,
     end_date: date | None = None,
     limit: int = Query(default=250, ge=1, le=1000),
+    latest: bool = False,
 ) -> dict[str, object]:
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(status_code=422, detail="start_date must not exceed end_date")
     try:
-        result = read_daily(symbol.upper(), start=start_date, end=end_date, limit=limit)
+        result = read_daily(
+            symbol.upper(), start=start_date, end=end_date, limit=limit, latest=latest
+        )
     except StorageError as exc:
         raise _unavailable(exc) from exc
     if result is None:
