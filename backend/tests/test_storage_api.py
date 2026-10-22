@@ -102,6 +102,4 @@ def test_latest_limit_returns_newest_but_chronological(tmp_path, monkeypatch):
     assert result.status_code == 200
     data = result.json()
     assert data["has_more"] is True
-    assert [row["session_date"] for row in data["observations"]] == [
-        "2026-10-19", "2026-10-20"
-    ]
+    assert [row["session_date"] for row in data["observations"]] == ["2026-10-19", "2026-10-20"]

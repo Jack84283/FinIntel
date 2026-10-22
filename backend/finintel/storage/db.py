@@ -360,7 +360,11 @@ def read_daily(
             "SELECT session_date, open, high, low, close, volume "
             "FROM daily_prices WHERE "
             + " AND ".join(clauses)
-            + (" ORDER BY session_date DESC LIMIT ?" if latest else " ORDER BY session_date ASC LIMIT ?")
+            + (
+                " ORDER BY session_date DESC LIMIT ?"
+                if latest
+                else " ORDER BY session_date ASC LIMIT ?"
+            )
         )
         rows = conn.execute(query, (*params, limit + 1)).fetchall()
         shown = rows[:limit]

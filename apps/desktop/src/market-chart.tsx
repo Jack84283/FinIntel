@@ -55,7 +55,7 @@ export function MarketCharts({ bars }: { bars: DailyBar[] }) {
           ))}
         </svg>
       </div>
-      <div className="rounded-md border border-border bg-muted/40 p-2">
+      <div className="overflow-x-auto rounded-md border border-border bg-muted/40 p-2">
         <p className="px-2 pt-1 text-xs font-medium text-muted-foreground">Daily volume</p>
         <svg viewBox="0 0 840 105" role="img" aria-label={"Daily trading volume bars for " + visible.length + " sessions"} className="h-auto min-w-[560px] w-full">
           <text x={left - 7} y={12} textAnchor="end" fontSize="11" fill="#a5b4c7">

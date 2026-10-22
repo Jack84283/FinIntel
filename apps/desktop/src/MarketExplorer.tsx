@@ -36,7 +36,7 @@ export function MarketExplorer() {
   useEffect(() => {
     let ignore = false;
     setIndexState("loading");
-    Promise.all([fetchMarketInstruments(), fetchMarketImports(10)])
+    Promise.all([fetchMarketInstruments(), fetchMarketImports(10).catch(() => [])])
       .then(([catalog, history]) => {
         if (ignore) return;
         setInstruments(catalog);
