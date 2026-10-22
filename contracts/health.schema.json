@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finintel.local/contracts/health.schema.json",
+  "title": "FinIntel Backend Health",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "service", "version"],
+  "properties": {
+    "status": { "const": "ok" },
+    "service": { "const": "finintel-backend" },
+    "version": { "type": "string", "minLength": 1 }
+  }
+}
