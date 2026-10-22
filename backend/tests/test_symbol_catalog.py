@@ -46,7 +46,10 @@ def test_starter_symbols_readable_without_database_or_key(tmp_path, monkeypatch)
     with sqlite3.connect(path) as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0] >= 73
-        assert conn.execute("SELECT asset_type FROM symbol_catalog WHERE symbol='^GSPC'").fetchone()[0] == "Index"
+        assert (
+            conn.execute("SELECT asset_type FROM symbol_catalog WHERE symbol='^GSPC'").fetchone()[0]
+            == "Index"
+        )
 
 
 def test_migrate_v1_prices_without_data_loss(tmp_path, monkeypatch):
