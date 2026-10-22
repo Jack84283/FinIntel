@@ -1,10 +1,21 @@
-"""Read-only historical market data API for the local development backend."""
+"""Local historical market data reads and explicitly authorized acquisition."""
 
+import threading
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Path, Query
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
 
+from fastapi import APIRouter, HTTPException, Path, Query, Request
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from finintel.market_data.acquisition import acquire_and_store, key_configured
+from finintel.market_data.provider import (
+    ProviderError,
+    ProviderPayloadInvalid,
+    ProviderRateLimited,
+    ProviderUnavailable,
+    SYMBOL_PATTERN,
+)
 from finintel.storage.db import StorageError, list_imports, list_instruments, read_daily
 
 router = APIRouter(prefix="/api/v1/market-data", tags=["historical-market-data"])
@@ -109,3 +120,97 @@ def get_daily(
     if result is None:
         raise HTTPException(status_code=404, detail="No stored data for this symbol")
     return result
+
+
+# This is a loopback *development* service, not the authenticated tablet gateway.
+# Cross-origin browser forms are denied: mutations require a custom JSON header
+# and allowlisted Origin. Tauri uses its fixed native IPC command to supply
+# the header; the React/Vite development proxy uses same-origin requests.
+_ACQUIRE_LOCK = threading.Lock()
+_ALLOWED_ORIGINS = {"http://127.0.0.1:1420", "http://localhost:1420"}
+
+
+class AcquisitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str = Field(min_length=1, max_length=15)
+    outputsize: Literal["compact", "full"] = "compact"
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        ticker = value.strip().upper()
+        if not SYMBOL_PATTERN.fullmatch(ticker):
+            raise ValueError("Invalid equity ticker symbol")
+        return ticker
+
+
+class AcquisitionStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["alpha_vantage"] = "alpha_vantage"
+    key_configured: bool
+    requires_explicit_action: bool = True
+    api_key_environment_variable: str = "FININTEL_ALPHA_VANTAGE_API_KEY"
+    supports_full_entitlement: bool = True
+
+
+class AcquisitionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["stored"]
+    symbol: str
+    provider: str
+    frequency: str
+    price_adjustment: str
+    first_session: str
+    last_session: str
+    retrieved_at: str
+    observations: int
+    inserted: int
+    updated: int
+    unchanged: int
+    stale: int
+    import_id: int
+    not_live_quotes: bool
+
+
+@router.get("/acquisition/status", response_model=AcquisitionStatus)
+def acquisition_status() -> AcquisitionStatus:
+    return AcquisitionStatus(key_configured=key_configured())
+
+
+@router.post("/acquisition", response_model=AcquisitionResult)
+def acquire_market_data(payload: AcquisitionRequest, request: Request) -> dict[str, object]:
+    """One explicit user request. No scheduled fetches and no input API keys."""
+    if (
+        request.client is None
+        or request.client.host not in {"127.0.0.1", "::1", "testclient"}
+        or request.headers.get("x-finintel-client") != "local-workstation"
+        or request.headers.get("origin") not in (None, *_ALLOWED_ORIGINS)
+        or request.headers.get("content-type", "").split(";")[0].strip().lower()
+        != "application/json"
+    ):
+        raise HTTPException(status_code=403, detail="Local workstation request required")
+    if not key_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Configure FININTEL_ALPHA_VANTAGE_API_KEY for the Python backend and restart it",
+        )
+    if not _ACQUIRE_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="An acquisition is already in progress")
+    try:
+        try:
+            return acquire_and_store(payload.symbol, outputsize=payload.outputsize)
+        except ProviderRateLimited as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except ProviderUnavailable as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ProviderPayloadInvalid as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ProviderError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (StorageError, OSError) as exc:
+            raise HTTPException(status_code=503, detail="Local SQLite import failed") from exc
+    finally:
+        _ACQUIRE_LOCK.release()

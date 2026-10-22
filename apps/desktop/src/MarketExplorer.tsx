@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchMarketDaily, fetchMarketImports, fetchMarketInstruments } from "./market-api";
+import { AcquisitionCard } from "./AcquisitionCard";
 import { MarketCharts } from "./market-chart";
 import { sortableBars, type DailySeries, type ImportRecord, type MarketInstrument } from "./market";
 
@@ -121,12 +122,17 @@ export function MarketExplorer() {
           <p className="mt-2 text-sm text-muted-foreground">Historical daily prices stored in local SQLite. No live quotes.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="outline">Local / read only</Badge>
+          <Badge variant="outline">Local SQLite</Badge>
           <Button type="button" variant="secondary" size="sm" onClick={() => setReload((v) => v + 1)}>
             <RefreshCw aria-hidden="true" /> Reload local data
           </Button>
         </div>
       </header>
+
+      <AcquisitionCard selectedSymbol={symbol} onAcquired={(ticker) => {
+        setSymbol(ticker);
+        setReload((value) => value + 1);
+      }} />
 
       {indexState === "loading" && (
         <Card><CardContent><Skeleton className="h-8 w-64" aria-label="Loading local instruments" /></CardContent></Card>
@@ -142,12 +148,12 @@ export function MarketExplorer() {
       {indexState === "ready" && instruments.length === 0 && (
         <Card>
           <CardHeader><CardTitle>No stored market data yet</CardTitle>
-            <CardDescription>FinIntel reads your local SQLite database. Import a previously downloaded snapshot to populate the Explorer.</CardDescription>
+            <CardDescription>FinIntel reads your local SQLite database. Use Data acquisition above to fetch and store your first symbol.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center gap-2 text-muted-foreground"><Database aria-hidden="true" className="size-5" /><span className="text-sm">No symbols are available.</span></div>
             <code className="block overflow-x-auto rounded-md bg-muted px-3 py-3 text-xs">python -m finintel.storage import data/raw/AAPL.json</code>
-            <p className="text-xs text-muted-foreground">Run the command from your FinIntel repository root using the same database path as the backend. Import is intentionally not triggered from this page.</p>
+            <p className="text-xs text-muted-foreground">Alternatively, import a previously downloaded snapshot using the command above. Your database is updated only on explicit acquisition or import.</p>
           </CardContent>
         </Card>
       )}
@@ -302,7 +308,7 @@ export function MarketExplorer() {
           )}
         </>
       )}
-      <footer className="text-xs text-muted-foreground">Local research workstation · Displayed values come from your SQLite database only · Not a live market feed</footer>
+      <footer className="text-xs text-muted-foreground">Local research workstation · Charts display local SQLite data only · Provider acquisition requires an explicit request · Not a live market feed</footer>
     </section>
   );
 }
