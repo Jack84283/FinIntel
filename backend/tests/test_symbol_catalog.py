@@ -14,6 +14,7 @@ from finintel.storage.db import (
     SCHEMA_V2,
     import_snapshot,
     list_instruments,
+    lookup_symbol_type,
     replace_symbol_catalog,
     search_symbols,
 )
@@ -238,3 +239,14 @@ def test_sync_preserves_indexes_and_mutual_funds(tmp_path):
     assert indexes["results"][0]["symbol"].startswith("^")
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 0
+
+
+def test_lookup_rejects_unsupported_seeded_fund_on_unmigrated_v2(tmp_path):
+    db = tmp_path / "preview-v2.sqlite3"
+    with sqlite3.connect(db) as conn:
+        conn.executescript(SCHEMA_V1 + "\n" + SCHEMA_V2)
+        conn.execute("PRAGMA user_version = 2")
+    assert lookup_symbol_type("FXAIX", db=db) == "Mutual Fund"
+    assert lookup_symbol_type("^GSPC", db=db) == "Index"
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
