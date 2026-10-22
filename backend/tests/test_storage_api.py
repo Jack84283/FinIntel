@@ -105,7 +105,6 @@ def test_latest_limit_returns_newest_but_chronological(tmp_path, monkeypatch):
     assert [row["session_date"] for row in data["observations"]] == ["2026-10-19", "2026-10-20"]
 
 
-
 def test_ten_year_query_limit_is_accepted(tmp_path, monkeypatch):
     _seed(tmp_path, monkeypatch)
     with TestClient(app) as client:
