@@ -179,4 +179,6 @@ def test_no_key_or_invalid_provider_never_fetches(tmp_path, monkeypatch):
     assert missing.status_code == 503
     assert invalid.status_code == 422
     assert bad_period.status_code == 422
-    assert not db.exists()
+    assert db.exists()
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 0
