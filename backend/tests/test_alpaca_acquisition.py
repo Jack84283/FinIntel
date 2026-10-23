@@ -99,9 +99,8 @@ def test_alpaca_rejects_unauthorized_credentials_and_invalid_bars(tmp_path, monk
                 200, json={"bars": {"IBM": [broken]}, "next_page_token": None}
             )
         )
-    ) as client:
-        with pytest.raises(ProviderPayloadInvalid):
-            AlpacaDailyProvider(client=client).fetch_daily("IBM")
+    ) as client, pytest.raises(ProviderPayloadInvalid):
+        AlpacaDailyProvider(client=client).fetch_daily("IBM")
 
 
 def test_alpaca_and_alpha_prices_coexist_and_are_queryable(tmp_path, monkeypatch):
