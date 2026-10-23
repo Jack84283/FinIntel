@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, BarChart3, BrainCircuit, BriefcaseBusiness, CircleCheck, CircleOff, Clock3, Database, History, RefreshCw, Settings } from "lucide-react";
+import { Activity, BarChart3, BrainCircuit, BriefcaseBusiness, CircleCheck, CircleOff, Clock3, Database, Download, History, RefreshCw, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +25,7 @@ const groups = [
     { id: "settings", label: "Settings", icon: Settings },
   ] },
 ] as const;
+const allSections = [...groups[0].items, ...groups[1].items, ...groups[2].items];
 const placeholders: Partial<Record<Screen, { title: string; description: string }>> = {
   intelligence: { title: "Intelligence", description: "Proprietary models, local AI, and market trend analysis will appear here." },
   "action-history": { title: "Action History", description: "Dedicated execution history, model runs, AI analyses and audit trails will appear here. Existing import records can be reviewed in Data Acquisition." },
@@ -85,7 +86,7 @@ export default function App() {
 
       <main className="w-full min-w-0 px-3 py-4 sm:px-4 lg:py-5">
         <nav aria-label="Mobile sections" className="mb-5 flex gap-2 overflow-x-auto pb-2 lg:hidden">
-          {groups.flatMap((group) => group.items).map(({ id, label, icon: Icon }) => (
+          {allSections.map(({ id, label, icon: Icon }) => (
             <Button key={id} type="button" className="shrink-0" variant={screen === id ? "secondary" : "ghost"} onClick={() => id === "market" ? openMarkets() : setScreen(id)} aria-current={screen === id ? "page" : undefined}>
               <Icon aria-hidden="true" /> {label}
             </Button>
