@@ -6,6 +6,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { acquireMarketDaily, fetchAcquisitionStatus, type AcquisitionResult, type AcquisitionStatus, type OutputSize, type AcquisitionProvider, type AlpacaPeriod } from "./market-acquisition-api";
 import { SymbolSelector } from "./SymbolSelector";
 import type { AssetType } from "./symbol-catalog-api";
+import { acquisitionBlockReason, preferredAcquisitionProvider } from "./acquisition-ui-state";
 
 export function AcquisitionCard({
   selectedSymbol,
@@ -18,6 +19,7 @@ export function AcquisitionCard({
   const [selectedType, setSelectedType] = useState<AssetType | null>(null);
   const [outputsize, setOutputsize] = useState<OutputSize>("compact");
   const [provider, setProvider] = useState<AcquisitionProvider>("alpaca_sip");
+  const [providerTouched, setProviderTouched] = useState(false);
   const [alpacaPeriod, setAlpacaPeriod] = useState<AlpacaPeriod>("10y");
   const [status, setStatus] = useState<AcquisitionStatus | null>(null);
   const [statusError, setStatusError] = useState("");
@@ -49,13 +51,36 @@ export function AcquisitionCard({
     return () => { cancelled = true; };
   }, [statusTick]);
 
+  // Choose a configured provider on first successful status check, but do
+  // not override the user's deliberate source selection.
+  useEffect(() => {
+    if (status && !providerTouched) {
+      setProvider(preferredAcquisitionProvider(status));
+    }
+  }, [status, providerTouched]);
+
   const configured = provider === "alpaca_sip" ? Boolean(status?.alpaca_configured) : Boolean(status?.key_configured);
+  const blockReason = acquisitionBlockReason({
+    symbol, selectedType, provider, status, statusError,
+  });
+
+  const recheckStatus = () => {
+    setStatus(null);
+    setStatusError("");
+    setStatusTick((value) => value + 1);
+  };
 
   const acquire = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (pending || selectedType === "Index" || selectedType === "Mutual Fund") return;
+    if (pending) return;
     setResult(null);
     setError("");
+    // Keep the button clickable: explain missing credentials, ticker or
+    // backend availability, but do not call any provider in these cases.
+    if (blockReason) {
+      setError(blockReason);
+      return;
+    }
     setPending(true);
     try {
       const imported = await acquireMarketDaily(symbol, outputsize, provider, alpacaPeriod);
@@ -74,11 +99,11 @@ export function AcquisitionCard({
         <CardTitle><span id="acquisition-title" className="flex items-center gap-2"><ArrowDownToLine aria-hidden="true" className="size-4" /> Data acquisition</span></CardTitle>
         <CardAction>
           <Badge variant={configured ? "success" : "outline"}>
-            {status === null ? "Checking provider" : configured ? "Provider configured" : "API key needed"}
+            {statusError ? "Backend unavailable" : status === null ? "Checking provider" : configured ? "Provider configured" : "API key needed"}
           </Badge>
         </CardAction>
         <CardDescription className="col-span-2">
-          Explicitly fetch daily unadjusted prices from Alpha Vantage and save them directly to local SQLite.
+          Choose Alpaca or Alpha Vantage to fetch validated daily stock/ETF prices into local SQLite.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -88,7 +113,12 @@ export function AcquisitionCard({
             <select
               aria-label="Historical market data provider"
               value={provider}
-              onChange={(event) => setProvider(event.target.value as AcquisitionProvider)}
+              onChange={(event) => {
+                setProvider(event.target.value as AcquisitionProvider);
+                setProviderTouched(true);
+                setError("");
+                setResult(null);
+              }}
               disabled={pending}
               className="h-9 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
@@ -98,7 +128,12 @@ export function AcquisitionCard({
           </label>
           <SymbolSelector
             value={symbol}
-            onChange={(ticker, type) => { setSymbol(ticker); setSelectedType(type); }}
+            onChange={(ticker, type) => {
+              setSymbol(ticker);
+              setSelectedType(type);
+              setError("");
+              setResult(null);
+            }}
             keyConfigured={Boolean(status?.key_configured)}
             disabled={pending}
           />
@@ -129,15 +164,29 @@ export function AcquisitionCard({
               </select>
             )}
           </label>
-          <Button type="submit" disabled={pending || !configured || !symbol.trim() || selectedType === "Index" || selectedType === "Mutual Fund"} size="sm">
+          <Button type="submit" disabled={pending} size="sm">
             {pending ? <RefreshCw aria-hidden="true" className="animate-spin" /> : <ArrowDownToLine aria-hidden="true" />}
             {pending ? "Fetching…" : "Fetch & store"}
           </Button>
-          {statusError && <Button type="button" variant="secondary" size="sm" onClick={() => setStatusTick((value) => value + 1)}>Retry connection</Button>}
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={recheckStatus}
+            disabled={pending || status === null && !statusError}
+          >
+            <RefreshCw aria-hidden="true" />
+            Recheck provider
+          </Button>
         </form>
         {(selectedType === "Index" || selectedType === "Mutual Fund") && (
           <p role="status" className="text-xs text-muted-foreground">
-            {selectedType} instruments are saved in the local catalog, but this Alpha Vantage stock/ETF daily-price integration cannot fetch their history yet.
+            {selectedType} instruments are reference entries only. Select a Stock or ETF to fetch daily prices from {provider === "alpaca_sip" ? "Alpaca" : "Alpha Vantage"}.
+          </p>
+        )}
+        {!symbol.trim() && (
+          <p role="status" className="text-xs text-muted-foreground">
+            Select a stock or ETF symbol above, or enter a ticker manually.
           </p>
         )}
         {configured && (
@@ -151,13 +200,18 @@ export function AcquisitionCard({
         {status && !configured && (
           <p role="status" className="text-xs text-muted-foreground">
             {provider === "alpaca_sip"
-              ? "Configure FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY in the Python backend environment."
-              : "Configure FININTEL_ALPHA_VANTAGE_API_KEY in the Python backend environment."}
-            {" "}Restart the backend and reload this page. Credentials never enter the UI.
+              ? "To use Alpaca, set FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY in the Python backend environment."
+              : "To use Alpha Vantage, set FININTEL_ALPHA_VANTAGE_API_KEY in the Python backend environment."}
+            {" "}Restart the backend, then select Recheck provider. Credentials never enter the UI.
+            {provider === "alpaca_sip" && status.key_configured
+              ? " Alpha Vantage is already configured; select it above to fetch now."
+              : provider === "alpha_vantage" && status.alpaca_configured
+                ? " Alpaca is already configured; select it above to fetch now."
+                : ""}
           </p>
         )}
         {statusError && <p role="alert" className="text-xs text-destructive">{statusError}</p>}
-        {error && <p role="alert" className="text-xs text-destructive">Acquisition failed: {error}. Existing stored data was not replaced.</p>}
+        {error && <p role="alert" className="text-xs text-destructive">{error} No stored data was changed.</p>}
         {result && (
           <p role="status" aria-live="polite" className="text-xs text-positive">
             Stored {result.symbol}: {result.observations} observations ({result.inserted} new, {result.updated} revised, {result.unchanged} unchanged, {result.stale} older). Through {result.last_session}. Local charts refreshed.
