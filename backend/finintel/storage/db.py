@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import HistoricalBatch
 from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -116,6 +116,18 @@ CREATE TABLE action_events (
 CREATE INDEX action_events_by_time ON action_events(occurred_at DESC, id DESC);
 """
 
+# Membership must be sourced and dated independently of the security asset type.
+SCHEMA_V5 = """
+CREATE TABLE index_memberships (
+    index_code TEXT NOT NULL CHECK(index_code IN ('SP500', 'DJIA')),
+    symbol TEXT NOT NULL,
+    as_of TEXT NOT NULL,
+    source TEXT NOT NULL,
+    PRIMARY KEY (index_code, symbol, as_of)
+);
+CREATE INDEX index_membership_symbol ON index_memberships(symbol, index_code);
+"""
+
 
 class StorageError(Exception):
     """Safe failure message for local CLI or API consumers."""
@@ -130,7 +142,7 @@ def _ensure_version(conn: sqlite3.Connection, *, allow_missing: bool) -> bool:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == 0 and allow_missing:
         return False
-    if version not in (1, 2, 3, SCHEMA_VERSION):
+    if version not in (1, 2, 3, 4, SCHEMA_VERSION):
         raise StorageError(
             "SQLite schema version is unsupported; expected version "
             + str(SCHEMA_VERSION)
@@ -209,6 +221,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if conn.in_transaction:
                 conn.rollback()
             raise StorageError("Unable to migrate action-event schema to v4") from exc
+        version = 4
+    if version == 4:
+        try:
+            conn.executescript(
+                "BEGIN IMMEDIATE;\n" + SCHEMA_V5 + "\nPRAGMA user_version = 5;\nCOMMIT;"
+            )
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate index membership schema to v5") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:
