@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import HistoricalBatch
 from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -101,6 +101,22 @@ CREATE INDEX symbol_catalog_by_type ON symbol_catalog(asset_type, symbol);
 """
 
 
+SCHEMA_V4 = """
+CREATE TABLE action_events (
+    id INTEGER PRIMARY KEY,
+    occurred_at TEXT NOT NULL,
+    action TEXT NOT NULL CHECK(action IN ('acquisition')),
+    status TEXT NOT NULL CHECK(status IN ('success', 'failed')),
+    symbol TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    import_id INTEGER,
+    error_code TEXT,
+    duration_ms INTEGER NOT NULL CHECK(duration_ms >= 0)
+);
+CREATE INDEX action_events_by_time ON action_events(occurred_at DESC, id DESC);
+"""
+
+
 class StorageError(Exception):
     """Safe failure message for local CLI or API consumers."""
 
@@ -114,7 +130,7 @@ def _ensure_version(conn: sqlite3.Connection, *, allow_missing: bool) -> bool:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == 0 and allow_missing:
         return False
-    if version not in (1, 2, SCHEMA_VERSION):
+    if version not in (1, 2, 3, SCHEMA_VERSION):
         raise StorageError(
             "SQLite schema version is unsupported; expected version "
             + str(SCHEMA_VERSION)
@@ -179,10 +195,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
             )
             conn.execute("PRAGMA user_version = 3")
             conn.commit()
+            version = 3
         except sqlite3.Error as exc:
             if conn.in_transaction:
                 conn.rollback()
             raise StorageError("Unable to migrate SQLite symbol catalog to v3") from exc
+    if version == 3:
+        try:
+            conn.executescript(
+                "BEGIN IMMEDIATE;\n" + SCHEMA_V4 + "\nPRAGMA user_version = 4;\nCOMMIT;"
+            )
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate action-event schema to v4") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:
@@ -643,5 +669,67 @@ def replace_symbol_catalog(
         }
     except sqlite3.Error as exc:
         raise StorageError("Could not update the local symbol catalog") from exc
+    finally:
+        conn.close()
+
+
+def append_action_event(
+    *,
+    symbol: str,
+    provider: str,
+    status: str,
+    duration_ms: int,
+    import_id: int | None = None,
+    error_code: str | None = None,
+    db: Path | None = None,
+) -> int:
+    """Append restricted, credential-free acquisition metadata to local SQLite."""
+    if status not in ("success", "failed") or not symbol or not provider:
+        raise ValueError("Invalid action event")
+    if duration_ms < 0 or (status == "success" and import_id is None):
+        raise ValueError("Invalid action result")
+    if error_code is not None and (len(error_code) > 64 or not error_code.isidentifier()):
+        raise ValueError("Invalid error code")
+    conn = _write_connection(db if db is not None else database_path())
+    try:
+        with conn:
+            cursor = conn.execute(
+                "INSERT INTO action_events(occurred_at,action,status,symbol,provider,import_id,error_code,duration_ms) "
+                "VALUES (?, 'acquisition', ?, ?, ?, ?, ?, ?)",
+                (
+                    datetime.now(UTC).isoformat(timespec="microseconds"),
+                    status,
+                    symbol,
+                    provider,
+                    import_id,
+                    error_code,
+                    duration_ms,
+                ),
+            )
+        return int(cursor.lastrowid)
+    except sqlite3.Error as exc:
+        raise StorageError("Unable to record local action event") from exc
+    finally:
+        conn.close()
+
+
+def list_action_events(*, limit: int = 100, db: Path | None = None) -> list[dict[str, object]]:
+    """Read bounded operational events; an older database has no recorded events."""
+    if limit < 1 or limit > 100:
+        raise ValueError("Event history limit must be 1–100")
+    conn = _read_connection(db if db is not None else database_path())
+    if conn is None:
+        return []
+    try:
+        if conn.execute("PRAGMA user_version").fetchone()[0] < 4:
+            return []
+        rows = conn.execute(
+            "SELECT id,occurred_at,action,status,symbol,provider,import_id,error_code,duration_ms "
+            "FROM action_events ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.Error as exc:
+        raise StorageError("Unable to read local action history") from exc
     finally:
         conn.close()

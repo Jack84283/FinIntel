@@ -105,7 +105,9 @@ def test_quota_is_not_retried_and_does_not_create_db(tmp_path, monkeypatch):
         response = client.post(API, headers=HEADERS, json={"symbol": "IBM"})
     assert response.status_code == 429
     assert calls == [("IBM", "compact")]
-    assert not db.exists()
+    assert db.exists()
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 0
 
 
 def test_missing_key_blocks_provider_and_returns_safe_status(tmp_path, monkeypatch):
@@ -117,7 +119,9 @@ def test_missing_key_blocks_provider_and_returns_safe_status(tmp_path, monkeypat
     assert status.json()["key_configured"] is False
     assert result.status_code == 503
     assert "FININTEL_ALPHA_VANTAGE_API_KEY" in result.json()["detail"]
-    assert not db.exists()
+    assert db.exists()
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 0
     assert calls == []
 
 
@@ -195,4 +199,6 @@ def test_index_and_mutual_fund_are_not_sent_to_stock_price_provider(tmp_path, mo
     assert mutual.status_code == 422
     assert "Mutual Fund history is not supported" in mutual.json()["detail"]
     assert calls == []
-    assert not db.exists()
+    assert db.exists()
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 0
