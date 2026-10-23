@@ -11,7 +11,7 @@ import time
 from datetime import UTC, datetime
 
 from finintel.market_data.acquisition import acquire_and_store
-from finintel.market_data.provider import ProviderRateLimited
+from finintel.market_data.provider import ProviderError, ProviderRateLimited
 from finintel.storage.db import StorageError, database_path
 
 
@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         except ProviderRateLimited:
             print(json.dumps({"symbol": symbol, "status": "quota_reached", "stopped": True}), flush=True)
             break
-        except Exception as exc:
+        except (ProviderError, StorageError, OSError, ValueError) as exc:
             # Restrict logged detail to type only; never print provider responses or secrets.
             failed += 1
             print(json.dumps({"symbol": symbol, "status": "failed",
