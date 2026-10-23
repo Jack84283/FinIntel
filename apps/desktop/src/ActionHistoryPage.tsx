@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { fetchMarketImports } from "./market-api";
 import type { ImportRecord } from "./market";
 import type { MarketSelection } from "./DataAcquisitionPage";
+import type { AcquisitionProvider } from "./market-acquisition-api";
 
 /** Read-only history of successful persisted imports. No events are fabricated. */
 export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?: MarketSelection) => void }) {
@@ -90,7 +91,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
                     <td className="px-3 py-2 text-right">{item.inserted.toLocaleString()} / {item.updated.toLocaleString()} / {item.unchanged.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right">
                       {item.provider === "alpaca_sip" || item.provider === "alpha_vantage"
-                        ? <Button type="button" size="sm" variant="ghost" onClick={() => onViewMarket({ symbol: item.symbol, provider: item.provider })}><BarChart3 aria-hidden="true" /> View</Button>
+                        ? <Button type="button" size="sm" variant="ghost" onClick={() => onViewMarket({ symbol: item.symbol, provider: item.provider as AcquisitionProvider })}><BarChart3 aria-hidden="true" /> View</Button>
                         : "—"}
                     </td>
                   </tr>
