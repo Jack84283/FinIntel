@@ -4,10 +4,10 @@ import json
 import httpx
 import pytest
 
+from finintel.market_data.__main__ import write_snapshot
 from finintel.market_data.provider import ProviderPayloadInvalid
 from finintel.market_data.tiingo import TiingoDailyProvider, parse_prices
 from finintel.storage.db import import_snapshot, read_daily
-from finintel.market_data.__main__ import write_snapshot
 
 
 def test_tiingo_fetch_and_store(tmp_path, monkeypatch):
