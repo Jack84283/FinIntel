@@ -201,7 +201,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
             raise StorageError("Unable to migrate SQLite symbol catalog to v3") from exc
     if version == 3:
         try:
-            conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA_V4 + "\nPRAGMA user_version = 4;\nCOMMIT;")
+            conn.executescript(
+                "BEGIN IMMEDIATE;\n" + SCHEMA_V4 + "\nPRAGMA user_version = 4;\nCOMMIT;"
+            )
         except sqlite3.Error as exc:
             if conn.in_transaction:
                 conn.rollback()
@@ -670,9 +672,16 @@ def replace_symbol_catalog(
         conn.close()
 
 
-def append_action_event(*, symbol: str, provider: str, status: str,
-                        duration_ms: int, import_id: int | None = None,
-                        error_code: str | None = None, db: Path | None = None) -> int:
+def append_action_event(
+    *,
+    symbol: str,
+    provider: str,
+    status: str,
+    duration_ms: int,
+    import_id: int | None = None,
+    error_code: str | None = None,
+    db: Path | None = None,
+) -> int:
     """Append restricted, credential-free acquisition metadata to local SQLite."""
     if status not in ("success", "failed") or not symbol or not provider:
         raise ValueError("Invalid action event")
@@ -686,8 +695,15 @@ def append_action_event(*, symbol: str, provider: str, status: str,
             cursor = conn.execute(
                 "INSERT INTO action_events(occurred_at,action,status,symbol,provider,import_id,error_code,duration_ms) "
                 "VALUES (?, 'acquisition', ?, ?, ?, ?, ?, ?)",
-                (datetime.now(UTC).isoformat(timespec="microseconds"), status, symbol,
-                 provider, import_id, error_code, duration_ms),
+                (
+                    datetime.now(UTC).isoformat(timespec="microseconds"),
+                    status,
+                    symbol,
+                    provider,
+                    import_id,
+                    error_code,
+                    duration_ms,
+                ),
             )
         return int(cursor.lastrowid)
     except sqlite3.Error as exc:
@@ -708,7 +724,8 @@ def list_action_events(*, limit: int = 100, db: Path | None = None) -> list[dict
             return []
         rows = conn.execute(
             "SELECT id,occurred_at,action,status,symbol,provider,import_id,error_code,duration_ms "
-            "FROM action_events ORDER BY id DESC LIMIT ?", (limit,),
+            "FROM action_events ORDER BY id DESC LIMIT ?",
+            (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
     except sqlite3.Error as exc:
