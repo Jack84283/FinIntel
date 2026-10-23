@@ -242,7 +242,11 @@ class AcquisitionResult(BaseModel):
 
 @router.get("/acquisition/status", response_model=AcquisitionStatus)
 def acquisition_status() -> AcquisitionStatus:
-    return AcquisitionStatus(key_configured=key_configured(), alpaca_configured=alpaca_configured(), tiingo_configured=tiingo_configured())
+    return AcquisitionStatus(
+        key_configured=key_configured(),
+        alpaca_configured=alpaca_configured(),
+        tiingo_configured=tiingo_configured(),
+    )
 
 
 def _acquire_market_data_impl(payload: AcquisitionRequest, request: Request) -> dict[str, object]:
