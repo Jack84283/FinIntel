@@ -11,12 +11,12 @@ from pathlib import Path
 
 from finintel.market_data.__main__ import write_snapshot
 from finintel.market_data.alpaca import AlpacaDailyProvider, alpaca_configured
-from finintel.market_data.tiingo import TiingoDailyProvider, tiingo_configured
 from finintel.market_data.provider import (
     SYMBOL_PATTERN,
     AlphaVantageDailyProvider,
     ProviderError,
 )
+from finintel.market_data.tiingo import TiingoDailyProvider, tiingo_configured
 from finintel.storage.db import import_snapshot
 
 
