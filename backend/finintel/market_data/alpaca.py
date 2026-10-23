@@ -65,22 +65,22 @@ def _decode_page(content: bytes, symbol: str) -> tuple[list[DailyOHLCV], str | N
         parsed: list[DailyOHLCV] = []
         for row in records:
             if not isinstance(row, dict):
-                raise ValueError("Invalid Alpaca OHLCV record")
+                raise TypeError("Invalid Alpaca OHLCV record")
             timestamp = row["t"]
             if not isinstance(timestamp, str):
-                raise ValueError("Invalid Alpaca bar timestamp")
-            trading_date = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                raise TypeError("Invalid Alpaca bar timestamp")
+            trading_date = datetime.fromisoformat(timestamp)
             if trading_date.tzinfo is None:
                 raise ValueError("Alpaca bar requires an offset-aware timestamp")
             prices = []
             for field in ("o", "h", "l", "c"):
                 value = row[field]
                 if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-                    raise ValueError("Invalid Alpaca price type")
+                    raise TypeError("Invalid Alpaca price type")
                 prices.append(Decimal(str(value)))
             volume = row["v"]
             if isinstance(volume, bool) or not isinstance(volume, int):
-                raise ValueError("Invalid Alpaca volume type")
+                raise TypeError("Invalid Alpaca volume type")
             parsed.append(
                 DailyOHLCV(
                     session_date=trading_date.astimezone(UTC).date(),

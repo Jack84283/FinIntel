@@ -73,9 +73,8 @@ def test_alpaca_exits_on_quota_and_corrupt_pagination(tmp_path, monkeypatch):
 
     with httpx.Client(
         transport=httpx.MockTransport(lambda request: httpx.Response(429))
-    ) as client:
-        with pytest.raises(ProviderRateLimited):
-            AlpacaDailyProvider(client=client).fetch_daily("IBM")
+    ) as client, pytest.raises(ProviderRateLimited):
+        AlpacaDailyProvider(client=client).fetch_daily("IBM")
 
     with httpx.Client(
         transport=httpx.MockTransport(
@@ -83,18 +82,16 @@ def test_alpaca_exits_on_quota_and_corrupt_pagination(tmp_path, monkeypatch):
                 200, json={"bars": {"IBM": [BARS[0]]}, "next_page_token": "REPEAT"}
             )
         )
-    ) as client:
-        with pytest.raises(ProviderPayloadInvalid):
-            AlpacaDailyProvider(client=client).fetch_daily("IBM")
+    ) as client, pytest.raises(ProviderPayloadInvalid):
+        AlpacaDailyProvider(client=client).fetch_daily("IBM")
 
 
 def test_alpaca_rejects_unauthorized_credentials_and_invalid_bars(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     with httpx.Client(
         transport=httpx.MockTransport(lambda request: httpx.Response(403, json={"error": "bad"}))
-    ) as client:
-        with pytest.raises(ProviderError, match="entitlement"):
-            AlpacaDailyProvider(client=client).fetch_daily("IBM")
+    ) as client, pytest.raises(ProviderError, match="entitlement"):
+        AlpacaDailyProvider(client=client).fetch_daily("IBM")
     broken = {**BARS[0], "h": 90}
     with httpx.Client(
         transport=httpx.MockTransport(
