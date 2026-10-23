@@ -1,4 +1,5 @@
 """Tiingo raw daily prices adapter. Token is sent only in HTTP headers."""
+
 import json
 import os
 from datetime import UTC, date, datetime, timedelta
@@ -10,7 +11,10 @@ from pydantic import ValidationError
 
 from finintel.market_data.models import DailyOHLCV, HistoricalBatch
 from finintel.market_data.provider import (
-    SYMBOL_PATTERN, ProviderError, ProviderPayloadInvalid, ProviderRateLimited,
+    SYMBOL_PATTERN,
+    ProviderError,
+    ProviderPayloadInvalid,
+    ProviderRateLimited,
     ProviderUnavailable,
 )
 
@@ -32,7 +36,7 @@ def parse_prices(data: bytes) -> list[DailyOHLCV]:
         bars = []
         for item in payload:
             if not isinstance(item, dict):
-                raise ValueError("Invalid Tiingo observation")
+                raise TypeError("Invalid Tiingo observation")
             bars.append(DailyOHLCV(
                 session_date=date.fromisoformat(item["date"][:10]),
                 open=Decimal(str(item["open"])), high=Decimal(str(item["high"])),
