@@ -17,6 +17,7 @@ from pathlib import Path
 from finintel.market_data.acquisition import acquire_and_store, key_configured
 from finintel.market_data.alpaca import alpaca_configured
 from finintel.market_data.batch import pending_symbols
+from finintel.market_data.tiingo import tiingo_configured
 from finintel.market_data.provider import ProviderError, ProviderRateLimited
 from finintel.storage.db import StorageError, database_path
 
@@ -71,6 +72,9 @@ def run(
         return 2
     if provider == "alpha_vantage" and not key_configured():
         print("Alpha Vantage API key is not configured; no requests were sent.", file=sys.stderr)
+        return 2
+    if provider == "tiingo" and not tiingo_configured():
+        print("Tiingo token is not configured; no requests were sent.", file=sys.stderr)
         return 2
     state_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = state_path.with_suffix(state_path.suffix + ".lock")
@@ -162,7 +166,7 @@ def run(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Persistent local historical backfill worker")
-    parser.add_argument("--provider", choices=("alpaca_sip", "alpha_vantage"), default="alpaca_sip")
+    parser.add_argument("--provider", choices=("alpaca_sip", "alpha_vantage", "tiingo"), default="alpaca_sip")
     parser.add_argument("--asset-type", choices=("all", "Stock", "ETF"), default="all")
     parser.add_argument("--max-requests-per-day", type=int, default=20)
     parser.add_argument("--delay-seconds", type=float, default=15.0)
