@@ -264,8 +264,6 @@ def _acquire_market_data_impl(payload: AcquisitionRequest, request: Request) -> 
             status_code=503,
             detail="Configure FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY",
         )
-    if payload.provider == "tiingo" and not tiingo_configured():
-        raise HTTPException(status_code=503, detail="Configure FININTEL_TIINGO_API_KEY in the Python backend")
     if not _ACQUIRE_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="An acquisition is already in progress")
     try:
@@ -353,8 +351,6 @@ def sync_symbols(request: Request) -> dict[str, object]:
             status_code=503,
             detail="Configure FININTEL_ALPHA_VANTAGE_API_KEY and restart the Python backend",
         )
-    if payload.provider == "tiingo" and not tiingo_configured():
-        raise HTTPException(status_code=503, detail="Configure FININTEL_TIINGO_API_KEY in the Python backend")
     if not _ACQUIRE_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="Another acquisition is in progress")
     try:
