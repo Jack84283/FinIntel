@@ -4,9 +4,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchMarketDaily, fetchMarketImports, fetchMarketInstruments } from "./market-api";
+import { fetchMarketDaily, fetchMarketInstruments } from "./market-api";
+import type { MarketSelection } from "./DataAcquisitionPage";
 import { MarketCharts } from "./market-chart";
-import { sortableBars, type DailySeries, type ImportRecord, type MarketInstrument } from "./market";
+import { yearsAgo, type HistoryPeriod } from "./history-range";
+import { sortableBars, type DailySeries, type MarketInstrument } from "./market";
 
 type LoadState = "loading" | "ready" | "error";
 type SortColumn = "session_date" | "close" | "volume";
@@ -15,19 +17,23 @@ const pageSize = 25;
 const formatInteger = (value: number) => new Intl.NumberFormat("en-US").format(value);
 const price = (raw: string) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(Number(raw));
 
-export function MarketExplorer() {
+export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
+  initialSelection?: MarketSelection | null;
+  onOpenAcquisition: () => void;
+}) {
   const [instruments, setInstruments] = useState<MarketInstrument[]>([]);
   const [indexState, setIndexState] = useState<LoadState>("loading");
   const [indexError, setIndexError] = useState("");
-  const [symbol, setSymbol] = useState("");
+  const [symbol, setSymbol] = useState(initialSelection?.symbol ?? "");
+  const [priceProvider, setPriceProvider] = useState<"alpha_vantage" | "alpaca_sip">(initialSelection?.provider ?? "alpha_vantage");
   const [draftStart, setDraftStart] = useState("");
   const [draftEnd, setDraftEnd] = useState("");
   const [range, setRange] = useState({ start: "", end: "" });
+  const [period, setPeriod] = useState<HistoryPeriod>("recent");
   const [validationError, setValidationError] = useState("");
   const [series, setSeries] = useState<DailySeries | null>(null);
   const [seriesState, setSeriesState] = useState<LoadState>("loading");
   const [seriesError, setSeriesError] = useState("");
-  const [imports, setImports] = useState<ImportRecord[]>([]);
   const [sortColumn, setSortColumn] = useState<SortColumn>("session_date");
   const [descending, setDescending] = useState(true);
   const [page, setPage] = useState(0);
@@ -36,12 +42,15 @@ export function MarketExplorer() {
   useEffect(() => {
     let ignore = false;
     setIndexState("loading");
-    Promise.all([fetchMarketInstruments(), fetchMarketImports(10).catch(() => [])])
-      .then(([catalog, history]) => {
+    fetchMarketInstruments()
+      .then((catalog) => {
         if (ignore) return;
         setInstruments(catalog);
-        setImports(history);
-        setSymbol((previous) => catalog.some((item) => item.symbol === previous) ? previous : (catalog[0]?.symbol ?? ""));
+        const matched = catalog.find((item) => item.symbol === symbol && item.provider === priceProvider)
+          ?? catalog.find((item) => item.symbol === symbol)
+          ?? catalog[0];
+        setSymbol(matched?.symbol ?? "");
+        setPriceProvider((matched?.provider ?? "alpha_vantage") as "alpha_vantage" | "alpaca_sip");
         setIndexState("ready");
         setIndexError("");
       })
@@ -61,9 +70,10 @@ export function MarketExplorer() {
     setPage(0);
     fetchMarketDaily({
       symbol,
+      provider: priceProvider,
       startDate: range.start || undefined,
       endDate: range.end || undefined,
-      limit: 1000,
+      limit: period === "recent" ? 100 : 4000,
     })
       .then((data) => {
         if (ignore) return;
@@ -77,17 +87,29 @@ export function MarketExplorer() {
         setSeriesError(error instanceof Error ? error.message : String(error));
       });
     return () => { ignore = true; };
-  }, [symbol, range, reload, indexState]);
+  }, [symbol, priceProvider, range, reload, indexState, period]);
 
   const bars = series?.observations ?? [];
   const sorted = useMemo(() => sortableBars(bars, sortColumn, descending), [bars, sortColumn, descending]);
   const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
   const visibleRows = sorted.slice(page * pageSize, (page + 1) * pageSize);
-  const currentInstrument = instruments.find((item) => item.symbol === symbol);
+  const currentInstrument = instruments.find((item) => item.symbol === symbol && item.provider === priceProvider);
   const last = bars[bars.length - 1];
   const first = bars[0];
   const prior = bars.length > 1 ? bars[bars.length - 2] : null;
   const closeChange = last && prior ? Number(last.close) - Number(prior.close) : null;
+
+  const selectPeriod = (selected: HistoryPeriod) => {
+    setPeriod(selected);
+    setValidationError("");
+    if (selected === "custom") return;
+    const start = selected === "recent" ? "" : yearsAgo(
+      selected === "1y" ? 1 : selected === "5y" ? 5 : 10,
+    );
+    setDraftStart(start);
+    setDraftEnd("");
+    setRange({ start, end: "" });
+  };
 
   const applyRange = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -96,6 +118,7 @@ export function MarketExplorer() {
       return;
     }
     setValidationError("");
+    setPeriod("custom");
     setRange({ start: draftStart, end: draftEnd });
   };
 
@@ -121,9 +144,12 @@ export function MarketExplorer() {
           <p className="mt-2 text-sm text-muted-foreground">Historical daily prices stored in local SQLite. No live quotes.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="outline">Local / read only</Badge>
+          <Badge variant="outline">Local SQLite</Badge>
           <Button type="button" variant="secondary" size="sm" onClick={() => setReload((v) => v + 1)}>
             <RefreshCw aria-hidden="true" /> Reload local data
+          </Button>
+          <Button type="button" size="sm" onClick={onOpenAcquisition}>
+            <Database aria-hidden="true" /> Data Acquisition
           </Button>
         </div>
       </header>
@@ -142,12 +168,13 @@ export function MarketExplorer() {
       {indexState === "ready" && instruments.length === 0 && (
         <Card>
           <CardHeader><CardTitle>No stored market data yet</CardTitle>
-            <CardDescription>FinIntel reads your local SQLite database. Import a previously downloaded snapshot to populate the Explorer.</CardDescription>
+            <CardDescription>FinIntel reads your local SQLite database. Open Data Acquisition to fetch and store your first stock or ETF.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex items-center gap-2 text-muted-foreground"><Database aria-hidden="true" className="size-5" /><span className="text-sm">No symbols are available.</span></div>
+            <div className="flex items-center gap-2 text-muted-foreground"><Database aria-hidden="true" className="size-5" /><span className="text-sm">No price series have been imported.</span></div>
+            <Button type="button" onClick={onOpenAcquisition}><Database aria-hidden="true" /> Open Data Acquisition</Button>
             <code className="block overflow-x-auto rounded-md bg-muted px-3 py-3 text-xs">python -m finintel.storage import data/raw/AAPL.json</code>
-            <p className="text-xs text-muted-foreground">Run the command from your FinIntel repository root using the same database path as the backend. Import is intentionally not triggered from this page.</p>
+            <p className="text-xs text-muted-foreground">Alternatively, import a previously downloaded snapshot using the command above. All new data acquisition and completed import history are managed in Data Acquisition.</p>
           </CardContent>
         </Card>
       )}
@@ -163,8 +190,36 @@ export function MarketExplorer() {
               <form onSubmit={applyRange} className="flex flex-wrap items-end gap-3">
                 <label className="grid min-w-[155px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
                   Instrument
-                  <select value={symbol} onChange={(e) => setSymbol(e.target.value)} className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    {instruments.map((item) => <option key={item.symbol + item.provider} value={item.symbol}>{item.symbol} · {formatInteger(item.sessions)} sessions</option>)}
+                  <select
+                    value={symbol + "|" + priceProvider}
+                    onChange={(event) => {
+                      const [ticker, selected] = event.target.value.split("|");
+                      setSymbol(ticker);
+                      setPriceProvider(selected as "alpha_vantage" | "alpaca_sip");
+                    }}
+                    aria-label="Stored instrument and historical data source"
+                    className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {instruments.map((item) => (
+                      <option key={item.symbol + item.provider} value={item.symbol + "|" + item.provider}>
+                        {item.symbol} · {item.provider === "alpaca_sip" ? "Alpaca SIP" : "Alpha Vantage"} · {formatInteger(item.sessions)} sessions
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid min-w-[150px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
+                  Display period
+                  <select
+                    aria-label="Historical time range"
+                    value={period}
+                    onChange={(event) => selectPeriod(event.target.value as HistoryPeriod)}
+                    className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="recent">Latest 100 sessions</option>
+                    <option value="1y">Last 1 year</option>
+                    <option value="5y">Last 5 years</option>
+                    <option value="10y">Last 10 years</option>
+                    <option value="custom">Custom dates</option>
                   </select>
                 </label>
                 <label className="grid min-w-[155px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
@@ -177,7 +232,7 @@ export function MarketExplorer() {
                 </label>
                 <Button type="submit" size="lg">Apply range</Button>
                 <Button type="button" size="lg" variant="ghost" onClick={() => {
-                  setDraftStart(""); setDraftEnd(""); setRange({ start: "", end: "" }); setValidationError("");
+                  setDraftStart(""); setDraftEnd(""); setRange({ start: "", end: "" }); setValidationError(""); setPeriod("recent");
                 }}>Clear</Button>
               </form>
               {validationError && <p role="alert" className="mt-3 text-sm text-destructive">{validationError}</p>}
@@ -197,11 +252,22 @@ export function MarketExplorer() {
           {seriesState === "ready" && series && (
             <>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                <Metric label="Instrument" value={series.symbol} note={currentInstrument ? formatInteger(currentInstrument.sessions) + " stored sessions" : series.provider} />
+                <Metric label="Instrument" value={series.symbol} note={currentInstrument ? formatInteger(currentInstrument.sessions) + " stored sessions · " + priceProvider : series.provider} />
                 <Metric label="Last close" value={last ? price(last.close) : "—"} note={last?.session_date ?? "No trading sessions"} />
                 <Metric label="Daily change" value={closeChange === null ? "—" : (closeChange >= 0 ? "+" : "") + price(String(closeChange))} note="Compared with prior loaded session" />
-                <Metric label="Loaded observations" value={formatInteger(bars.length)} note={series.has_more ? "Latest 1,000 only · more stored" : "Complete selected range"} />
+                <Metric label="Loaded observations" value={formatInteger(bars.length)} note={series.has_more ? "Bounded result · more stored" : "Available stored data"} />
               </div>
+
+              {period !== "recent" && bars.length > 0 && bars.length < (period === "10y" ? 1200 : period === "5y" ? 600 : 120) && !series.has_more && (
+                <p role="status" className="text-xs text-muted-foreground">
+                  Only {formatInteger(bars.length)} sessions are stored for this selection. More history may require a premium full-history import, or the instrument may have a shorter trading history. This selector never downloads data automatically.
+                </p>
+              )}
+              {series.has_more && (
+                <p role="status" className="text-xs text-muted-foreground">
+                  Display is limited to 4,000 latest records. Use date filters to examine older stored sessions.
+                </p>
+              )}
 
               <Card>
                 <CardHeader>
@@ -209,7 +275,7 @@ export function MarketExplorer() {
                   <CardAction><Badge variant="outline">{series.price_adjustment.replaceAll("_", " ")}</Badge></CardAction>
                   <CardDescription className="col-span-2 mt-2">{first && last ? first.session_date + " – " + last.session_date : "No sessions in selected range"} · historical end-of-day data</CardDescription>
                 </CardHeader>
-                <CardContent><MarketCharts bars={bars} /></CardContent>
+                <CardContent><MarketCharts bars={bars} period={period} /></CardContent>
               </Card>
 
               <Card>
@@ -273,36 +339,9 @@ export function MarketExplorer() {
             </>
           )}
 
-          {imports.length > 0 && (
-            <Card>
-              <CardHeader><CardTitle>Recent local imports</CardTitle><CardAction><Badge variant="outline">Last {imports.length}</Badge></CardAction></CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[590px] text-left text-xs">
-                    <thead><tr className="text-muted-foreground">
-                      <th className="pb-3 font-medium">Symbol</th>
-                      <th className="pb-3 font-medium">Imported at (UTC)</th>
-                      <th className="pb-3 text-right font-medium">Inserted</th>
-                      <th className="pb-3 text-right font-medium">Updated</th>
-                      <th className="pb-3 text-right font-medium">Unchanged</th>
-                    </tr></thead>
-                    <tbody>{imports.map((entry) => (
-                      <tr key={entry.id} className="border-t border-border">
-                        <td className="py-2.5 font-semibold">{entry.symbol}</td>
-                        <td className="py-2.5">{entry.imported_at}</td>
-                        <td className="py-2.5 text-right">{entry.inserted}</td>
-                        <td className="py-2.5 text-right">{entry.updated}</td>
-                        <td className="py-2.5 text-right">{entry.unchanged}</td>
-                      </tr>
-                    ))}</tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </>
       )}
-      <footer className="text-xs text-muted-foreground">Local research workstation · Displayed values come from your SQLite database only · Not a live market feed</footer>
+      <footer className="text-xs text-muted-foreground">Local research workstation · Charts display local SQLite data only · Fetches and action history live in Data Acquisition · Not a live market feed</footer>
     </section>
   );
 }

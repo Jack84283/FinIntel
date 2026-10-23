@@ -7,7 +7,7 @@ provider data from an API request. It is safe to start the backend without a
 database. The React UI is deliberately unchanged: market-data charts/grid
 are a later milestone.
 
-## Version 1 schema
+## Version 1 schema — original historical price tables
 - `instruments`: uppercase ticker symbol.
 - `series`: unique (symbol, provider, frequency, price adjustment); currently
   Alpha Vantage / 1d / raw_unadjusted.
@@ -77,3 +77,75 @@ Multi-provider normalization, authentication/authorization, native backend
 packaging, continuous ingestion scheduling, corporate-action adjustments,
 multi-year pagination/cursors, encryption and market charts/grids remain
 explicit follow-up scope.
+
+## Provider-to-SQLite integrated write path (GitHub PR #6)
+
+The Markets UI can now explicitly request an Alpha Vantage daily series.
+The backend validates provider output using PR #2's strict Pydantic contract,
+then reuses the PR #4 snapshot importer with a private temporary file.
+SQLite's unique daily-session keys and single transaction still protect
+the database against duplicated or partial price records. The original market-price tables remain unchanged. A fifth table, symbol_catalog, is added in v2 and expanded to four instrument classes in v3. The UI automatically refreshes
+after a successful commit. The legacy explicit JSON export/import tools
+remain supported for audit and offline workflows.
+
+
+
+## SQLite schema v3 — Persistent instrument catalog (PR #6)
+
+The database keeps the existing four historical-market tables and adds
+`symbol_catalog` as a **fifth table**. Its columns are `symbol` (primary
+key), `name`, `asset_type`, `exchange`, `source`, and `updated_at`.
+The valid classifications are `Stock`, `ETF`, `Index`, and
+`Mutual Fund`. An instrument's directory record is independent from
+`series` and `daily_prices`, which exist only after historical data import.
+
+The migrations run sequentially: v1 initializes the historical tables;
+v1 → v2 adds stock/ETF catalog rows; v2 → v3 safely expands the catalog
+classification to include indexes and mutual funds without changing
+historical price or ingestion tables. The 73 starter records are seeded in
+SQLite on first symbol-search access, **even without an API key**, so they
+survive subsequent app restarts. Unlike the historical-price GET routes,
+the symbol-directory GET intentionally initializes/migrates its local table.
+
+The initial classifications include 63 stock/ETF examples, six index
+references (`^GSPC`, `^DJI`, `^IXIC`, `^RUT`, `^NDX`, `^VIX`),
+and four mutual funds (`FXAIX`, `VFIAX`, `VTSAX`, `SWPPX`).
+The index IDs are reference labels, not guaranteed Alpha Vantage mappings.
+The current daily-price adapter fetches only individual stocks/ETFs;
+unsupported index and mutual-fund acquisitions are blocked until separately
+validated provider adapters exist.
+
+An explicit `LISTING_STATUS` sync replaces only **Stock/ETF catalog rows**
+after complete CSV validation. Reference indexes and mutual funds are
+retained, as are all imported daily prices and provenance. Failed provider
+syncs do not change the previous saved catalog. The UI performs bounded
+SQLite searches, rather than loading the full directory in the webview.
+
+Before a migration, make a private backup of `data/finintel.sqlite3` using
+SQLite's backup API or while all writers are stopped.
+
+## Reading up to ten years in Markets
+
+The local historical-price GET now accepts a maximum `limit=4000` (formerly
+1000) to support approximately 2,520 daily observations over ten calendar
+years. `latest=true` maintains chronological output after selecting the
+newest bounded records. Search of older or broader archives still requires
+date filters, not an unlimited response. The underlying daily_prices and
+ingestion_runs schema and raw decimal-text persistence are unchanged.
+Charts use weekly/monthly/quarterly aggregates only in the frontend; daily
+rows are never overwritten with aggregated observations.
+
+## Separate Alpaca and Alpha Vantage price series (PR #6)
+
+No new schema migration is necessary for provider selection. The existing
+unique series key (symbol, provider, frequency, adjustment) separates
+alpaca_sip from alpha_vantage. Each series has its own daily_prices,
+ingestion_runs, source URL and provider terms. Both have raw_unadjusted
+price adjustment; the sources are never silently merged. The read API's
+provider selector chooses which series is shown in Markets.
+
+Alpaca retrieval always uses the HTTPS historical SIP/raw endpoint and
+bounded page-token pagination; source URL metadata excludes credentials,
+and both the fetched bars and sanitized provenance are validated before
+transactional insertion. A failed or partial response leaves previously
+stored data untouched. The SQLite application schema stays at v3.

@@ -2,7 +2,7 @@
 
 Private, local-first financial intelligence workstation.
 
-> **Implementation stage:** Native shell, historical provider, shadcn UI and SQLite persistence are merged. The read-only Market Data Explorer is being developed on GitHub PR #5.
+> **Implementation stage:** Native shell, validated historical data, shadcn/Tailwind UI, SQLite and the Market Data Explorer are merged. GitHub PR #6 adds explicit in-app provider acquisition to SQLite.
 
 ## Architecture
 
@@ -170,3 +170,199 @@ return the newest bounded records in chronological order. Existing clients omitt
 this parameter retain the original oldest-first response. Source data remains
 historical, unadjusted, and **not** a real-time quote. Automatic fetching/refresh
 and packaged Python sidecar support are separate follow-up milestones.
+
+## Integrated market data acquisition — GitHub PR #6
+
+FinIntel's **Markets → Data acquisition** card performs this single-click
+workflow: **Fetch → Validate → Transactional SQLite import → Reload Markets**.
+It works even when the instrument list is empty, allowing the first ticker
+to be added directly from the UI. Historical OHLCV and import history remain in the original four tables. A new **symbol_catalog** master-data table is added in SQLite schema v2. A catalog symbol does not imply its historical prices have been downloaded.
+
+Start the backend **from the repository root** with a key in the **backend's
+own environment**. The UI never receives the key; provider responses and
+keys are not checked into Git:
+
+```sh
+cd /path/to/FinIntel
+source .venv/bin/activate
+# Set FININTEL_ALPHA_VANTAGE_API_KEY in your local shell securely before launch.
+# Never paste the actual key into issues, PRs, screenshots or chat.
+python -m uvicorn finintel.main:app --host 127.0.0.1 --port 8765
+```
+
+In another terminal, run `npm run tauri:dev`; open **Markets** and choose
+a ticker and **Fetch & store**. Select **Latest ~100 sessions** unless your
+provider subscription entitles you to full history. One click can consume
+one provider API request (up to 3 attempts **only on transient errors**).
+The UI displays inserted, revised, unchanged and stale counts. The Markets
+catalog, charts, data table and import history refresh after success.
+
+The acquisition-status endpoint returns only a Boolean describing whether
+the backend has the key. If the card reports "API key needed" after setting
+it, **restart the Python backend process**; a key exported in another shell
+is not automatically visible to an already-running server.
+
+The validated response is written to a temporary, owner-private JSON file
+and loaded by the pre-existing transactional SQLite importer. The temporary
+file is removed; durable acquisition records and OHLCV rows remain in
+`data/finintel.sqlite3`. Users can still use PR #2's local JSON export and
+PR #4's manual import commands independently.
+
+The development write API accepts only loopback callers, JSON, a dedicated
+workstation header, and a constrained browser Origin. This mitigates basic
+cross-site browser requests but **does not provide authenticated remote
+access** or isolation from untrusted local processes. Do not expose the
+FastAPI development server to LAN or Internet. The secure multi-device
+gateway and native packaged Python sidecar remain future milestones.
+
+Acquisition is **manual only**, not a scheduler or a live quote. Invalid
+provider responses, quota notifications and import failures never replace
+previously committed price rows. There are no real-provider calls in CI.
+
+
+## Persistent instrument directory (PR #6)
+
+The Markets Data acquisition form now offers a searchable **instrument selector**
+with four explicit classes: **Individual stocks, ETFs, market indexes, and
+mutual funds**. Search by symbol or instrument name, filter by class and choose
+a record. The catalog is separate from OHLCV observations: seeing a symbol
+in the directory **does not mean historical data is downloaded**.
+
+The local SQLite database `data/finintel.sqlite3` contains a fifth application
+table, `symbol_catalog`, whose main columns are `symbol`, `name`,
+`asset_type`, `exchange`, `source` and `updated_at`. The first
+instrument search initializes the database and saves **73 starter instrument
+records** locally, including 63 stocks/ETFs and 10 index/mutual-fund references.
+There is no provider request for this initial seed, and records persist after
+restarting FinIntel. Existing SQLite v1/v2 databases are upgraded to
+**schema v3** on the first instrument search or next database write. Back up
+your local database before testing any schema migration.
+
+**Sync symbols** explicitly fetches the Alpha Vantage `LISTING_STATUS`
+active US stocks and ETFs, and transactionally updates only those two classes
+in the local catalog. It **preserves** index/mutual-fund references and all
+historical price/import records. Sync uses the backend API key and can consume
+provider quota. Symbols may also be entered manually for instruments absent
+from the directory, but classification is preserved when selecting entries.
+
+**Provider capability boundary:** the current Alpha Vantage
+`TIME_SERIES_DAILY` adapter handles only stock/ETF symbols. Index and Mutual Fund records remain available in the catalog for reference,
+but the Fetch & store selector only offers Stocks and ETFs. The backend
+also rejects unsupported classes, including manually entered index symbols. Index identifiers such as
+`^GSPC` are display/reference IDs, **not** validated Alpha Vantage daily
+ticker mappings. Dedicated index and mutual-fund data adapters are future
+work, and the directory is not a live listing feed.
+
+To inspect your local records:
+
+```sh
+sqlite3 data/finintel.sqlite3 "SELECT asset_type, COUNT(*) FROM symbol_catalog GROUP BY asset_type ORDER BY asset_type;"
+sqlite3 data/finintel.sqlite3 "SELECT symbol, name, asset_type, source FROM symbol_catalog WHERE asset_type='Index' ORDER BY symbol;"
+```
+
+## Multi-year historical research (PR #6)
+
+Alpha Vantage's `TIME_SERIES_DAILY` endpoint supports **compact** (last 100
+trading sessions; free or premium) and **full** (up to 25+ years where an
+instrument has traded; premium key required). It does not accept a direct
+five-year or ten-year response-size option. FinIntel imports the provider's
+full validated dataset when explicitly requested and retains it in SQLite.
+
+The Markets Explorer now offers **Latest 100 sessions, Last 1 year, Last 5
+years, Last 10 years, and Custom dates**. Those are local stored-history
+filters, not additional provider requests. The date range is based on
+calendar years, while actual trading-day counts vary. 5 and 10 years typically
+contain about 1,260 and 2,520 daily records.
+
+To support this, the local daily-read endpoint remains bounded but now allows
+up to **4,000 rows** per request (formerly 1,000). The React/Tauri bridge and
+validation are aligned with this limit, so ten-year history can be inspected
+in the table. Custom requests beyond 4,000 available observations are
+explicitly marked as bounded; date filtering can access older sessions.
+
+Charts aggregate stored daily prices into genuine OHLCV weekly candles for
+1 year, monthly candles for 5 years, and quarterly candles for 10 years,
+preserving open/high/low/close/total volume per interval. This is solely a
+chart-resolution choice: **daily** observations remain unchanged in SQLite
+and are visible in the table. Raw/as-traded prices are not adjusted for
+splits or dividends, which matters especially over a decade.
+
+Free Alpha Vantage keys cannot fetch five or ten years of **daily** records
+from this endpoint. A longer selected period will only display history
+already stored locally; choosing it does not bypass premium entitlements or
+fabricate missing dates.
+
+## Selectable historical price APIs (PR #6)
+
+Data Acquisition → Data source now has two **working API** choices:
+**Alpaca SIP** (5 years, 10 years, available since 2016) and
+**Alpha Vantage** (compact 100 daily sessions on free; full history requires premium).
+Selecting the source, ticker and history only configures the request.
+The user must explicitly click **Fetch & store** to call an external provider.
+Both providers use the same validated SQLite ingestion pipeline and price table,
+but each symbol/provider combination has its own history and provenance.
+
+For Alpaca, set **FININTEL_ALPACA_API_KEY_ID** and
+**FININTEL_ALPACA_API_SECRET_KEY** in the local Python backend process environment.
+For Alpha Vantage, set **FININTEL_ALPHA_VANTAGE_API_KEY** instead.
+Do not enter secrets in the webview or commit them to the repository.
+After changing credentials, restart the Python backend.
+
+Alpaca uses a fixed HTTPS historical SIP endpoint, raw daily OHLCV values,
+explicitly selected 5/10-year or available-since-2016 window (ending yesterday
+UTC), and bounded pagination. Free Basic plan historical SIP access is
+delayed and account entitlements still apply. The adapter **does not**
+silently fall back to IEX when SIP access is denied.
+
+The Markets instrument selector distinguishes the same ticker from multiple
+stored providers; its selected source also controls chart/table reads.
+The SQLite series key includes provider and adjustment, so importing Alpaca
+does not overwrite Alpha Vantage OHLCV. Historical 1/5/10-year view filters
+continue to query SQLite and never make additional provider API calls.
+
+Yahoo Finance, Stooq and Twelve Data are **not yet integrated** as automatic
+API sources. Their permissions, stability and credential contracts need
+separate validation. The existing stock/ETF daily adapters do not support
+index or mutual-fund acquisition, even though those classes appear in the
+symbol directory.
+
+
+### Index reference versus tradable ETF price history
+
+FinIntel's supported Alpaca and Alpha Vantage daily-price acquisition
+endpoints currently accept **stocks and ETFs**. The separate symbol directory
+may include references to actual index values, but showing them in a price
+fetch form previously produced an avoidable unsupported-history error.
+The selector now searches only Stock/ETF entries; the master catalog remains
+complete and unchanged. Common examples of ETF tracking proxies include
+SPY or VOO for the S&P 500, DIA for the Dow Jones Industrial Average, QQQ
+for the Nasdaq-100 and IWM for the Russell 2000. These funds **track related
+benchmarks, but their market prices are not the index levels**; FinIntel
+must not silently substitute an ETF when an actual index is requested.
+True index history needs its own validated provider contract and data model.
+
+## Separate Markets and Data Acquisition workspaces (PR #6)
+
+FinIntel desktop navigation now has three primary sections:
+**Overview**, **Markets** and **Data Acquisition**. The same compact
+12/16px page gutters and 8px inter-card spacing apply to both workspaces.
+
+- **Markets** is the read-only research workspace: stored instrument and
+  provider selection, 1/5/10-year time-range filters, OHLCV visualization,
+  price table and per-series source provenance. It no longer contains
+  the acquisition form or completed-import activity table.
+- **Data Acquisition** is the operational workspace: explicit
+  provider/ticker/history selection, Fetch & store, provider status,
+  and a dedicated **Action History** table showing the most recent
+  25 persisted successful ingestion runs, including imports triggered by
+  the CLI. Failed provider attempts are not persisted in this history yet,
+  so the table must not be described as a complete request audit.
+- After a successful fetch, **View in Markets** navigates to the
+  matching symbol and provider. Each historical import row with a
+  supported price provider also links directly to its stored series.
+- With no market data stored, Markets offers a shortcut to the
+  Data Acquisition workspace. The same navigation is available in
+  the compact/mobile tab row.
+
+This is a frontend-only navigation and composition change: existing
+local FastAPI/Tauri commands, validation and SQLite tables remain unchanged.
