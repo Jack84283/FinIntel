@@ -247,8 +247,9 @@ from the directory, but classification is preserved when selecting entries.
 
 **Provider capability boundary:** the current Alpha Vantage
 `TIME_SERIES_DAILY` adapter handles only stock/ETF symbols. Selecting an
-Index or Mutual Fund shows its reference metadata but disables Fetch & store;
-the backend also rejects unsupported types. Index identifiers such as
+Index and Mutual Fund records remain available in the catalog for reference,
+but the Fetch & store selector only offers Stocks and ETFs. The backend
+also rejects unsupported classes, including manually entered index symbols. Index identifiers such as
 `^GSPC` are display/reference IDs, **not** validated Alpha Vantage daily
 ticker mappings. Dedicated index and mutual-fund data adapters are future
 work, and the directory is not a live listing feed.
@@ -325,3 +326,18 @@ API sources. Their permissions, stability and credential contracts need
 separate validation. The existing stock/ETF daily adapters do not support
 index or mutual-fund acquisition, even though those classes appear in the
 symbol directory.
+
+
+### Index reference versus tradable ETF price history
+
+FinIntel's supported Alpaca and Alpha Vantage daily-price acquisition
+endpoints currently accept **stocks and ETFs**. The separate symbol directory
+may include references to actual index values, but showing them in a price
+fetch form previously produced an avoidable unsupported-history error.
+The selector now searches only Stock/ETF entries; the master catalog remains
+complete and unchanged. Common examples of ETF tracking proxies include
+SPY or VOO for the S&P 500, DIA for the Dow Jones Industrial Average, QQQ
+for the Nasdaq-100 and IWM for the Russell 2000. These funds **track related
+benchmarks, but their market prices are not the index levels**; FinIntel
+must not silently substitute an ETF when an actual index is requested.
+True index history needs its own validated provider contract and data model.
