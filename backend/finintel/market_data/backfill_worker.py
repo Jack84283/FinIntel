@@ -127,11 +127,22 @@ def run(
                 consecutive_provider_errors += 1
                 state["last_status"] = "provider_error"
                 state["last_error_type"] = type(exc).__name__
-                print(json.dumps({"symbol": symbol, "status": "provider_error",
-                                  "consecutive": consecutive_provider_errors}), flush=True)
+                print(
+                    json.dumps(
+                        {
+                            "symbol": symbol,
+                            "status": "provider_error",
+                            "consecutive": consecutive_provider_errors,
+                        }
+                    ),
+                    flush=True,
+                )
                 if consecutive_provider_errors >= 3:
                     state["last_status"] = "paused_provider_errors"
-                    print("Stopped after three consecutive provider errors. Check credentials and feed entitlement.", file=sys.stderr)
+                    print(
+                        "Stopped after three consecutive provider errors. Check credentials and feed entitlement.",
+                        file=sys.stderr,
+                    )
                     return 2
             except (StorageError, OSError, ValueError) as exc:
                 state["last_status"] = "failed"
