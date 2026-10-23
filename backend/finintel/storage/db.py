@@ -195,6 +195,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             )
             conn.execute("PRAGMA user_version = 3")
             conn.commit()
+            version = 3
         except sqlite3.Error as exc:
             if conn.in_transaction:
                 conn.rollback()
