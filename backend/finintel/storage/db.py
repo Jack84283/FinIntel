@@ -306,6 +306,30 @@ def _safe_source(batch: HistoricalBatch) -> None:
         if terms.scheme != "https" or terms.hostname != "alpaca.markets":
             raise StorageError("Alpaca provider terms metadata is unapproved")
         return
+    if batch.provider == "tiingo":
+        if (
+            url.scheme != "https"
+            or url.hostname != "api.tiingo.com"
+            or url.port is not None
+            or url.username
+            or url.password
+            or url.path != "/tiingo/daily/" + batch.symbol + "/prices"
+            or set(params) != {"startDate", "endDate"}
+            or len(params["startDate"]) != 1
+            or len(params["endDate"]) != 1
+        ):
+            raise StorageError("Tiingo snapshot URL contains invalid metadata")
+        try:
+            first = date.fromisoformat(params["startDate"][0])
+            last = date.fromisoformat(params["endDate"][0])
+        except ValueError as exc:
+            raise StorageError("Invalid Tiingo date range") from exc
+        if first > last or first > batch.first_session or last < batch.last_session:
+            raise StorageError("Tiingo source date range conflicts with observations")
+        terms = urlsplit(batch.provider_terms_url)
+        if terms.scheme != "https" or terms.hostname != "www.tiingo.com" or terms.path != "/about/terms":
+            raise StorageError("Tiingo license metadata is unapproved")
+        return
     if batch.provider != "alpha_vantage":
         raise StorageError("Unknown market-data provider")
     if (
@@ -489,7 +513,7 @@ def read_daily(
     """Bounded, chronological read of stored daily prices; no live provider calls."""
     if limit < 1 or limit > 4000:
         raise ValueError("Daily price limit must be 1–4000")
-    if provider not in ("alpha_vantage", "alpaca_sip"):
+    if provider not in ("alpha_vantage", "alpaca_sip", "tiingo"):
         raise ValueError("Invalid historical data provider")
     path = db if db is not None else database_path()
     conn = _read_connection(path)
