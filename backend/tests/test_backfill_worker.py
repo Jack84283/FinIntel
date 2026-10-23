@@ -34,10 +34,17 @@ def test_backfill_checkpoint_prevents_duplicate_requests(tmp_path, monkeypatch):
 
 def test_backfill_rejects_provider_change_for_checkpoint(tmp_path):
     checkpoint = tmp_path / "progress.json"
-    checkpoint.write_text(json.dumps({
-        "provider": "alpha_vantage", "asset_type": "Stock", "day": "2026-10-23",
-        "attempted": [], "requests": 0,
-    }))
+    checkpoint.write_text(
+        json.dumps(
+            {
+                "provider": "alpha_vantage",
+                "asset_type": "Stock",
+                "day": "2026-10-23",
+                "attempted": [],
+                "requests": 0,
+            }
+        )
+    )
     try:
         backfill_worker._load(checkpoint, provider="alpaca_sip", asset_type="Stock")
     except ValueError:
