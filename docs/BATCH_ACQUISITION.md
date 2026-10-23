@@ -41,3 +41,20 @@ Choose a request cap and interval **appropriate to your actual provider plan**. 
 The worker runs across days while the Mac and local process stay running; it sleeps when a daily limit is reached, persists the attempted tickers, and retries unsuccessful symbols the following UTC day. A single-process file lock prevents a duplicate worker with the same state file. Re-launch the command after reboot to resume. No service, live download, automatic app-start execution, or desktop Start/Pause controls are included yet.
 
 The worker skips any instrument/provider that already has a daily series; it **does not prove 10-year completeness or repair partial history**. A later coverage-audit stage must verify dates, listing age, and gaps before declaring backfill complete. This is a local opt-in job, not an automated ChatGPT task.
+
+## Tiingo historical data
+
+Tiingo is available as a third, independent raw daily OHLCV provider for Stock and ETF instruments. Its provider token stays in the local backend environment and is never sent to the React webview or saved in snapshots. Do not commit credentials.
+
+From the FinIntel repo root, activate your virtualenv and export `FININTEL_TIINGO_API_KEY` into the backend process environment, then restart the backend service. You can explicitly select **Tiingo** in **Data Acquisition → Data source** and choose 5 years, 10 years, or maximum (requests from 1990 onward, subject to Tiingo coverage and plan). The Markets explorer lists Tiingo records as their own series.
+
+For a Tiingo background backfill, use a **separate checkpoint** or stop and archive an existing Alpaca checkpoint before switching providers. The current controller fixes `data/finintel.backfill.json` to a single provider, and will refuse mismatched provider restarts.
+
+```sh
+FININTEL_BACKFILL_PROVIDER=tiingo \
+FININTEL_BACKFILL_MAX_REQUESTS_PER_DAY=100 \
+FININTEL_BACKFILL_DELAY_SECONDS=75 \
+bash scripts/backfill.sh start
+```
+
+The numbers above are conservative examples, not a guarantee of access or quota entitlement. Provider quotas may include distinct monthly symbol limits, and FinIntel does **not** yet track such monthly quotas across applications. Historical prices are stored as unadjusted in provider-isolated SQLite series; adjusted Tiingo fields and corporate actions are not yet imported. Historical completeness is not yet guaranteed, and local database retention must comply with your Tiingo subscription.
