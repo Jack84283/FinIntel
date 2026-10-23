@@ -49,7 +49,7 @@ async fn market_acquire_daily(
     if outputsize != "compact" && outputsize != "full" {
         return Err("Output size must be compact or full.".to_string());
     }
-    if provider != "alpha_vantage" && provider != "alpaca_sip" {
+    if provider != "alpha_vantage" && provider != "alpaca_sip" && provider != "tiingo" {
         return Err("Unsupported acquisition provider.".to_string());
     }
     if !matches!(period.as_str(), "5y" | "10y" | "max") {
@@ -176,7 +176,7 @@ async fn market_daily(
     if !valid_symbol(&symbol) {
         return Err("Invalid ticker symbol.".to_string());
     }
-    if provider != "alpha_vantage" && provider != "alpaca_sip" {
+    if provider != "alpha_vantage" && provider != "alpaca_sip" && provider != "tiingo" {
         return Err("Unsupported price-history provider.".to_string());
     }
     if limit == 0 || limit > 4000 {

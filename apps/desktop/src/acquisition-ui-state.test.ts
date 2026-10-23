@@ -6,6 +6,8 @@ const status: AcquisitionStatus = {
   provider: "alpha_vantage",
   key_configured: true,
   alpaca_configured: false,
+  tiingo_configured: false,
+  tiingo_key_environment_variable: "FININTEL_TIINGO_API_KEY",
   requires_explicit_action: true,
   api_key_environment_variable: "FININTEL_ALPHA_VANTAGE_API_KEY",
   alpaca_key_environment_variable: "FININTEL_ALPACA_API_KEY_ID",

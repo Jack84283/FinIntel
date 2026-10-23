@@ -4,6 +4,7 @@ import type { AcquisitionProvider, AcquisitionStatus } from "./market-acquisitio
 import type { AssetType } from "./symbol-catalog-api";
 
 export function preferredAcquisitionProvider(status: AcquisitionStatus): AcquisitionProvider {
+  if (status.tiingo_configured) return "tiingo";
   if (status.alpaca_configured) return "alpaca_sip";
   if (status.key_configured) return "alpha_vantage";
   return "alpaca_sip";
@@ -36,6 +37,9 @@ export function acquisitionBlockReason({
   }
   if (!status) {
     return "The backend connection has not been verified yet. Select Recheck provider.";
+  }
+  if (provider === "tiingo" && !status.tiingo_configured) {
+    return "Tiingo requires FININTEL_TIINGO_API_KEY in the Python backend environment. Restart the backend, then select Recheck provider.";
   }
   if (provider === "alpaca_sip" && !status.alpaca_configured) {
     return "Alpaca requires FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY in the Python backend environment. Restart the backend, then select Recheck provider. Or switch to Alpha Vantage if its key is already configured.";

@@ -3,7 +3,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 export type OutputSize = "compact" | "full";
-export type AcquisitionProvider = "alpha_vantage" | "alpaca_sip";
+export type AcquisitionProvider = "alpha_vantage" | "alpaca_sip" | "tiingo";
 export type AlpacaPeriod = "5y" | "10y" | "max";
 
 export interface AcquisitionStatus {
@@ -12,6 +12,8 @@ export interface AcquisitionStatus {
   requires_explicit_action: true;
   api_key_environment_variable: string;
   full_requires_premium: true;
+  tiingo_configured: boolean;
+  tiingo_key_environment_variable: string;
   alpaca_configured: boolean;
   alpaca_key_environment_variable: string;
   alpaca_secret_environment_variable: string;
@@ -64,7 +66,8 @@ export function parseAcquisitionStatus(value: unknown): AcquisitionStatus {
     item.requires_explicit_action !== true ||
     item.api_key_environment_variable !== "FININTEL_ALPHA_VANTAGE_API_KEY" ||
     item.full_requires_premium !== true ||
-    (item.alpaca_configured !== undefined && typeof item.alpaca_configured !== "boolean")
+    (item.alpaca_configured !== undefined && typeof item.alpaca_configured !== "boolean") ||
+    (item.tiingo_configured !== undefined && typeof item.tiingo_configured !== "boolean")
   ) {
     throw new Error("Invalid acquisition status response.");
   }
@@ -74,6 +77,8 @@ export function parseAcquisitionStatus(value: unknown): AcquisitionStatus {
     requires_explicit_action: true,
     api_key_environment_variable: "FININTEL_ALPHA_VANTAGE_API_KEY",
     full_requires_premium: true,
+    tiingo_configured: item.tiingo_configured === true,
+    tiingo_key_environment_variable: "FININTEL_TIINGO_API_KEY",
     alpaca_configured: item.alpaca_configured === true,
     alpaca_key_environment_variable: "FININTEL_ALPACA_API_KEY_ID",
     alpaca_secret_environment_variable: "FININTEL_ALPACA_API_SECRET_KEY",
@@ -141,7 +146,7 @@ export async function acquireMarketDaily(
   if (outputsize !== "compact" && outputsize !== "full") {
     throw new Error("Select a valid history size.");
   }
-  if (provider !== "alpha_vantage" && provider !== "alpaca_sip") {
+  if (provider !== "alpha_vantage" && provider !== "alpaca_sip" && provider !== "tiingo") {
     throw new Error("Choose a supported market-data provider.");
   }
   if (!["5y", "10y", "max"].includes(period)) {

@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import HistoricalBatch
 from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -116,6 +116,18 @@ CREATE TABLE action_events (
 CREATE INDEX action_events_by_time ON action_events(occurred_at DESC, id DESC);
 """
 
+# Membership must be sourced and dated independently of the security asset type.
+SCHEMA_V5 = """
+CREATE TABLE index_memberships (
+    index_code TEXT NOT NULL CHECK(index_code IN ('SP500', 'DJIA')),
+    symbol TEXT NOT NULL,
+    as_of TEXT NOT NULL,
+    source TEXT NOT NULL,
+    PRIMARY KEY (index_code, symbol, as_of)
+);
+CREATE INDEX index_membership_symbol ON index_memberships(symbol, index_code);
+"""
+
 
 class StorageError(Exception):
     """Safe failure message for local CLI or API consumers."""
@@ -130,7 +142,7 @@ def _ensure_version(conn: sqlite3.Connection, *, allow_missing: bool) -> bool:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == 0 and allow_missing:
         return False
-    if version not in (1, 2, 3, SCHEMA_VERSION):
+    if version not in (1, 2, 3, 4, SCHEMA_VERSION):
         raise StorageError(
             "SQLite schema version is unsupported; expected version "
             + str(SCHEMA_VERSION)
@@ -209,6 +221,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if conn.in_transaction:
                 conn.rollback()
             raise StorageError("Unable to migrate action-event schema to v4") from exc
+        version = 4
+    if version == 4:
+        try:
+            conn.executescript(
+                "BEGIN IMMEDIATE;\n" + SCHEMA_V5 + "\nPRAGMA user_version = 5;\nCOMMIT;"
+            )
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate index membership schema to v5") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:
@@ -283,6 +305,34 @@ def _safe_source(batch: HistoricalBatch) -> None:
         terms = urlsplit(batch.provider_terms_url)
         if terms.scheme != "https" or terms.hostname != "alpaca.markets":
             raise StorageError("Alpaca provider terms metadata is unapproved")
+        return
+    if batch.provider == "tiingo":
+        if (
+            url.scheme != "https"
+            or url.hostname != "api.tiingo.com"
+            or url.port is not None
+            or url.username
+            or url.password
+            or url.path != "/tiingo/daily/" + batch.symbol + "/prices"
+            or set(params) != {"startDate", "endDate"}
+            or len(params["startDate"]) != 1
+            or len(params["endDate"]) != 1
+        ):
+            raise StorageError("Tiingo snapshot URL contains invalid metadata")
+        try:
+            first = date.fromisoformat(params["startDate"][0])
+            last = date.fromisoformat(params["endDate"][0])
+        except ValueError as exc:
+            raise StorageError("Invalid Tiingo date range") from exc
+        if first > last or first > batch.first_session or last < batch.last_session:
+            raise StorageError("Tiingo source date range conflicts with observations")
+        terms = urlsplit(batch.provider_terms_url)
+        if (
+            terms.scheme != "https"
+            or terms.hostname != "www.tiingo.com"
+            or terms.path != "/about/terms"
+        ):
+            raise StorageError("Tiingo license metadata is unapproved")
         return
     if batch.provider != "alpha_vantage":
         raise StorageError("Unknown market-data provider")
@@ -467,7 +517,7 @@ def read_daily(
     """Bounded, chronological read of stored daily prices; no live provider calls."""
     if limit < 1 or limit > 4000:
         raise ValueError("Daily price limit must be 1–4000")
-    if provider not in ("alpha_vantage", "alpaca_sip"):
+    if provider not in ("alpha_vantage", "alpaca_sip", "tiingo"):
         raise ValueError("Invalid historical data provider")
     path = db if db is not None else database_path()
     conn = _read_connection(path)

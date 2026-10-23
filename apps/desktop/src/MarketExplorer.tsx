@@ -25,7 +25,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
   const [indexState, setIndexState] = useState<LoadState>("loading");
   const [indexError, setIndexError] = useState("");
   const [symbol, setSymbol] = useState(initialSelection?.symbol ?? "");
-  const [priceProvider, setPriceProvider] = useState<"alpha_vantage" | "alpaca_sip">(initialSelection?.provider ?? "alpha_vantage");
+  const [priceProvider, setPriceProvider] = useState<"alpha_vantage" | "alpaca_sip" | "tiingo">(initialSelection?.provider ?? "alpha_vantage");
   const [draftStart, setDraftStart] = useState("");
   const [draftEnd, setDraftEnd] = useState("");
   const [range, setRange] = useState({ start: "", end: "" });
@@ -50,7 +50,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
           ?? catalog.find((item) => item.symbol === symbol)
           ?? catalog[0];
         setSymbol(matched?.symbol ?? "");
-        setPriceProvider((matched?.provider ?? "alpha_vantage") as "alpha_vantage" | "alpaca_sip");
+        setPriceProvider((matched?.provider ?? "alpha_vantage") as "alpha_vantage" | "alpaca_sip" | "tiingo");
         setIndexState("ready");
         setIndexError("");
       })
@@ -195,14 +195,14 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                     onChange={(event) => {
                       const [ticker, selected] = event.target.value.split("|");
                       setSymbol(ticker);
-                      setPriceProvider(selected as "alpha_vantage" | "alpaca_sip");
+                      setPriceProvider(selected as "alpha_vantage" | "alpaca_sip" | "tiingo");
                     }}
                     aria-label="Stored instrument and historical data source"
                     className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {instruments.map((item) => (
                       <option key={item.symbol + item.provider} value={item.symbol + "|" + item.provider}>
-                        {item.symbol} · {item.provider === "alpaca_sip" ? "Alpaca SIP" : "Alpha Vantage"} · {formatInteger(item.sessions)} sessions
+                        {item.symbol} · {item.provider === "tiingo" ? "Tiingo" : item.provider === "alpaca_sip" ? "Alpaca SIP" : "Alpha Vantage"} · {formatInteger(item.sessions)} sessions
                       </option>
                     ))}
                   </select>
