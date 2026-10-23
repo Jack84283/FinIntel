@@ -236,9 +236,8 @@ def _safe_source(batch: HistoricalBatch) -> None:
             or url.path != "/v2/stocks/bars"
             or url.username
             or url.password
-            or set(params) != {
-                "symbols", "timeframe", "start", "end", "feed", "adjustment", "limit"
-            }
+            or set(params)
+            != {"symbols", "timeframe", "start", "end", "feed", "adjustment", "limit"}
             or params.get("symbols") != [batch.symbol]
             or params.get("timeframe") != ["1Day"]
             or params.get("feed") != ["sip"]

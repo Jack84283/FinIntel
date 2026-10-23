@@ -146,7 +146,9 @@ class AlpacaDailyProvider:
             ) as client:
                 bars = self._fetch_pages(client, public_params, ticker)
         if not bars:
-            raise ProviderPayloadInvalid("Alpaca returned no daily sessions for the selected period")
+            raise ProviderPayloadInvalid(
+                "Alpaca returned no daily sessions for the selected period"
+            )
         return HistoricalBatch(
             provider="alpaca_sip",
             symbol=ticker,
@@ -179,7 +181,9 @@ class AlpacaDailyProvider:
             if response.status_code == 429:
                 raise ProviderRateLimited("Alpaca quota reached; retry manually later")
             if response.status_code in (401, 403):
-                raise ProviderError("Alpaca credentials or historical SIP entitlement were rejected")
+                raise ProviderError(
+                    "Alpaca credentials or historical SIP entitlement were rejected"
+                )
             if response.status_code != 200:
                 raise ProviderUnavailable("Alpaca daily-history request was unsuccessful")
             new_bars, next_token = _decode_page(response.content, symbol)
@@ -187,7 +191,9 @@ class AlpacaDailyProvider:
                 raise ProviderPayloadInvalid("Alpaca returned no bars for this instrument")
             for bar in new_bars:
                 if bars and bar.session_date <= bars[-1].session_date:
-                    raise ProviderPayloadInvalid("Alpaca returned overlapping or unordered daily dates")
+                    raise ProviderPayloadInvalid(
+                        "Alpaca returned overlapping or unordered daily dates"
+                    )
                 bars.append(bar)
                 if len(bars) > MAX_BARS:
                     raise ProviderPayloadInvalid("Alpaca history exceeds the safe session limit")

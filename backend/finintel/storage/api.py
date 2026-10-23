@@ -123,8 +123,12 @@ def get_daily(
         raise HTTPException(status_code=422, detail="start_date must not exceed end_date")
     try:
         result = read_daily(
-            symbol.upper(), start=start_date, end=end_date, limit=limit, latest=latest,
-            provider=provider
+            symbol.upper(),
+            start=start_date,
+            end=end_date,
+            limit=limit,
+            latest=latest,
+            provider=provider,
         )
     except StorageError as exc:
         raise _unavailable(exc) from exc
@@ -232,9 +236,7 @@ class AcquisitionResult(BaseModel):
 
 @router.get("/acquisition/status", response_model=AcquisitionStatus)
 def acquisition_status() -> AcquisitionStatus:
-    return AcquisitionStatus(
-        key_configured=key_configured(), alpaca_configured=alpaca_configured()
-    )
+    return AcquisitionStatus(key_configured=key_configured(), alpaca_configured=alpaca_configured())
 
 
 @router.post("/acquisition", response_model=AcquisitionResult)
