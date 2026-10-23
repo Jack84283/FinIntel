@@ -14,7 +14,8 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from finintel.market_data.acquisition import acquire_and_store
+from finintel.market_data.acquisition import acquire_and_store, key_configured
+from finintel.market_data.alpaca import alpaca_configured
 from finintel.market_data.batch import pending_symbols
 from finintel.market_data.provider import ProviderError, ProviderRateLimited
 from finintel.storage.db import StorageError, database_path
@@ -65,6 +66,12 @@ def run(
     outputsize: str = "compact",
     once: bool = False,
 ) -> int:
+    if provider == "alpaca_sip" and not alpaca_configured():
+        print("Alpaca API credentials are not configured; no requests were sent.", file=sys.stderr)
+        return 2
+    if provider == "alpha_vantage" and not key_configured():
+        print("Alpha Vantage API key is not configured; no requests were sent.", file=sys.stderr)
+        return 2
     state_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = state_path.with_suffix(state_path.suffix + ".lock")
     with lock_path.open("a+", encoding="utf-8") as lock:
@@ -73,6 +80,7 @@ def run(
         except BlockingIOError:
             print("Another historical backfill is already using this checkpoint.", file=sys.stderr)
             return 2
+        consecutive_provider_errors = 0
         while True:
             state = _load(state_path, provider=provider, asset_type=asset_type)
             attempted = set(state["attempted"])
@@ -103,6 +111,7 @@ def run(
                 result = acquire_and_store(
                     symbol, provider=provider, outputsize=outputsize, period=period
                 )
+                consecutive_provider_errors = 0
                 state["last_status"] = "stored"
                 state["last_import_id"] = result["import_id"]
                 print(json.dumps({"symbol": symbol, "status": "stored"}), flush=True)
@@ -114,7 +123,17 @@ def run(
                     return 0
                 _sleep_until_next_utc_day()
                 continue
-            except (ProviderError, StorageError, OSError, ValueError) as exc:
+            except ProviderError as exc:
+                consecutive_provider_errors += 1
+                state["last_status"] = "provider_error"
+                state["last_error_type"] = type(exc).__name__
+                print(json.dumps({"symbol": symbol, "status": "provider_error",
+                                  "consecutive": consecutive_provider_errors}), flush=True)
+                if consecutive_provider_errors >= 3:
+                    state["last_status"] = "paused_provider_errors"
+                    print("Stopped after three consecutive provider errors. Check credentials and feed entitlement.", file=sys.stderr)
+                    return 2
+            except (StorageError, OSError, ValueError) as exc:
                 state["last_status"] = "failed"
                 state["last_error_type"] = type(exc).__name__
                 print(
