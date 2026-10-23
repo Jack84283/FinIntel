@@ -44,7 +44,7 @@ describe("acquisition button eligibility", () => {
     expect(acquisitionBlockReason({
       symbol: "FXAIX", selectedType: "Mutual Fund", provider: "alpha_vantage",
       status, statusError: "",
-    })).toContain("not supported");
+    })).toContain("dedicated provider");
     expect(acquisitionBlockReason({
       symbol: "AAPL", selectedType: "Stock", provider: "alpaca_sip",
       status: null, statusError: "offline",

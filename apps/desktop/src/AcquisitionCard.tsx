@@ -211,7 +211,7 @@ export function AcquisitionCard({
           </p>
         )}
         {statusError && <p role="alert" className="text-xs text-destructive">{statusError}</p>}
-        {error && <p role="alert" className="text-xs text-destructive">{error} No stored data was changed.</p>}
+        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
         {result && (
           <p role="status" aria-live="polite" className="text-xs text-positive">
             Stored {result.symbol}: {result.observations} observations ({result.inserted} new, {result.updated} revised, {result.unchanged} unchanged, {result.stale} older). Through {result.last_session}. Local charts refreshed.

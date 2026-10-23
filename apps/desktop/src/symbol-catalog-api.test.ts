@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCatalogSync, parseSymbolSearch } from "./symbol-catalog-api";
+import { mergeAcquirableResults, parseCatalogSync, parseSymbolSearch } from "./symbol-catalog-api";
 
 describe("local Stock / ETF directory contracts", () => {
   it("accepts a typed catalog result from the backend", () => {
@@ -20,6 +20,26 @@ describe("local Stock / ETF directory contracts", () => {
       ],
     });
     expect(expanded.results.map((x) => x.asset_type)).toEqual(["Index", "Mutual Fund"]);
+  });
+
+  it("only offers Stock and ETF history symbols, excluding indexes and mutual funds", () => {
+    const stocks = parseSymbolSearch({
+      source: "starter", updated_at: null, total: 4,
+      results: [
+        { symbol: "AAPL", name: "Apple", asset_type: "Stock", exchange: "" },
+        { symbol: "^GSPC", name: "S&P 500 Index", asset_type: "Index", exchange: "" },
+      ],
+    });
+    const etfs = parseSymbolSearch({
+      source: "starter", updated_at: null, total: 4,
+      results: [
+        { symbol: "SPY", name: "SPDR S&P 500 ETF", asset_type: "ETF", exchange: "" },
+        { symbol: "FXAIX", name: "Fidelity 500 Fund", asset_type: "Mutual Fund", exchange: "" },
+      ],
+    });
+    const combined = mergeAcquirableResults(stocks, etfs, "", 40);
+    expect(combined.results.map(({ symbol }) => symbol)).toEqual(["AAPL", "SPY"]);
+    expect(mergeAcquirableResults(stocks, etfs, "", 1).results).toHaveLength(1);
   });
 
   it("validates sync results and rejects malformed search data", () => {

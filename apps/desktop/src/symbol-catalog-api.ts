@@ -128,3 +128,38 @@ export async function syncSymbols(): Promise<CatalogSyncResult> {
   }
   return parseCatalogSync(data);
 }
+
+/** Stock/ETF-only acquisition search; reference indexes and mutual funds
+ * remain in the master catalog but are not offered as historical API inputs.
+ * Two bounded local queries ensure indexes cannot crowd out results.
+ */
+export async function searchAcquirableSymbols(
+  query: string,
+  kind: "All" | "Stock" | "ETF" = "All",
+  limit = 40,
+): Promise<SymbolSearchResponse> {
+  if (kind !== "All") return searchSymbols(query, kind, limit);
+  const [stocks, funds] = await Promise.all([
+    searchSymbols(query, "Stock", limit),
+    searchSymbols(query, "ETF", limit),
+  ]);
+  return mergeAcquirableResults(stocks, funds, query, limit);
+}
+
+export function mergeAcquirableResults(
+  stocks: SymbolSearchResponse,
+  funds: SymbolSearchResponse,
+  query: string,
+  limit: number,
+): SymbolSearchResponse {
+  const prefix = query.trim().toUpperCase();
+  const results = [...stocks.results, ...funds.results]
+    .filter((entry) => entry.asset_type === "Stock" || entry.asset_type === "ETF")
+    .sort((a, b) => {
+      const aPrefix = a.symbol.startsWith(prefix) ? 0 : 1;
+      const bPrefix = b.symbol.startsWith(prefix) ? 0 : 1;
+      return aPrefix - bPrefix || a.symbol.localeCompare(b.symbol);
+    })
+    .slice(0, limit);
+  return { ...stocks, results };
+}

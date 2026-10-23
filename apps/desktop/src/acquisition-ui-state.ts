@@ -23,7 +23,7 @@ export function acquisitionBlockReason({
   statusError: string;
 }): string | null {
   if (selectedType === "Index" || selectedType === "Mutual Fund") {
-    return selectedType + " history is not supported by the current stock/ETF data providers. Select a stock or ETF.";
+    return selectedType + " history needs a dedicated provider. Alpaca and Alpha Vantage daily APIs in FinIntel currently support Stock/ETF prices only. For example, SPY tracks the S&P 500 and QQQ tracks the Nasdaq-100, but ETF prices are not index levels.";
   }
   if (!symbol.trim()) {
     return "Select a stock or ETF symbol before fetching market data.";
