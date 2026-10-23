@@ -8,7 +8,8 @@ PYTHON="$ROOT/.venv/bin/python"
 MODULE="finintel.market_data.backfill_worker"
 PID_FILE="$ROOT/data/backfill.pid"
 LOG_FILE="$ROOT/data/backfill.log"
-STATE_FILE="$ROOT/data/finintel.backfill.json"
+PROVIDER="${FININTEL_BACKFILL_PROVIDER:-alpaca_sip}"
+STATE_FILE="$ROOT/data/finintel.${PROVIDER}.backfill.json"
 mkdir -p "$ROOT/data"
 
 is_running() {
@@ -45,7 +46,6 @@ case "${1:-}" in
     fi
     check_setup
     # Provider and caps can be changed via environment variables, never hardcoded secrets.
-    PROVIDER="${FININTEL_BACKFILL_PROVIDER:-alpaca_sip}"
     MAX_REQUESTS="${FININTEL_BACKFILL_MAX_REQUESTS_PER_DAY:-100}"
     DELAY="${FININTEL_BACKFILL_DELAY_SECONDS:-2}"
     PERIOD="${FININTEL_BACKFILL_PERIOD:-10y}"
