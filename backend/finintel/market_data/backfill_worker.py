@@ -17,8 +17,8 @@ from pathlib import Path
 from finintel.market_data.acquisition import acquire_and_store, key_configured
 from finintel.market_data.alpaca import alpaca_configured
 from finintel.market_data.batch import pending_symbols
-from finintel.market_data.tiingo import tiingo_configured
 from finintel.market_data.provider import ProviderError, ProviderRateLimited
+from finintel.market_data.tiingo import tiingo_configured
 from finintel.storage.db import StorageError, database_path
 
 
