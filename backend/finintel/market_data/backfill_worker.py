@@ -3,6 +3,7 @@
 Start once in a detached local process; does not run on import or app launch.
 Successful imports are skipped through the shared local SQLite catalog.
 """
+
 import argparse
 import fcntl
 import json
@@ -53,9 +54,17 @@ def _sleep_until_next_utc_day() -> None:
     time.sleep(max(1, (tomorrow - now).total_seconds() + 30))
 
 
-def run(*, provider: str, asset_type: str, max_per_day: int, delay: float,
-        state_path: Path, period: str = "10y", outputsize: str = "compact",
-        once: bool = False) -> int:
+def run(
+    *,
+    provider: str,
+    asset_type: str,
+    max_per_day: int,
+    delay: float,
+    state_path: Path,
+    period: str = "10y",
+    outputsize: str = "compact",
+    once: bool = False,
+) -> int:
     state_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = state_path.with_suffix(state_path.suffix + ".lock")
     with lock_path.open("a+", encoding="utf-8") as lock:
@@ -108,8 +117,12 @@ def run(*, provider: str, asset_type: str, max_per_day: int, delay: float,
             except (ProviderError, StorageError, OSError, ValueError) as exc:
                 state["last_status"] = "failed"
                 state["last_error_type"] = type(exc).__name__
-                print(json.dumps({"symbol": symbol, "status": "failed",
-                                  "error_type": type(exc).__name__}), flush=True)
+                print(
+                    json.dumps(
+                        {"symbol": symbol, "status": "failed", "error_type": type(exc).__name__}
+                    ),
+                    flush=True,
+                )
             finally:
                 state["current_symbol"] = None
                 _save(state_path, state)
@@ -119,8 +132,7 @@ def run(*, provider: str, asset_type: str, max_per_day: int, delay: float,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Persistent local historical backfill worker")
-    parser.add_argument("--provider", choices=("alpaca_sip", "alpha_vantage"),
-                        default="alpaca_sip")
+    parser.add_argument("--provider", choices=("alpaca_sip", "alpha_vantage"), default="alpaca_sip")
     parser.add_argument("--asset-type", choices=("all", "Stock", "ETF"), default="all")
     parser.add_argument("--max-requests-per-day", type=int, default=20)
     parser.add_argument("--delay-seconds", type=float, default=15.0)
@@ -135,10 +147,16 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("Delay must be 0–3600 seconds")
     path = args.state_path or database_path().with_suffix(".backfill.json")
     try:
-        return run(provider=args.provider, asset_type=args.asset_type,
-                   max_per_day=args.max_requests_per_day, delay=args.delay_seconds,
-                   state_path=path, period=args.period, outputsize=args.outputsize,
-                   once=args.once)
+        return run(
+            provider=args.provider,
+            asset_type=args.asset_type,
+            max_per_day=args.max_requests_per_day,
+            delay=args.delay_seconds,
+            state_path=path,
+            period=args.period,
+            outputsize=args.outputsize,
+            once=args.once,
+        )
     except (StorageError, sqlite3.Error, ValueError, OSError) as exc:
         print("Backfill stopped: " + type(exc).__name__, file=sys.stderr)
         return 2
