@@ -1,6 +1,7 @@
 """Local historical market data reads and explicitly authorized acquisition."""
 
 import threading
+from time import monotonic
 from datetime import date
 from typing import Literal
 
@@ -19,6 +20,8 @@ from finintel.market_data.provider import (
 from finintel.market_data.symbol_catalog import fetch_active_listings
 from finintel.storage.db import (
     StorageError,
+    append_action_event,
+    list_action_events,
     list_imports,
     list_instruments,
     lookup_symbol_type,
@@ -239,8 +242,7 @@ def acquisition_status() -> AcquisitionStatus:
     return AcquisitionStatus(key_configured=key_configured(), alpaca_configured=alpaca_configured())
 
 
-@router.post("/acquisition", response_model=AcquisitionResult)
-def acquire_market_data(payload: AcquisitionRequest, request: Request) -> dict[str, object]:
+def _acquire_market_data_impl(payload: AcquisitionRequest, request: Request) -> dict[str, object]:
     """One explicit user request. No scheduled fetches and no input API keys."""
     _authorize_local_write(request)
     asset_type = lookup_symbol_type(payload.symbol)
@@ -281,6 +283,60 @@ def acquire_market_data(payload: AcquisitionRequest, request: Request) -> dict[s
             raise HTTPException(status_code=503, detail="Local SQLite import failed") from exc
     finally:
         _ACQUIRE_LOCK.release()
+
+
+class ActionEventRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    occurred_at: str
+    action: Literal["acquisition"]
+    status: Literal["success", "failed"]
+    symbol: str
+    provider: str
+    import_id: int | None
+    error_code: str | None
+    duration_ms: int = Field(ge=0)
+
+
+@router.get("/action-events", response_model=list[ActionEventRecord])
+def get_action_events(limit: int = Query(default=100, ge=1, le=100)) -> list[dict[str, object]]:
+    try:
+        return list_action_events(limit=limit)
+    except StorageError as exc:
+        raise _unavailable(exc) from exc
+
+
+@router.post("/acquisition", response_model=AcquisitionResult)
+def acquire_market_data(payload: AcquisitionRequest, request: Request) -> dict[str, object]:
+    """Record authorized acquisition outcomes without persisting secrets or exception text."""
+    _authorize_local_write(request)
+    started = monotonic()
+    result: dict[str, object] | None = None
+    error_code: str | None = None
+    try:
+        result = _acquire_market_data_impl(payload, request)
+        return result
+    except HTTPException as exc:
+        error_code = f"http_{exc.status_code}"
+        raise
+    except Exception:
+        error_code = "internal_error"
+        raise
+    finally:
+        try:
+            append_action_event(
+                symbol=payload.symbol,
+                provider=payload.provider,
+                status="success" if result is not None else "failed",
+                import_id=int(result["import_id"]) if result is not None else None,
+                error_code=error_code,
+                duration_ms=max(0, int((monotonic() - started) * 1000)),
+            )
+        except (StorageError, OSError):
+            # Never turn a completed import into an apparent failed import.
+            # An unavailable database cannot provide durable audit guarantees.
+            pass
 
 
 @router.post("/symbols/sync", response_model=CatalogSyncResult)
