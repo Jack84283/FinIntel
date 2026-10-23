@@ -1,8 +1,10 @@
 import type { DailyBar } from "./market";
+import { chartBars, chartInterval, type HistoryPeriod } from "./history-range";
 
 /** Deliberately lightweight SVG: no new chart dependency or third-party data feed. */
-export function MarketCharts({ bars }: { bars: DailyBar[] }) {
-  const visible = bars.slice(-70);
+export function MarketCharts({ bars, period }: { bars: DailyBar[]; period: HistoryPeriod }) {
+  const interval = chartInterval(period, bars.length);
+  const visible = chartBars(bars, interval);
   if (visible.length === 0) return <p className="py-10 text-center text-sm text-muted-foreground">No observations in this date range.</p>;
 
   const width = 840;
@@ -26,7 +28,7 @@ export function MarketCharts({ bars }: { bars: DailyBar[] }) {
   return (
     <div className="space-y-2">
       <div className="overflow-x-auto rounded-md border border-border bg-muted/40 p-2">
-        <svg viewBox="0 0 840 280" role="img" aria-label={"Historical candlestick chart showing " + visible.length + " daily sessions"} className="h-auto min-w-[560px] w-full">
+        <svg viewBox="0 0 840 280" role="img" aria-label={"Historical " + interval.toLowerCase() + " candlestick chart showing " + visible.length + " intervals"} className="h-auto min-w-[560px] w-full">
           {ticks.map((tick) => (
             <g key={tick}>
               <line x1={left} x2={width - right} y1={yPrice(tick)} y2={yPrice(tick)} stroke="#2b394b" strokeDasharray="3 4" />
@@ -56,8 +58,8 @@ export function MarketCharts({ bars }: { bars: DailyBar[] }) {
         </svg>
       </div>
       <div className="overflow-x-auto rounded-md border border-border bg-muted/40 p-2">
-        <p className="px-2 pt-1 text-xs font-medium text-muted-foreground">Daily volume</p>
-        <svg viewBox="0 0 840 105" role="img" aria-label={"Daily trading volume bars for " + visible.length + " sessions"} className="h-auto min-w-[560px] w-full">
+        <p className="px-2 pt-1 text-xs font-medium text-muted-foreground">Trading volume · {interval.toLowerCase()} aggregation</p>
+        <svg viewBox="0 0 840 105" role="img" aria-label={"Trading volume by " + interval.toLowerCase() + " interval for " + visible.length + " intervals"} className="h-auto min-w-[560px] w-full">
           <text x={left - 7} y={12} textAnchor="end" fontSize="11" fill="#a5b4c7">
             {new Intl.NumberFormat("en", { notation: "compact" }).format(maxVolume)}
           </text>
@@ -81,7 +83,7 @@ export function MarketCharts({ bars }: { bars: DailyBar[] }) {
           })}
         </svg>
       </div>
-      <p className="text-xs text-muted-foreground">Chart displays the latest {visible.length} sessions in the loaded selection. Green means close ≥ open; red means close &lt; open. Prices are raw, not corporate-action adjusted.</p>
+      <p className="text-xs text-muted-foreground">Chart represents {bars.length.toLocaleString()} actual daily sessions across {visible.length} {interval.toLowerCase()} intervals. Green means close ≥ open; red means close &lt; open. Prices are raw, not corporate-action adjusted.</p>
     </div>
   );
 }

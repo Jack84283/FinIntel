@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, BarChart3, CircleCheck, CircleOff, Clock3, RefreshCw } from "lucide-react";
+import { Activity, BarChart3, CircleCheck, CircleOff, Clock3, Download, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchBackendHealth } from "./api";
 import { MarketExplorer } from "./MarketExplorer";
+import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
 import type { BackendHealth } from "./health";
 
-type Screen = "overview" | "markets";
+type Screen = "overview" | "markets" | "acquisition";
 type Connection =
   | { kind: "loading" }
   | { kind: "connected"; health: BackendHealth }
@@ -16,7 +17,13 @@ type Connection =
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("overview");
+  const [marketSelection, setMarketSelection] = useState<MarketSelection | null>(null);
   const [connection, setConnection] = useState<Connection>({ kind: "loading" });
+
+  const openMarkets = (selection?: MarketSelection) => {
+    setMarketSelection(selection ?? null);
+    setScreen("markets");
+  };
 
   const checkHealth = useCallback(async (signal?: { cancelled: boolean }) => {
     setConnection({ kind: "loading" });
@@ -45,8 +52,11 @@ export default function App() {
           <button type="button" aria-current={screen === "overview" ? "page" : undefined} onClick={() => setScreen("overview")} className={(screen === "overview" ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
             <Activity aria-hidden="true" className="size-4" /> Overview
           </button>
-          <button type="button" aria-current={screen === "markets" ? "page" : undefined} onClick={() => setScreen("markets")} className={(screen === "markets" ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
+          <button type="button" aria-current={screen === "markets" ? "page" : undefined} onClick={() => openMarkets()} className={(screen === "markets" ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
             <BarChart3 aria-hidden="true" className="size-4" /> Markets
+          </button>
+          <button type="button" aria-current={screen === "acquisition" ? "page" : undefined} onClick={() => setScreen("acquisition")} className={(screen === "acquisition" ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
+            <Download aria-hidden="true" className="size-4" /> Data Acquisition
           </button>
           <span aria-disabled="true" className="rounded-md px-3 py-3 text-muted-foreground/60">Research <small>Later</small></span>
           <span aria-disabled="true" className="rounded-md px-3 py-3 text-muted-foreground/60">AI Desk <small>Later</small></span>
@@ -55,11 +65,16 @@ export default function App() {
       </aside>
 
       <main className="w-full min-w-0 px-3 py-4 sm:px-4 lg:py-5">
-        <nav aria-label="Mobile sections" className="mb-5 flex gap-2 lg:hidden">
+        <nav aria-label="Mobile sections" className="mb-5 flex flex-wrap gap-2 lg:hidden">
           <Button type="button" variant={screen === "overview" ? "secondary" : "ghost"} onClick={() => setScreen("overview")} aria-current={screen === "overview" ? "page" : undefined}><Activity aria-hidden="true" /> Overview</Button>
-          <Button type="button" variant={screen === "markets" ? "secondary" : "ghost"} onClick={() => setScreen("markets")} aria-current={screen === "markets" ? "page" : undefined}><BarChart3 aria-hidden="true" /> Markets</Button>
+          <Button type="button" variant={screen === "markets" ? "secondary" : "ghost"} onClick={() => openMarkets()} aria-current={screen === "markets" ? "page" : undefined}><BarChart3 aria-hidden="true" /> Markets</Button>
+          <Button type="button" variant={screen === "acquisition" ? "secondary" : "ghost"} onClick={() => setScreen("acquisition")} aria-current={screen === "acquisition" ? "page" : undefined}><Download aria-hidden="true" /> Data Acquisition</Button>
         </nav>
-        {screen === "markets" ? <MarketExplorer /> : (
+        {screen === "markets" ? (
+          <MarketExplorer initialSelection={marketSelection} onOpenAcquisition={() => setScreen("acquisition")} />
+        ) : screen === "acquisition" ? (
+          <DataAcquisitionPage onViewMarket={openMarkets} />
+        ) : (
           <section aria-labelledby="overview-title">
             <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
               <div>
@@ -72,10 +87,11 @@ export default function App() {
               <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">Historical research</p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Your local market workspace.</h2>
               <p className="mt-4 max-w-[68ch] text-sm leading-7 text-muted-foreground">
-                Historical stock prices are acquired and stored locally. Open Markets to view the
-                real OHLCV records already imported into SQLite, along with their source history.
+                Use Data Acquisition to fetch prices and review completed import actions. Open Markets to explore
+                stored OHLCV charts, historical tables, and instrument-level source provenance.
               </p>
-              <Button type="button" className="mt-5" onClick={() => setScreen("markets")}><BarChart3 aria-hidden="true" /> Open Market Data Explorer</Button>
+              <Button type="button" className="mt-5" onClick={() => openMarkets()}><BarChart3 aria-hidden="true" /> Open Market Data Explorer</Button>
+              <Button type="button" variant="secondary" className="mt-5 ml-2" onClick={() => setScreen("acquisition")}><Download aria-hidden="true" /> Open Data Acquisition</Button>
             </section>
             <div className="grid gap-2 xl:grid-cols-2">
               <Card aria-labelledby="backend-title">

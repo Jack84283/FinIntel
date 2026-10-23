@@ -73,3 +73,93 @@ M1.5: authenticated HTTPS gateway for the cross-device tablet PWA.
 
 This document does not claim any third-party dataset is public domain or freely
 redistributable. Provider plans, data policy and licensing require periodic review.
+
+## Integrated UI workflow (GitHub PR #6)
+
+In **Markets → Data acquisition**, enter a ticker and explicitly click
+**Fetch & store**. The backend alone reads its locally configured
+`FININTEL_ALPHA_VANTAGE_API_KEY`. One validated Alpha Vantage batch is
+staged briefly in a private temporary directory and then imported using
+the existing transaction-safe SQLite importer; the temporary JSON is
+deleted. The UI reloads the catalog, OHLCV chart, table and ingestion
+history on success. Repeating an explicit import is idempotent at the price
+row level, though each click consumes a provider request and creates a
+new audit entry. The card does not poll or fetch on mount.
+
+A full-history request is allowed in the UI only as a user-selected option
+and requires the appropriate provider subscription; local software cannot
+infer the account's entitlement from an API-key-presence check. Free access
+is quota-limited, and the UI should not bulk-refresh symbols automatically.
+
+The loopback development POST uses a strict JSON contract and workstation
+header plus Origin checks. These controls are not strong local-client
+authentication; never expose the dev Python API outside loopback. The
+future secure gateway must provide authentication and authorization.
+
+
+
+## Stock / ETF directory and selector (GitHub PR #6)
+
+Alpha Vantage's LISTING_STATUS API provides a CSV of US active stock and ETF listings. The UI does not fetch that directory on page load or when searching. The first-launch **73-record locally persisted starter catalog** is incomplete and marked as such; stock and ETF filters, name/ticker search, and manual ticker entry are available. The user may explicitly choose Sync symbols (one provider request subject to quota and license) to store the full validated listing into SQLite symbol_catalog without affecting historical price tables.
+
+Provider feed URL: https://www.alphavantage.co/documentation/#listing-status . Only active rows of Stock or ETF type with supported symbols are retained; malformed or conflicting duplicate rows abort ingestion. Catalog selection alone never fetches prices. Successful refresh records a local UTC update timestamp; no API key, historical prices, or full provider payload is published to GitHub.
+
+
+### Instrument-type restrictions
+
+The local catalog distinguishes individual Stock, ETF, Index, and Mutual Fund
+classes, including first-launch index and fund reference records. The
+`LISTING_STATUS` provider synchronizes **only active stock and ETF**
+classes; its refresh preserves all local Index/Mutual Fund rows. Reference
+index identifiers, such as `^GSPC`, are not presented as Alpha Vantage
+daily-price symbols. The existing `TIME_SERIES_DAILY` acquisition
+supports stock and ETF entries only; index and mutual fund price history
+requires new, tested provider contracts.
+
+## Daily history length and entitlement
+
+Per Alpha Vantage's current `TIME_SERIES_DAILY` documentation
+(https://www.alphavantage.co/documentation/#daily), `outputsize=compact`
+returns the latest 100 trading-day points and is available with free and
+premium API keys. `outputsize=full` can return up to 25+ years of trading
+history where available, and **requires a premium API key**. The API has no
+native `outputsize=5y` or `outputsize=10y`.
+
+FinIntel's `Last 5 years` and `Last 10 years` selectors are **local
+time-window filters** over already-imported SQLite OHLCV data. Only
+`Fetch & store` initiates a provider call. After full-history import, users
+can freely change the local 1/5/10-year time range without consuming new
+provider quota. API reads are bounded at 4,000 observations, sufficient for
+ordinary ten-year daily price history; for older coverage use date filtering.
+
+## Multi-provider API acquisition (PR #6)
+
+The Markets acquisition form now provides a functional Data source selector
+for Alpha Vantage or Alpaca SIP. The frontend passes an allowlisted provider
+identifier, a ticker and a history option to the fixed localhost Python API;
+credentials never flow through the frontend or into SQLite.
+
+Alpha Vantage continues to use TIME_SERIES_DAILY with compact/full values;
+full requires a paid entitlement. Alpaca uses its documented historical
+aggregates API at https://data.alpaca.markets/v2/stocks/bars, with fixed
+timeframe=1Day, feed=sip and adjustment=raw. Alpaca request credentials are
+header-only, provided by backend environment variables
+FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY.
+
+Alpaca history request start and end dates support the selected last 5
+years, last 10 years, or since January 2016, ending yesterday UTC to avoid
+intraday freshness restrictions. The importer follows bounded page tokens
+and validates the complete sequence, type, candle ranges, volumes and
+duplicate dates before an atomic SQLite commit. Quotas, failed pages,
+malformed data and denied SIP feed access abort without partial writes.
+There is no automatic fallback to a materially different market-data feed.
+
+A single instrument may have both alpaca_sip and alpha_vantage price
+series, each with its own import provenance and raw data. The Explorer
+requests the chosen provider explicitly. Existing Alpha Vantage
+snapshot/CLI support stays backward compatible.
+
+Alpaca historical bars: https://docs.alpaca.markets/us/reference/stockbars
+Alpaca data FAQ: https://docs.alpaca.markets/us/docs/market-data-faq
+Provider coverage and licensing remain account dependent and should not
+be described as a redistribution grant.

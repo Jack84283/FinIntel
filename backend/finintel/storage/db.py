@@ -14,8 +14,9 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from finintel.market_data.models import HistoricalBatch
+from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -68,6 +69,38 @@ CREATE INDEX daily_prices_by_session ON daily_prices(session_date);
 """
 
 
+# Asset discovery is deliberately separate from observed historical price series:
+# a symbol appearing here does not mean prices have been downloaded.
+SCHEMA_V2 = """
+CREATE TABLE symbol_catalog (
+    symbol TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    asset_type TEXT NOT NULL CHECK(asset_type IN ('Stock', 'ETF')),
+    exchange TEXT NOT NULL,
+    source TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX symbol_catalog_by_type ON symbol_catalog(asset_type, symbol);
+"""
+
+
+# Version 3 expands the directory taxonomy without modifying price-series tables.
+SCHEMA_V3 = """
+CREATE TABLE symbol_catalog_v3 (
+    symbol TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    asset_type TEXT NOT NULL CHECK(asset_type IN ('Stock', 'ETF', 'Index', 'Mutual Fund')),
+    exchange TEXT NOT NULL,
+    source TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+INSERT INTO symbol_catalog_v3 SELECT * FROM symbol_catalog;
+DROP TABLE symbol_catalog;
+ALTER TABLE symbol_catalog_v3 RENAME TO symbol_catalog;
+CREATE INDEX symbol_catalog_by_type ON symbol_catalog(asset_type, symbol);
+"""
+
+
 class StorageError(Exception):
     """Safe failure message for local CLI or API consumers."""
 
@@ -81,7 +114,7 @@ def _ensure_version(conn: sqlite3.Connection, *, allow_missing: bool) -> bool:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == 0 and allow_missing:
         return False
-    if version != SCHEMA_VERSION:
+    if version not in (1, 2, SCHEMA_VERSION):
         raise StorageError(
             "SQLite schema version is unsupported; expected version "
             + str(SCHEMA_VERSION)
@@ -97,19 +130,59 @@ def _migrate(conn: sqlite3.Connection) -> None:
         raise StorageError("Database uses a newer schema; upgrade FinIntel before importing")
     if version == SCHEMA_VERSION:
         return
-    if version != 0:
-        raise StorageError("No migration exists for this SQLite schema version")
-    existing = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-    ).fetchall()
-    if existing:
-        raise StorageError("Refusing to initialize a nonempty unversioned database")
-    try:
-        conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA_V1 + "\nPRAGMA user_version = 1;\nCOMMIT;")
-    except sqlite3.Error as exc:
-        if conn.in_transaction:
-            conn.rollback()
-        raise StorageError("Unable to initialize the SQLite schema") from exc
+    if version == 0:
+        existing = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        if existing:
+            raise StorageError("Refusing to initialize a nonempty unversioned database")
+        try:
+            conn.executescript(
+                "BEGIN IMMEDIATE;\n" + SCHEMA_V1 + "\nPRAGMA user_version = 1;\nCOMMIT;"
+            )
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to initialize the SQLite schema") from exc
+        version = 1
+    if version == 1:
+        try:
+            conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA_V2)
+            conn.executemany(
+                "INSERT INTO symbol_catalog(symbol, name, asset_type, exchange, source, updated_at) "
+                "VALUES (?, ?, ?, ?, 'starter', '')",
+                (
+                    (item["symbol"], item["name"], item["asset_type"], item["exchange"])
+                    for item in STARTER_SYMBOLS
+                    if item["asset_type"] in ("Stock", "ETF")
+                ),
+            )
+            conn.execute("PRAGMA user_version = 2")
+            conn.commit()
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate SQLite historical schema to v2") from exc
+        version = 2
+    if version == 2:
+        try:
+            conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA_V3)
+            conn.executemany(
+                "INSERT OR IGNORE INTO symbol_catalog"
+                "(symbol, name, asset_type, exchange, source, updated_at) "
+                "VALUES (?, ?, ?, ?, 'starter', '')",
+                (
+                    (item["symbol"], item["name"], item["asset_type"], item["exchange"])
+                    for item in STARTER_SYMBOLS
+                    if item["asset_type"] in ("Index", "Mutual Fund")
+                ),
+            )
+            conn.execute("PRAGMA user_version = 3")
+            conn.commit()
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate SQLite symbol catalog to v3") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:
@@ -155,6 +228,38 @@ def _safe_source(batch: HistoricalBatch) -> None:
 
     url = urlsplit(batch.source_url)
     params = parse_qs(url.query)
+    if batch.provider == "alpaca_sip":
+        if (
+            url.scheme != "https"
+            or url.hostname != "data.alpaca.markets"
+            or url.port is not None
+            or url.path != "/v2/stocks/bars"
+            or url.username
+            or url.password
+            or set(params)
+            != {"symbols", "timeframe", "start", "end", "feed", "adjustment", "limit"}
+            or params.get("symbols") != [batch.symbol]
+            or params.get("timeframe") != ["1Day"]
+            or params.get("feed") != ["sip"]
+            or params.get("adjustment") != ["raw"]
+            or params.get("limit") != ["10000"]
+        ):
+            raise StorageError("Alpaca source metadata failed sanitization")
+        from datetime import date as parsed_date
+
+        try:
+            first = parsed_date.fromisoformat(params["start"][0])
+            last = parsed_date.fromisoformat(params["end"][0])
+        except (ValueError, IndexError, KeyError) as exc:
+            raise StorageError("Invalid Alpaca date range in source metadata") from exc
+        if first > last:
+            raise StorageError("Invalid Alpaca source date ordering")
+        terms = urlsplit(batch.provider_terms_url)
+        if terms.scheme != "https" or terms.hostname != "alpaca.markets":
+            raise StorageError("Alpaca provider terms metadata is unapproved")
+        return
+    if batch.provider != "alpha_vantage":
+        raise StorageError("Unknown market-data provider")
     if (
         url.scheme != "https"
         or url.hostname != "www.alphavantage.co"
@@ -331,10 +436,13 @@ def read_daily(
     limit: int = 250,
     db: Path | None = None,
     latest: bool = False,
+    provider: str = "alpha_vantage",
 ) -> dict[str, object] | None:
     """Bounded, chronological read of stored daily prices; no live provider calls."""
-    if limit < 1 or limit > 1000:
-        raise ValueError("Daily price limit must be 1–1000")
+    if limit < 1 or limit > 4000:
+        raise ValueError("Daily price limit must be 1–4000")
+    if provider not in ("alpha_vantage", "alpaca_sip"):
+        raise ValueError("Invalid historical data provider")
     path = db if db is not None else database_path()
     conn = _read_connection(path)
     if conn is None:
@@ -342,9 +450,9 @@ def read_daily(
     try:
         series = conn.execute(
             "SELECT id, symbol, provider, frequency, adjustment, data_kind "
-            "FROM series WHERE symbol=? AND provider='alpha_vantage' "
+            "FROM series WHERE symbol=? AND provider=? "
             "AND frequency='1d' AND adjustment='raw_unadjusted'",
-            (symbol.upper(),),
+            (symbol.upper(), provider),
         ).fetchone()
         if series is None:
             return None
@@ -414,5 +522,126 @@ def list_imports(*, db: Path | None = None, limit: int = 25) -> list[dict[str, o
         return [dict(row) for row in rows]
     except sqlite3.Error as exc:
         raise StorageError("Could not read local import history") from exc
+    finally:
+        conn.close()
+
+
+def search_symbols(
+    *,
+    query: str = "",
+    asset_type: str | None = None,
+    limit: int = 50,
+    db: Path | None = None,
+) -> dict[str, object]:
+    """Initialize the durable local catalog on first search, then read it."""
+    if limit < 1 or limit > 100:
+        raise ValueError("Symbol search limit must be 1–100")
+    if asset_type not in (None, *ASSET_TYPES):
+        raise ValueError("Invalid asset-type filter")
+    if len(query) > 80:
+        raise ValueError("Search query is too long")
+    path = db if db is not None else database_path()
+    # Catalog access is the one intentional initializing GET: user explicitly
+    # requested persistent offline symbol master data, even before price fetch.
+    write_conn = _write_connection(path)
+    write_conn.close()
+    conn = _read_connection(path)
+    if conn is None:
+        raise StorageError("Could not open the newly initialized symbol catalog")
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0]
+        source_row = conn.execute(
+            "SELECT source, MAX(updated_at) AS updated_at FROM symbol_catalog "
+            "GROUP BY source ORDER BY updated_at DESC LIMIT 1"
+        ).fetchone()
+        pattern = (
+            "%"
+            + query.strip().upper().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            + "%"
+        )
+        prefix = query.strip().upper() + "%"
+        records = conn.execute(
+            "SELECT symbol, name, asset_type, exchange FROM symbol_catalog "
+            "WHERE (? IS NULL OR asset_type=?) "
+            "AND (symbol LIKE ? ESCAPE '\\' OR UPPER(name) LIKE ? ESCAPE '\\') "
+            "ORDER BY CASE WHEN symbol LIKE ? THEN 0 ELSE 1 END, symbol LIMIT ?",
+            (asset_type, asset_type, pattern, pattern, prefix, limit),
+        ).fetchall()
+        return {
+            "source": source_row["source"] if source_row else "starter",
+            "total": count,
+            "updated_at": source_row["updated_at"] or None if source_row else None,
+            "results": [dict(row) for row in records],
+        }
+    except sqlite3.Error as exc:
+        raise StorageError("Could not read the local symbol catalog") from exc
+    finally:
+        conn.close()
+
+
+def lookup_symbol_type(symbol: str, *, db: Path | None = None) -> str | None:
+    """Find the instrument class before attempting a provider-price request."""
+    path = db if db is not None else database_path()
+    conn = _read_connection(path)
+    if conn is None:
+        return next(
+            (row["asset_type"] for row in STARTER_SYMBOLS if row["symbol"] == symbol),
+            None,
+        )
+    try:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version == 1:
+            return next(
+                (row["asset_type"] for row in STARTER_SYMBOLS if row["symbol"] == symbol),
+                None,
+            )
+        result = conn.execute(
+            "SELECT asset_type FROM symbol_catalog WHERE symbol=?", (symbol,)
+        ).fetchone()
+        if result:
+            return result["asset_type"]
+        # Protect direct API calls against unsupported reference instruments
+        # even if an earlier v2 catalog has not yet been upgraded by the UI.
+        return next(
+            (
+                row["asset_type"]
+                for row in STARTER_SYMBOLS
+                if row["symbol"] == symbol and row["asset_type"] in ("Index", "Mutual Fund")
+            ),
+            None,
+        )
+    except sqlite3.Error as exc:
+        raise StorageError("Could not check symbol asset type") from exc
+    finally:
+        conn.close()
+
+
+def replace_symbol_catalog(
+    records: list[dict[str, str]], *, db: Path | None = None
+) -> dict[str, object]:
+    """Atomically replace only the symbol *directory*, never daily price rows."""
+    if not records:
+        raise StorageError("Refusing an empty symbol catalog")
+    rows, timestamp = synchronized_rows(records)
+    path = db if db is not None else database_path()
+    conn = _write_connection(path)
+    try:
+        with conn:
+            conn.execute("DELETE FROM symbol_catalog WHERE asset_type IN ('Stock', 'ETF')")
+            conn.executemany(
+                "INSERT INTO symbol_catalog"
+                "(symbol, name, asset_type, exchange, source, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+        total = conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0]
+        return {
+            "status": "synced",
+            "total": total,
+            "updated_at": timestamp,
+            "source": "alpha_vantage",
+        }
+    except sqlite3.Error as exc:
+        raise StorageError("Could not update the local symbol catalog") from exc
     finally:
         conn.close()
