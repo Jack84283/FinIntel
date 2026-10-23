@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, BarChart3, CircleCheck, CircleOff, Clock3, RefreshCw } from "lucide-react";
+import { Activity, BarChart3, BrainCircuit, BriefcaseBusiness, CircleCheck, CircleOff, Clock3, Database, History, RefreshCw, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,29 @@ import { fetchBackendHealth } from "./api";
 import { MarketExplorer } from "./MarketExplorer";
 import type { BackendHealth } from "./health";
 
-type Screen = "overview" | "markets";
+type Screen = "overview" | "market" | "intelligence" | "data-acquisition" | "action-history" | "portfolio" | "settings";
+const groups = [
+  { heading: "Workspace", items: [
+    { id: "overview", label: "Overview", icon: Activity },
+    { id: "market", label: "Market", icon: BarChart3 },
+    { id: "intelligence", label: "Intelligence", icon: BrainCircuit },
+  ] },
+  { heading: "Data & Operations", items: [
+    { id: "data-acquisition", label: "Data Acquisition", icon: Database },
+    { id: "action-history", label: "Action History", icon: History },
+  ] },
+  { heading: "Workspace & Preferences", items: [
+    { id: "portfolio", label: "Portfolio", icon: BriefcaseBusiness },
+    { id: "settings", label: "Settings", icon: Settings },
+  ] },
+] as const;
+const placeholders: Partial<Record<Screen, { title: string; description: string }>> = {
+  intelligence: { title: "Intelligence", description: "Proprietary models, local AI, and market trend analysis will appear here." },
+  "data-acquisition": { title: "Data Acquisition", description: "Source configuration, ingestion, scheduling and data quality monitoring will appear here. Historical acquisition is currently available through the backend CLI." },
+  "action-history": { title: "Action History", description: "Acquisition runs, model executions, AI analyses, and audit trails will appear here. Existing market import provenance remains available in Market." },
+  portfolio: { title: "Portfolio", description: "Holdings, performance, allocation, and risk exposure will appear here." },
+  settings: { title: "Settings", description: "Providers, local models, storage, and preferences will appear here." },
+};
 type Connection =
   | { kind: "loading" }
   | { kind: "connected"; health: BackendHealth }
@@ -40,26 +62,44 @@ export default function App() {
     <div className="min-h-screen bg-background text-foreground lg:grid lg:grid-cols-[208px_minmax(0,1fr)]">
       <aside className="hidden min-h-screen flex-col border-r border-border bg-muted px-3 py-6 lg:flex" aria-label="Main navigation">
         <div className="mx-3 mb-12 grid h-11 w-12 place-items-center rounded-lg border border-[#568ad1] text-xl font-extrabold tracking-tight" aria-hidden="true">FI</div>
-        <span className="mb-3 px-3 text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">Workspace</span>
         <nav aria-label="Sections" className="flex flex-col gap-1 text-sm">
-          <button type="button" aria-current={screen === "overview" ? "page" : undefined} onClick={() => setScreen("overview")} className={(screen === "overview" ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
-            <Activity aria-hidden="true" className="size-4" /> Overview
-          </button>
-          <button type="button" aria-current={screen === "markets" ? "page" : undefined} onClick={() => setScreen("markets")} className={(screen === "markets" ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
-            <BarChart3 aria-hidden="true" className="size-4" /> Markets
-          </button>
-          <span aria-disabled="true" className="rounded-md px-3 py-3 text-muted-foreground/60">Research <small>Later</small></span>
-          <span aria-disabled="true" className="rounded-md px-3 py-3 text-muted-foreground/60">AI Desk <small>Later</small></span>
+          {groups.map((group) => (
+            <div key={group.heading} className="mb-5 flex flex-col gap-1">
+              <span className="mb-2 px-3 text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">{group.heading}</span>
+              {group.items.map(({ id, label, icon: Icon }) => (
+                <button key={id} type="button" aria-current={screen === id ? "page" : undefined} onClick={() => setScreen(id)} className={(screen === id ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
+                  <Icon aria-hidden="true" className="size-4" /> {label}
+                </button>
+              ))}
+            </div>
+          ))}
         </nav>
         <p className="mt-auto px-2 pt-8 text-[10px] font-medium tracking-widest text-[#62758d]">PRIVATE · LOCAL FIRST</p>
       </aside>
 
       <main className="w-full min-w-0 px-3 py-4 sm:px-4 lg:py-5">
-        <nav aria-label="Mobile sections" className="mb-5 flex gap-2 lg:hidden">
-          <Button type="button" variant={screen === "overview" ? "secondary" : "ghost"} onClick={() => setScreen("overview")} aria-current={screen === "overview" ? "page" : undefined}><Activity aria-hidden="true" /> Overview</Button>
-          <Button type="button" variant={screen === "markets" ? "secondary" : "ghost"} onClick={() => setScreen("markets")} aria-current={screen === "markets" ? "page" : undefined}><BarChart3 aria-hidden="true" /> Markets</Button>
+        <nav aria-label="Mobile sections" className="mb-5 flex gap-2 overflow-x-auto pb-2 lg:hidden">
+          {groups.flatMap((group) => group.items).map(({ id, label, icon: Icon }) => (
+            <Button key={id} type="button" className="shrink-0" variant={screen === id ? "secondary" : "ghost"} onClick={() => setScreen(id)} aria-current={screen === id ? "page" : undefined}>
+              <Icon aria-hidden="true" /> {label}
+            </Button>
+          ))}
         </nav>
-        {screen === "markets" ? <MarketExplorer /> : (
+        {screen === "market" ? <MarketExplorer /> : screen !== "overview" ? (
+          <section aria-labelledby="placeholder-title">
+            <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
+              <div>
+                <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / {placeholders[screen]?.title}</p>
+                <h1 id="placeholder-title" className="mt-2 text-2xl font-semibold tracking-tight">{placeholders[screen]?.title}</h1>
+              </div>
+              <Badge variant="outline">Not implemented</Badge>
+            </header>
+            <Card className="mt-6 max-w-[820px]">
+              <CardHeader><CardTitle>Coming in a future milestone</CardTitle><CardDescription>{placeholders[screen]?.description}</CardDescription></CardHeader>
+              <CardContent><p className="text-sm text-muted-foreground">This page is a placeholder; no live data or actions are available yet.</p></CardContent>
+            </Card>
+          </section>
+        ) : (
           <section aria-labelledby="overview-title">
             <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
               <div>
@@ -72,10 +112,10 @@ export default function App() {
               <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">Historical research</p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Your local market workspace.</h2>
               <p className="mt-4 max-w-[68ch] text-sm leading-7 text-muted-foreground">
-                Historical stock prices are acquired and stored locally. Open Markets to view the
+                Historical stock prices are acquired and stored locally. Open Market to view the
                 real OHLCV records already imported into SQLite, along with their source history.
               </p>
-              <Button type="button" className="mt-5" onClick={() => setScreen("markets")}><BarChart3 aria-hidden="true" /> Open Market Data Explorer</Button>
+              <Button type="button" className="mt-5" onClick={() => setScreen("market")}><BarChart3 aria-hidden="true" /> Open Market Data Explorer</Button>
             </section>
             <div className="grid gap-2 xl:grid-cols-2">
               <Card aria-labelledby="backend-title">
