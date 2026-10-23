@@ -14,7 +14,7 @@ This is a real source-owned shadcn/ui integration, not a linked third-party styl
 
 ## Shared page layout and gutters
 
-Use the single shared `<main>` container in `src/App.tsx` for both Overview and Markets. **Keep page-edge spacing separate from shadcn Card internals**:
+Use the single shared `<main>` container in `src/App.tsx` for Overview, Markets, and Data Acquisition. **Keep page-edge spacing separate from shadcn Card internals**:
 
 - Compact screens: `px-3` (**12px** horizontal page gutter).
 - Tablet and desktop: `sm:px-4` (**16px** horizontal page gutter), including wide desktop windows.
@@ -75,3 +75,27 @@ npm run tauri:dev
 GitHub CI covers React and Tauri compilation. Real-device PWA QA, app bundling and tablet authentication follow in their respective milestones.
 
 Official documentation: https://ui.shadcn.com/docs/installation/vite
+
+## Separation of research and data operations
+
+Keep these top-level screens deliberately distinct:
+
+- **Markets** (read-only): exploration of local historical OHLCV
+  observations, period/date filtering, candlestick/volume charts,
+  prices, and provider provenance.
+- **Data Acquisition** (mutating): explicit fetch controls,
+  provider/key status, ticker discovery and the **Action History**
+  card of recently completed imports. Never trigger external fetches
+  during navigation or history table rendering.
+- **Overview**: application status and links to both workspaces.
+
+Reuse the `MarketSelection` context (symbol + provider) when
+navigating from a successful acquisition or a history-row **View**
+action to Markets. Never conflate separate Alpaca and Alpha Vantage
+series for one ticker. Keep the sidebar and compact navigation
+consistent, keyboard-accessible, and within the shared 8px
+inter-card spacing system.
+
+Action History currently represents completed, persisted
+`ingestion_runs` only; failed attempts, cancellation and provider
+quota rejections are not stored as durable audit events.

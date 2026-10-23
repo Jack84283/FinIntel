@@ -246,8 +246,7 @@ provider quota. Symbols may also be entered manually for instruments absent
 from the directory, but classification is preserved when selecting entries.
 
 **Provider capability boundary:** the current Alpha Vantage
-`TIME_SERIES_DAILY` adapter handles only stock/ETF symbols. Selecting an
-Index and Mutual Fund records remain available in the catalog for reference,
+`TIME_SERIES_DAILY` adapter handles only stock/ETF symbols. Index and Mutual Fund records remain available in the catalog for reference,
 but the Fetch & store selector only offers Stocks and ETFs. The backend
 also rejects unsupported classes, including manually entered index symbols. Index identifiers such as
 `^GSPC` are display/reference IDs, **not** validated Alpha Vantage daily
@@ -295,7 +294,7 @@ fabricate missing dates.
 
 ## Selectable historical price APIs (PR #6)
 
-Markets → Data acquisition → Data source now has two **working API** choices:
+Data Acquisition → Data source now has two **working API** choices:
 **Alpaca SIP** (5 years, 10 years, available since 2016) and
 **Alpha Vantage** (compact 100 daily sessions on free; full history requires premium).
 Selecting the source, ticker and history only configures the request.
@@ -341,3 +340,29 @@ for the Nasdaq-100 and IWM for the Russell 2000. These funds **track related
 benchmarks, but their market prices are not the index levels**; FinIntel
 must not silently substitute an ETF when an actual index is requested.
 True index history needs its own validated provider contract and data model.
+
+## Separate Markets and Data Acquisition workspaces (PR #6)
+
+FinIntel desktop navigation now has three primary sections:
+**Overview**, **Markets** and **Data Acquisition**. The same compact
+12/16px page gutters and 8px inter-card spacing apply to both workspaces.
+
+- **Markets** is the read-only research workspace: stored instrument and
+  provider selection, 1/5/10-year time-range filters, OHLCV visualization,
+  price table and per-series source provenance. It no longer contains
+  the acquisition form or completed-import activity table.
+- **Data Acquisition** is the operational workspace: explicit
+  provider/ticker/history selection, Fetch & store, provider status,
+  and a dedicated **Action History** table showing the most recent
+  25 persisted successful ingestion runs, including imports triggered by
+  the CLI. Failed provider attempts are not persisted in this history yet,
+  so the table must not be described as a complete request audit.
+- After a successful fetch, **View in Markets** navigates to the
+  matching symbol and provider. Each historical import row with a
+  supported price provider also links directly to its stored series.
+- With no market data stored, Markets offers a shortcut to the
+  Data Acquisition workspace. The same navigation is available in
+  the compact/mobile tab row.
+
+This is a frontend-only navigation and composition change: existing
+local FastAPI/Tauri commands, validation and SQLite tables remain unchanged.
