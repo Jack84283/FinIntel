@@ -6,6 +6,7 @@ from finintel.market_data import backfill_worker
 
 
 def test_backfill_checkpoint_prevents_duplicate_requests(tmp_path, monkeypatch):
+    monkeypatch.setattr(backfill_worker, "alpaca_configured", lambda: True)
     monkeypatch.setattr(backfill_worker, "pending_symbols", lambda **kwargs: ["AAPL", "MSFT"])
     calls = []
 
