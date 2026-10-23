@@ -327,7 +327,11 @@ def _safe_source(batch: HistoricalBatch) -> None:
         if first > last or first > batch.first_session or last < batch.last_session:
             raise StorageError("Tiingo source date range conflicts with observations")
         terms = urlsplit(batch.provider_terms_url)
-        if terms.scheme != "https" or terms.hostname != "www.tiingo.com" or terms.path != "/about/terms":
+        if (
+            terms.scheme != "https"
+            or terms.hostname != "www.tiingo.com"
+            or terms.path != "/about/terms"
+        ):
             raise StorageError("Tiingo license metadata is unapproved")
         return
     if batch.provider != "alpha_vantage":
