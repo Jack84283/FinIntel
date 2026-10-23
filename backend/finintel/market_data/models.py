@@ -40,7 +40,7 @@ class HistoricalBatch(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    provider: Literal["alpha_vantage", "alpaca_sip"]
+    provider: Literal["alpha_vantage", "alpaca_sip", "tiingo"]
     symbol: str
     frequency: Literal["1d"] = "1d"
     price_adjustment: Literal["raw_unadjusted"] = "raw_unadjusted"
