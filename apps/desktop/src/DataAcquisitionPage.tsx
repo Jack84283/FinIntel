@@ -18,9 +18,6 @@ export function DataAcquisitionPage({
 }) {
   const [latest, setLatest] = useState<MarketSelection | null>(null);
 
-  return () => { cancelled = true; };
-  }, [revision]);
-
   return (
     <section className="space-y-2" aria-labelledby="acquisition-page-title">
       <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-5">
