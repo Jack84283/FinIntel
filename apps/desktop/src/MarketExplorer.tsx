@@ -4,11 +4,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchMarketDaily, fetchMarketImports, fetchMarketInstruments } from "./market-api";
-import { AcquisitionCard } from "./AcquisitionCard";
+import { fetchMarketDaily, fetchMarketInstruments } from "./market-api";
+import type { MarketSelection } from "./DataAcquisitionPage";
 import { MarketCharts } from "./market-chart";
 import { yearsAgo, type HistoryPeriod } from "./history-range";
-import { sortableBars, type DailySeries, type ImportRecord, type MarketInstrument } from "./market";
+import { sortableBars, type DailySeries, type MarketInstrument } from "./market";
 
 type LoadState = "loading" | "ready" | "error";
 type SortColumn = "session_date" | "close" | "volume";
@@ -17,12 +17,15 @@ const pageSize = 25;
 const formatInteger = (value: number) => new Intl.NumberFormat("en-US").format(value);
 const price = (raw: string) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(Number(raw));
 
-export function MarketExplorer() {
+export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
+  initialSelection?: MarketSelection | null;
+  onOpenAcquisition: () => void;
+}) {
   const [instruments, setInstruments] = useState<MarketInstrument[]>([]);
   const [indexState, setIndexState] = useState<LoadState>("loading");
   const [indexError, setIndexError] = useState("");
-  const [symbol, setSymbol] = useState("");
-  const [priceProvider, setPriceProvider] = useState<"alpha_vantage" | "alpaca_sip">("alpha_vantage");
+  const [symbol, setSymbol] = useState(initialSelection?.symbol ?? "");
+  const [priceProvider, setPriceProvider] = useState<"alpha_vantage" | "alpaca_sip">(initialSelection?.provider ?? "alpha_vantage");
   const [draftStart, setDraftStart] = useState("");
   const [draftEnd, setDraftEnd] = useState("");
   const [range, setRange] = useState({ start: "", end: "" });
@@ -31,7 +34,6 @@ export function MarketExplorer() {
   const [series, setSeries] = useState<DailySeries | null>(null);
   const [seriesState, setSeriesState] = useState<LoadState>("loading");
   const [seriesError, setSeriesError] = useState("");
-  const [imports, setImports] = useState<ImportRecord[]>([]);
   const [sortColumn, setSortColumn] = useState<SortColumn>("session_date");
   const [descending, setDescending] = useState(true);
   const [page, setPage] = useState(0);
@@ -40,17 +42,15 @@ export function MarketExplorer() {
   useEffect(() => {
     let ignore = false;
     setIndexState("loading");
-    Promise.all([fetchMarketInstruments(), fetchMarketImports(10).catch(() => [])])
-      .then(([catalog, history]) => {
+    fetchMarketInstruments()
+      .then((catalog) => {
         if (ignore) return;
         setInstruments(catalog);
-        setImports(history);
-        setSymbol((previous) => catalog.some((item) => item.symbol === previous) ? previous : (catalog[0]?.symbol ?? ""));
-        setPriceProvider((previous) =>
-          catalog.some((item) => item.symbol === symbol && item.provider === previous)
-            ? previous
-            : (catalog.find((item) => item.symbol === symbol)?.provider ?? catalog[0]?.provider ?? "alpha_vantage") as "alpha_vantage" | "alpaca_sip"
-        );
+        const matched = catalog.find((item) => item.symbol === symbol && item.provider === priceProvider)
+          ?? catalog.find((item) => item.symbol === symbol)
+          ?? catalog[0];
+        setSymbol(matched?.symbol ?? "");
+        setPriceProvider((matched?.provider ?? "alpha_vantage") as "alpha_vantage" | "alpaca_sip");
         setIndexState("ready");
         setIndexError("");
       })
@@ -148,14 +148,11 @@ export function MarketExplorer() {
           <Button type="button" variant="secondary" size="sm" onClick={() => setReload((v) => v + 1)}>
             <RefreshCw aria-hidden="true" /> Reload local data
           </Button>
+          <Button type="button" size="sm" onClick={onOpenAcquisition}>
+            <Database aria-hidden="true" /> Data Acquisition
+          </Button>
         </div>
       </header>
-
-      <AcquisitionCard selectedSymbol={symbol} onAcquired={(ticker, provider) => {
-        setSymbol(ticker);
-        setPriceProvider(provider);
-        setReload((value) => value + 1);
-      }} />
 
       {indexState === "loading" && (
         <Card><CardContent><Skeleton className="h-8 w-64" aria-label="Loading local instruments" /></CardContent></Card>
@@ -171,12 +168,13 @@ export function MarketExplorer() {
       {indexState === "ready" && instruments.length === 0 && (
         <Card>
           <CardHeader><CardTitle>No stored market data yet</CardTitle>
-            <CardDescription>FinIntel reads your local SQLite database. Use Data acquisition above to fetch and store your first symbol.</CardDescription>
+            <CardDescription>FinIntel reads your local SQLite database. Open Data Acquisition to fetch and store your first stock or ETF.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex items-center gap-2 text-muted-foreground"><Database aria-hidden="true" className="size-5" /><span className="text-sm">No symbols are available.</span></div>
+            <div className="flex items-center gap-2 text-muted-foreground"><Database aria-hidden="true" className="size-5" /><span className="text-sm">No price series have been imported.</span></div>
+            <Button type="button" onClick={onOpenAcquisition}><Database aria-hidden="true" /> Open Data Acquisition</Button>
             <code className="block overflow-x-auto rounded-md bg-muted px-3 py-3 text-xs">python -m finintel.storage import data/raw/AAPL.json</code>
-            <p className="text-xs text-muted-foreground">Alternatively, import a previously downloaded snapshot using the command above. Your database is updated only on explicit acquisition or import.</p>
+            <p className="text-xs text-muted-foreground">Alternatively, import a previously downloaded snapshot using the command above. All new data acquisition and completed import history are managed in Data Acquisition.</p>
           </CardContent>
         </Card>
       )}
@@ -341,36 +339,9 @@ export function MarketExplorer() {
             </>
           )}
 
-          {imports.length > 0 && (
-            <Card>
-              <CardHeader><CardTitle>Recent local imports</CardTitle><CardAction><Badge variant="outline">Last {imports.length}</Badge></CardAction></CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[590px] text-left text-xs">
-                    <thead><tr className="text-muted-foreground">
-                      <th className="pb-3 font-medium">Symbol</th>
-                      <th className="pb-3 font-medium">Imported at (UTC)</th>
-                      <th className="pb-3 text-right font-medium">Inserted</th>
-                      <th className="pb-3 text-right font-medium">Updated</th>
-                      <th className="pb-3 text-right font-medium">Unchanged</th>
-                    </tr></thead>
-                    <tbody>{imports.map((entry) => (
-                      <tr key={entry.id} className="border-t border-border">
-                        <td className="py-2.5 font-semibold">{entry.symbol}</td>
-                        <td className="py-2.5">{entry.imported_at}</td>
-                        <td className="py-2.5 text-right">{entry.inserted}</td>
-                        <td className="py-2.5 text-right">{entry.updated}</td>
-                        <td className="py-2.5 text-right">{entry.unchanged}</td>
-                      </tr>
-                    ))}</tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </>
       )}
-      <footer className="text-xs text-muted-foreground">Local research workstation · Charts display local SQLite data only · Provider acquisition requires an explicit request · Not a live market feed</footer>
+      <footer className="text-xs text-muted-foreground">Local research workstation · Charts display local SQLite data only · Fetches and action history live in Data Acquisition · Not a live market feed</footer>
     </section>
   );
 }
