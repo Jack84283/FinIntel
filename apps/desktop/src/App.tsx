@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, BarChart3, CircleCheck, CircleOff, Clock3, Download, RefreshCw } from "lucide-react";
+import { Activity, BarChart3, BrainCircuit, BriefcaseBusiness, CircleCheck, CircleOff, Clock3, Database, Download, History, RefreshCw, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +9,29 @@ import { MarketExplorer } from "./MarketExplorer";
 import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
 import type { BackendHealth } from "./health";
 
-type Screen = "overview" | "markets" | "acquisition";
+type Screen = "overview" | "market" | "intelligence" | "data-acquisition" | "action-history" | "portfolio" | "settings";
+const groups = [
+  { heading: "Workspace", items: [
+    { id: "overview", label: "Overview", icon: Activity },
+    { id: "market", label: "Market", icon: BarChart3 },
+    { id: "intelligence", label: "Intelligence", icon: BrainCircuit },
+  ] },
+  { heading: "Data & Operations", items: [
+    { id: "data-acquisition", label: "Data Acquisition", icon: Database },
+    { id: "action-history", label: "Action History", icon: History },
+  ] },
+  { heading: "Workspace & Preferences", items: [
+    { id: "portfolio", label: "Portfolio", icon: BriefcaseBusiness },
+    { id: "settings", label: "Settings", icon: Settings },
+  ] },
+] as const;
+const allSections = [...groups[0].items, ...groups[1].items, ...groups[2].items];
+const placeholders: Partial<Record<Screen, { title: string; description: string }>> = {
+  intelligence: { title: "Intelligence", description: "Proprietary models, local AI, and market trend analysis will appear here." },
+  "action-history": { title: "Action History", description: "Dedicated execution history, model runs, AI analyses and audit trails will appear here. Existing import records can be reviewed in Data Acquisition." },
+  portfolio: { title: "Portfolio", description: "Holdings, performance, allocation, and risk exposure will appear here." },
+  settings: { title: "Settings", description: "Providers, local models, storage, and preferences will appear here." },
+};
 type Connection =
   | { kind: "loading" }
   | { kind: "connected"; health: BackendHealth }
@@ -22,7 +44,7 @@ export default function App() {
 
   const openMarkets = (selection?: MarketSelection) => {
     setMarketSelection(selection ?? null);
-    setScreen("markets");
+    setScreen("market");
   };
 
   const checkHealth = useCallback(async (signal?: { cancelled: boolean }) => {
@@ -47,33 +69,47 @@ export default function App() {
     <div className="min-h-screen bg-background text-foreground lg:grid lg:grid-cols-[208px_minmax(0,1fr)]">
       <aside className="hidden min-h-screen flex-col border-r border-border bg-muted px-3 py-6 lg:flex" aria-label="Main navigation">
         <div className="mx-3 mb-12 grid h-11 w-12 place-items-center rounded-lg border border-[#568ad1] text-xl font-extrabold tracking-tight" aria-hidden="true">FI</div>
-        <span className="mb-3 px-3 text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">Workspace</span>
         <nav aria-label="Sections" className="flex flex-col gap-1 text-sm">
-          <button type="button" aria-current={screen === "overview" ? "page" : undefined} onClick={() => setScreen("overview")} className={(screen === "overview" ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
-            <Activity aria-hidden="true" className="size-4" /> Overview
-          </button>
-          <button type="button" aria-current={screen === "markets" ? "page" : undefined} onClick={() => openMarkets()} className={(screen === "markets" ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
-            <BarChart3 aria-hidden="true" className="size-4" /> Markets
-          </button>
-          <button type="button" aria-current={screen === "acquisition" ? "page" : undefined} onClick={() => setScreen("acquisition")} className={(screen === "acquisition" ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
-            <Download aria-hidden="true" className="size-4" /> Data Acquisition
-          </button>
-          <span aria-disabled="true" className="rounded-md px-3 py-3 text-muted-foreground/60">Research <small>Later</small></span>
-          <span aria-disabled="true" className="rounded-md px-3 py-3 text-muted-foreground/60">AI Desk <small>Later</small></span>
+          {groups.map((group) => (
+            <div key={group.heading} className="mb-5 flex flex-col gap-1">
+              <span className="mb-2 px-3 text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">{group.heading}</span>
+              {group.items.map(({ id, label, icon: Icon }) => (
+                <button key={id} type="button" aria-current={screen === id ? "page" : undefined} onClick={() => id === "market" ? openMarkets() : setScreen(id)} className={(screen === id ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
+                  <Icon aria-hidden="true" className="size-4" /> {label}
+                </button>
+              ))}
+            </div>
+          ))}
         </nav>
         <p className="mt-auto px-2 pt-8 text-[10px] font-medium tracking-widest text-[#62758d]">PRIVATE · LOCAL FIRST</p>
       </aside>
 
       <main className="w-full min-w-0 px-3 py-4 sm:px-4 lg:py-5">
-        <nav aria-label="Mobile sections" className="mb-5 flex flex-wrap gap-2 lg:hidden">
-          <Button type="button" variant={screen === "overview" ? "secondary" : "ghost"} onClick={() => setScreen("overview")} aria-current={screen === "overview" ? "page" : undefined}><Activity aria-hidden="true" /> Overview</Button>
-          <Button type="button" variant={screen === "markets" ? "secondary" : "ghost"} onClick={() => openMarkets()} aria-current={screen === "markets" ? "page" : undefined}><BarChart3 aria-hidden="true" /> Markets</Button>
-          <Button type="button" variant={screen === "acquisition" ? "secondary" : "ghost"} onClick={() => setScreen("acquisition")} aria-current={screen === "acquisition" ? "page" : undefined}><Download aria-hidden="true" /> Data Acquisition</Button>
+        <nav aria-label="Mobile sections" className="mb-5 flex gap-2 overflow-x-auto pb-2 lg:hidden">
+          {allSections.map(({ id, label, icon: Icon }) => (
+            <Button key={id} type="button" className="shrink-0" variant={screen === id ? "secondary" : "ghost"} onClick={() => id === "market" ? openMarkets() : setScreen(id)} aria-current={screen === id ? "page" : undefined}>
+              <Icon aria-hidden="true" /> {label}
+            </Button>
+          ))}
         </nav>
-        {screen === "markets" ? (
-          <MarketExplorer initialSelection={marketSelection} onOpenAcquisition={() => setScreen("acquisition")} />
-        ) : screen === "acquisition" ? (
+        {screen === "market" ? (
+          <MarketExplorer initialSelection={marketSelection} onOpenAcquisition={() => setScreen("data-acquisition")} />
+        ) : screen === "data-acquisition" ? (
           <DataAcquisitionPage onViewMarket={openMarkets} />
+        ) : screen !== "overview" ? (
+          <section aria-labelledby="placeholder-title">
+            <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
+              <div>
+                <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / {placeholders[screen]?.title}</p>
+                <h1 id="placeholder-title" className="mt-2 text-2xl font-semibold tracking-tight">{placeholders[screen]?.title}</h1>
+              </div>
+              <Badge variant="outline">Not implemented</Badge>
+            </header>
+            <Card className="mt-6 max-w-[820px]">
+              <CardHeader><CardTitle>Coming in a future milestone</CardTitle><CardDescription>{placeholders[screen]?.description}</CardDescription></CardHeader>
+              <CardContent><p className="text-sm text-muted-foreground">This is a navigation placeholder. No live data or actions are available on this page yet.</p></CardContent>
+            </Card>
+          </section>
         ) : (
           <section aria-labelledby="overview-title">
             <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
@@ -91,7 +127,7 @@ export default function App() {
                 stored OHLCV charts, historical tables, and instrument-level source provenance.
               </p>
               <Button type="button" className="mt-5" onClick={() => openMarkets()}><BarChart3 aria-hidden="true" /> Open Market Data Explorer</Button>
-              <Button type="button" variant="secondary" className="mt-5 ml-2" onClick={() => setScreen("acquisition")}><Download aria-hidden="true" /> Open Data Acquisition</Button>
+              <Button type="button" variant="secondary" className="mt-5 ml-2" onClick={() => setScreen("data-acquisition")}><Download aria-hidden="true" /> Open Data Acquisition</Button>
             </section>
             <div className="grid gap-2 xl:grid-cols-2">
               <Card aria-labelledby="backend-title">
