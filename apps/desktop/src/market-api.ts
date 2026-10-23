@@ -23,7 +23,7 @@ export async function fetchMarketInstruments(): Promise<MarketInstrument[]> {
 
 export interface DailyQuery {
   symbol: string;
-  provider?: "alpha_vantage" | "alpaca_sip";
+  provider?: "alpha_vantage" | "alpaca_sip" | "tiingo";
   startDate?: string;
   endDate?: string;
   limit?: number;
@@ -41,7 +41,7 @@ export async function fetchMarketDaily(query: DailyQuery): Promise<DailySeries> 
     throw new Error("Start date must not exceed end date.");
   }
   const provider = query.provider ?? "alpha_vantage";
-  if (provider !== "alpha_vantage" && provider !== "alpaca_sip") {
+  if (provider !== "alpha_vantage" && provider !== "alpaca_sip" && provider !== "tiingo") {
     throw new Error("Unsupported historical data provider.");
   }
   const params = new URLSearchParams({ limit: String(limit), latest: "true", provider });
