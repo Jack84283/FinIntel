@@ -166,7 +166,9 @@ def run(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Persistent local historical backfill worker")
-    parser.add_argument("--provider", choices=("alpaca_sip", "alpha_vantage", "tiingo"), default="alpaca_sip")
+    parser.add_argument(
+        "--provider", choices=("alpaca_sip", "alpha_vantage", "tiingo"), default="alpaca_sip"
+    )
     parser.add_argument("--asset-type", choices=("all", "Stock", "ETF"), default="all")
     parser.add_argument("--max-requests-per-day", type=int, default=20)
     parser.add_argument("--delay-seconds", type=float, default=15.0)
