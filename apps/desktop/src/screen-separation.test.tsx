@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MarketExplorer } from "./MarketExplorer";
 import { DataAcquisitionPage } from "./DataAcquisitionPage";
+import { ActionHistoryPage } from "./ActionHistoryPage";
 
 describe("navigation between research and data operations", () => {
   it("keeps acquisition controls and action history off the Markets screen", () => {
@@ -14,14 +15,17 @@ describe("navigation between research and data operations", () => {
     expect(market).not.toContain("Action History");
   });
 
-  it("groups fetch controls and successful ingestion history on Data Acquisition", () => {
+  it("keeps fetch controls on Data Acquisition and records on Action History", () => {
     const acquisition = renderToStaticMarkup(
       <DataAcquisitionPage onViewMarket={() => undefined} />,
     );
     expect(acquisition).toContain("Data Acquisition");
     expect(acquisition).toContain("Fetch &amp; store");
     expect(acquisition).toContain("Action History");
+    expect(acquisition).not.toContain("Refresh history");
     expect(acquisition).not.toContain("Historical price table");
-    expect(acquisition).toContain("failed requests are not yet recorded");
+    const history = renderToStaticMarkup(<ActionHistoryPage onViewMarket={() => undefined} />);
+    expect(history).toContain("Completed imports");
+    expect(history).not.toContain("Fetch &amp; store");
   });
 });

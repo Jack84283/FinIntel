@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchBackendHealth } from "./api";
 import { MarketExplorer } from "./MarketExplorer";
+import { ActionHistoryPage } from "./ActionHistoryPage";
 import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
 import type { BackendHealth } from "./health";
 
@@ -28,7 +29,6 @@ const groups = [
 const allSections = [...groups[0].items, ...groups[1].items, ...groups[2].items];
 const placeholders: Partial<Record<Screen, { title: string; description: string }>> = {
   intelligence: { title: "Intelligence", description: "Proprietary models, local AI, and market trend analysis will appear here." },
-  "action-history": { title: "Action History", description: "Dedicated execution history, model runs, AI analyses and audit trails will appear here. Existing import records can be reviewed in Data Acquisition." },
   portfolio: { title: "Portfolio", description: "Holdings, performance, allocation, and risk exposure will appear here." },
   settings: { title: "Settings", description: "Providers, local models, storage, and preferences will appear here." },
 };
@@ -96,6 +96,8 @@ export default function App() {
           <MarketExplorer initialSelection={marketSelection} onOpenAcquisition={() => setScreen("data-acquisition")} />
         ) : screen === "data-acquisition" ? (
           <DataAcquisitionPage onViewMarket={openMarkets} />
+        ) : screen === "action-history" ? (
+          <ActionHistoryPage onViewMarket={openMarkets} />
         ) : screen !== "overview" ? (
           <section aria-labelledby="placeholder-title">
             <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
