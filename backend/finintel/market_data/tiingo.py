@@ -37,12 +37,16 @@ def parse_prices(data: bytes) -> list[DailyOHLCV]:
         for item in payload:
             if not isinstance(item, dict):
                 raise TypeError("Invalid Tiingo observation")
-            bars.append(DailyOHLCV(
-                session_date=date.fromisoformat(item["date"][:10]),
-                open=Decimal(str(item["open"])), high=Decimal(str(item["high"])),
-                low=Decimal(str(item["low"])), close=Decimal(str(item["close"])),
-                volume=item["volume"],
-            ))
+            bars.append(
+                DailyOHLCV(
+                    session_date=date.fromisoformat(item["date"][:10]),
+                    open=Decimal(str(item["open"])),
+                    high=Decimal(str(item["high"])),
+                    low=Decimal(str(item["low"])),
+                    close=Decimal(str(item["close"])),
+                    volume=item["volume"],
+                )
+            )
         dates = [bar.session_date for bar in bars]
         if dates != sorted(set(dates)):
             raise ValueError("Duplicate or unordered Tiingo dates")
@@ -75,22 +79,30 @@ class TiingoDailyProvider:
         url = BASE + "/" + quote(ticker, safe="") + "/prices"
         params = {"startDate": start.isoformat(), "endDate": end.isoformat()}
         if self._client is None:
-            with httpx.Client(timeout=httpx.Timeout(60.0, connect=5.0), follow_redirects=False) as client:
+            with httpx.Client(
+                timeout=httpx.Timeout(60.0, connect=5.0), follow_redirects=False
+            ) as client:
                 bars = self._request(client, url, params)
         else:
             bars = self._request(self._client, url, params)
         return HistoricalBatch(
-            provider="tiingo", symbol=ticker,
+            provider="tiingo",
+            symbol=ticker,
             source_url=url + "?startDate=" + params["startDate"] + "&endDate=" + params["endDate"],
-            provider_terms_url=TERMS, observations=bars,
+            provider_terms_url=TERMS,
+            observations=bars,
         )
 
     def _request(self, client: httpx.Client, url: str, params: dict[str, str]) -> list[DailyOHLCV]:
         try:
             response = client.get(
-                url, params=params,
-                headers={"Authorization": "Token " + self._token,
-                         "Content-Type": "application/json", "Accept": "application/json"},
+                url,
+                params=params,
+                headers={
+                    "Authorization": "Token " + self._token,
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
             )
         except httpx.RequestError as exc:
             raise ProviderUnavailable("Could not reach Tiingo") from exc
