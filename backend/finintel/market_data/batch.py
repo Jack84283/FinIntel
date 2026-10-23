@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Acquire missing local daily history, one symbol at a time"
     )
     parser.add_argument(
-        "--provider", choices=("alpha_vantage", "alpaca_sip"), default="alpha_vantage"
+        "--provider", choices=("alpha_vantage", "alpaca_sip", "tiingo"), default="alpha_vantage"
     )
     parser.add_argument("--asset-type", choices=("all", "Stock", "ETF"), default="all")
     parser.add_argument(
