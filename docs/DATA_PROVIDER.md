@@ -131,3 +131,35 @@ time-window filters** over already-imported SQLite OHLCV data. Only
 can freely change the local 1/5/10-year time range without consuming new
 provider quota. API reads are bounded at 4,000 observations, sufficient for
 ordinary ten-year daily price history; for older coverage use date filtering.
+
+## Multi-provider API acquisition (PR #6)
+
+The Markets acquisition form now provides a functional Data source selector
+for Alpha Vantage or Alpaca SIP. The frontend passes an allowlisted provider
+identifier, a ticker and a history option to the fixed localhost Python API;
+credentials never flow through the frontend or into SQLite.
+
+Alpha Vantage continues to use TIME_SERIES_DAILY with compact/full values;
+full requires a paid entitlement. Alpaca uses its documented historical
+aggregates API at https://data.alpaca.markets/v2/stocks/bars, with fixed
+timeframe=1Day, feed=sip and adjustment=raw. Alpaca request credentials are
+header-only, provided by backend environment variables
+FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY.
+
+Alpaca history request start and end dates support the selected last 5
+years, last 10 years, or since January 2016, ending yesterday UTC to avoid
+intraday freshness restrictions. The importer follows bounded page tokens
+and validates the complete sequence, type, candle ranges, volumes and
+duplicate dates before an atomic SQLite commit. Quotas, failed pages,
+malformed data and denied SIP feed access abort without partial writes.
+There is no automatic fallback to a materially different market-data feed.
+
+A single instrument may have both alpaca_sip and alpha_vantage price
+series, each with its own import provenance and raw data. The Explorer
+requests the chosen provider explicitly. Existing Alpha Vantage
+snapshot/CLI support stays backward compatible.
+
+Alpaca historical bars: https://docs.alpaca.markets/us/reference/stockbars
+Alpaca data FAQ: https://docs.alpaca.markets/us/docs/market-data-faq
+Provider coverage and licensing remain account dependent and should not
+be described as a redistribution grant.

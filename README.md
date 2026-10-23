@@ -291,3 +291,37 @@ Free Alpha Vantage keys cannot fetch five or ten years of **daily** records
 from this endpoint. A longer selected period will only display history
 already stored locally; choosing it does not bypass premium entitlements or
 fabricate missing dates.
+
+## Selectable historical price APIs (PR #6)
+
+Markets → Data acquisition → Data source now has two **working API** choices:
+**Alpaca SIP** (5 years, 10 years, available since 2016) and
+**Alpha Vantage** (compact 100 daily sessions on free; full history requires premium).
+Selecting the source, ticker and history only configures the request.
+The user must explicitly click **Fetch & store** to call an external provider.
+Both providers use the same validated SQLite ingestion pipeline and price table,
+but each symbol/provider combination has its own history and provenance.
+
+For Alpaca, set **FININTEL_ALPACA_API_KEY_ID** and
+**FININTEL_ALPACA_API_SECRET_KEY** in the local Python backend process environment.
+For Alpha Vantage, set **FININTEL_ALPHA_VANTAGE_API_KEY** instead.
+Do not enter secrets in the webview or commit them to the repository.
+After changing credentials, restart the Python backend.
+
+Alpaca uses a fixed HTTPS historical SIP endpoint, raw daily OHLCV values,
+explicitly selected 5/10-year or available-since-2016 window (ending yesterday
+UTC), and bounded pagination. Free Basic plan historical SIP access is
+delayed and account entitlements still apply. The adapter **does not**
+silently fall back to IEX when SIP access is denied.
+
+The Markets instrument selector distinguishes the same ticker from multiple
+stored providers; its selected source also controls chart/table reads.
+The SQLite series key includes provider and adjustment, so importing Alpaca
+does not overwrite Alpha Vantage OHLCV. Historical 1/5/10-year view filters
+continue to query SQLite and never make additional provider API calls.
+
+Yahoo Finance, Stooq and Twelve Data are **not yet integrated** as automatic
+API sources. Their permissions, stability and credential contracts need
+separate validation. The existing stock/ETF daily adapters do not support
+index or mutual-fund acquisition, even though those classes appear in the
+symbol directory.

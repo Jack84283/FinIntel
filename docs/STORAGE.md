@@ -134,3 +134,18 @@ date filters, not an unlimited response. The underlying daily_prices and
 ingestion_runs schema and raw decimal-text persistence are unchanged.
 Charts use weekly/monthly/quarterly aggregates only in the frontend; daily
 rows are never overwritten with aggregated observations.
+
+## Separate Alpaca and Alpha Vantage price series (PR #6)
+
+No new schema migration is necessary for provider selection. The existing
+unique series key (symbol, provider, frequency, adjustment) separates
+alpaca_sip from alpha_vantage. Each series has its own daily_prices,
+ingestion_runs, source URL and provider terms. Both have raw_unadjusted
+price adjustment; the sources are never silently merged. The read API's
+provider selector chooses which series is shown in Markets.
+
+Alpaca retrieval always uses the HTTPS historical SIP/raw endpoint and
+bounded page-token pagination; source URL metadata excludes credentials,
+and both the fetched bars and sanitized provenance are validated before
+transactional insertion. A failed or partial response leaves previously
+stored data untouched. The SQLite application schema stays at v3.
