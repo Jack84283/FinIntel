@@ -59,7 +59,7 @@ export function AcquisitionCard({
     }
   }, [status, providerTouched]);
 
-  const configured = provider === "alpaca_sip" ? Boolean(status?.alpaca_configured) : Boolean(status?.key_configured);
+  const configured = provider === "tiingo" ? Boolean(status?.tiingo_configured) : provider === "alpaca_sip" ? Boolean(status?.alpaca_configured) : Boolean(status?.key_configured);
   const blockReason = acquisitionBlockReason({
     symbol, selectedType, provider, status, statusError,
   });
@@ -103,7 +103,7 @@ export function AcquisitionCard({
           </Badge>
         </CardAction>
         <CardDescription className="col-span-2">
-          Choose Alpaca or Alpha Vantage to fetch validated daily stock/ETF prices into local SQLite.
+          Choose Tiingo, Alpaca or Alpha Vantage to fetch validated daily stock/ETF prices into local SQLite.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -122,6 +122,7 @@ export function AcquisitionCard({
               disabled={pending}
               className="h-9 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
+              <option value="tiingo">Tiingo · long-term daily history</option>
               <option value="alpaca_sip">Alpaca · SIP daily (free delayed)</option>
               <option value="alpha_vantage">Alpha Vantage · daily</option>
             </select>
@@ -139,9 +140,9 @@ export function AcquisitionCard({
           />
           <label className="grid min-w-[165px] flex-1 gap-1 text-xs text-muted-foreground">
             Download history
-            {provider === "alpaca_sip" ? (
+            {provider !== "alpha_vantage" ? (
               <select
-                aria-label="Alpaca history length"
+                aria-label="Historical data length"
                 value={alpacaPeriod}
                 onChange={(event) => setAlpacaPeriod(event.target.value as AlpacaPeriod)}
                 disabled={pending}
@@ -149,7 +150,7 @@ export function AcquisitionCard({
               >
                 <option value="5y">Last 5 years</option>
                 <option value="10y">Last 10 years</option>
-                <option value="max">Available since 2016</option>
+                <option value="max">Maximum available history</option>
               </select>
             ) : (
               <select
@@ -181,7 +182,7 @@ export function AcquisitionCard({
         </form>
         {(selectedType === "Index" || selectedType === "Mutual Fund") && (
           <p role="status" className="text-xs text-muted-foreground">
-            {selectedType} instruments are reference entries only. Select a Stock or ETF to fetch daily prices from {provider === "alpaca_sip" ? "Alpaca" : "Alpha Vantage"}.
+            {selectedType} instruments are reference entries only. Select a Stock or ETF to fetch daily prices from {provider === "tiingo" ? "Tiingo" : provider === "alpaca_sip" ? "Alpaca" : "Alpha Vantage"}.
           </p>
         )}
         {!symbol.trim() && (
@@ -191,7 +192,9 @@ export function AcquisitionCard({
         )}
         {configured && (
           <p className="text-xs text-muted-foreground">
-            {provider === "alpaca_sip"
+            {provider === "tiingo"
+              ? "Tiingo requests raw daily OHLCV over the selected period. Coverage and access depend on your account and the instrument."
+              : provider === "alpaca_sip"
               ? "Alpaca requests SIP daily OHLCV up to yesterday; free Basic accounts may access delayed historical SIP data. Access depends on your Alpaca account and feed entitlement. Each click calls the API."
               : "Alpha Vantage's free key returns only 100 sessions; full history requires premium access."}
             {" "}Raw prices are not split/dividend-adjusted. Provider quotas and licensing apply.
@@ -199,7 +202,9 @@ export function AcquisitionCard({
         )}
         {status && !configured && (
           <p role="status" className="text-xs text-muted-foreground">
-            {provider === "alpaca_sip"
+            {provider === "tiingo"
+              ? "To use Tiingo, set FININTEL_TIINGO_API_KEY in the Python backend environment."
+              : provider === "alpaca_sip"
               ? "To use Alpaca, set FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY in the Python backend environment."
               : "To use Alpha Vantage, set FININTEL_ALPHA_VANTAGE_API_KEY in the Python backend environment."}
             {" "}Restart the backend, then select Recheck provider. Credentials never enter the UI.
