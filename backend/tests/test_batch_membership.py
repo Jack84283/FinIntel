@@ -1,4 +1,5 @@
 """Offline tests for batch selection and dated index classifications."""
+
 import sqlite3
 
 from finintel.market_data.batch import pending_symbols
@@ -8,12 +9,12 @@ from finintel.storage.db import _write_connection
 
 def test_membership_snapshot_tracks_source_without_claiming_etf_constituents(tmp_path):
     path = tmp_path / "fi.sqlite3"
-    assert load_membership("SP500", "2026-10-01", "licensed-snapshot", ["AAPL", "MSFT"],
-                           db=path) == 2
+    assert (
+        load_membership("SP500", "2026-10-01", "licensed-snapshot", ["AAPL", "MSFT"], db=path) == 2
+    )
     assert memberships("AAPL", db=path)[0]["source"] == "licensed-snapshot"
     assert memberships("SPY", db=path) == []
-    assert load_membership("SP500", "2026-10-01", "revised-snapshot", ["MSFT"],
-                           db=path) == 1
+    assert load_membership("SP500", "2026-10-01", "revised-snapshot", ["MSFT"], db=path) == 1
     assert memberships("AAPL", db=path) == []
 
 
