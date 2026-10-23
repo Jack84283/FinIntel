@@ -9,7 +9,11 @@ MODULE="finintel.market_data.backfill_worker"
 PID_FILE="$ROOT/data/backfill.pid"
 LOG_FILE="$ROOT/data/backfill.log"
 PROVIDER="${FININTEL_BACKFILL_PROVIDER:-alpaca_sip}"
-STATE_FILE="$ROOT/data/finintel.${PROVIDER}.backfill.json"
+if [[ "$PROVIDER" == "alpaca_sip" ]]; then
+  STATE_FILE="$ROOT/data/finintel.backfill.json"  # Preserve existing Alpaca quota checkpoint.
+else
+  STATE_FILE="$ROOT/data/finintel.${PROVIDER}.backfill.json"
+fi
 mkdir -p "$ROOT/data"
 
 is_running() {
