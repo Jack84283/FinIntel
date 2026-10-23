@@ -84,6 +84,7 @@ def test_upgrading_populated_v1_preserves_imported_prices(tmp_path, monkeypatch)
         before_series = conn.execute("SELECT * FROM series").fetchall()
         conn.execute("DROP TABLE symbol_catalog")
         conn.execute("DROP TABLE action_events")
+        conn.execute("DROP TABLE index_memberships")
         conn.execute("PRAGMA user_version = 1")
     assert search_symbols(db=db)["source"] == "starter"
     assert replace_symbol_catalog(parse_listing_csv(LISTING), db=db)["total"] == 12
