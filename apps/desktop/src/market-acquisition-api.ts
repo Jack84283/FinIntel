@@ -3,6 +3,8 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 export type OutputSize = "compact" | "full";
+export type AcquisitionProvider = "alpha_vantage" | "alpaca_sip";
+export type AlpacaPeriod = "5y" | "10y" | "max";
 
 export interface AcquisitionStatus {
   provider: "alpha_vantage";
@@ -10,6 +12,9 @@ export interface AcquisitionStatus {
   requires_explicit_action: true;
   api_key_environment_variable: string;
   full_requires_premium: true;
+  alpaca_configured: boolean;
+  alpaca_key_environment_variable: string;
+  alpaca_secret_environment_variable: string;
 }
 
 export interface AcquisitionResult {
@@ -58,7 +63,8 @@ export function parseAcquisitionStatus(value: unknown): AcquisitionStatus {
     typeof item.key_configured !== "boolean" ||
     item.requires_explicit_action !== true ||
     item.api_key_environment_variable !== "FININTEL_ALPHA_VANTAGE_API_KEY" ||
-    item.full_requires_premium !== true
+    item.full_requires_premium !== true ||
+    (item.alpaca_configured !== undefined && typeof item.alpaca_configured !== "boolean")
   ) {
     throw new Error("Invalid acquisition status response.");
   }
@@ -68,6 +74,9 @@ export function parseAcquisitionStatus(value: unknown): AcquisitionStatus {
     requires_explicit_action: true,
     api_key_environment_variable: "FININTEL_ALPHA_VANTAGE_API_KEY",
     full_requires_premium: true,
+    alpaca_configured: item.alpaca_configured === true,
+    alpaca_key_environment_variable: "FININTEL_ALPACA_API_KEY_ID",
+    alpaca_secret_environment_variable: "FININTEL_ALPACA_API_SECRET_KEY",
   };
 }
 
@@ -119,7 +128,12 @@ export async function fetchAcquisitionStatus(): Promise<AcquisitionStatus> {
   return parseAcquisitionStatus(await response.json());
 }
 
-export async function acquireMarketDaily(symbol: string, outputsize: OutputSize): Promise<AcquisitionResult> {
+export async function acquireMarketDaily(
+  symbol: string,
+  outputsize: OutputSize,
+  provider: AcquisitionProvider = "alpha_vantage",
+  period: AlpacaPeriod = "10y",
+): Promise<AcquisitionResult> {
   const ticker = symbol.trim().toUpperCase();
   if (!/^[A-Z0-9][A-Z0-9.-]{0,14}$/.test(ticker)) {
     throw new Error("Enter a valid equity ticker (for example AAPL).");
@@ -127,20 +141,28 @@ export async function acquireMarketDaily(symbol: string, outputsize: OutputSize)
   if (outputsize !== "compact" && outputsize !== "full") {
     throw new Error("Select a valid history size.");
   }
+  if (provider !== "alpha_vantage" && provider !== "alpaca_sip") {
+    throw new Error("Choose a supported market-data provider.");
+  }
+  if (!["5y", "10y", "max"].includes(period)) {
+    throw new Error("Choose a valid Alpaca history range.");
+  }
   let result: unknown;
   if (isTauri()) {
-    result = await invoke<unknown>("market_acquire_daily", { symbol: ticker, outputsize });
+    result = await invoke<unknown>("market_acquire_daily", { symbol: ticker, outputsize, provider, period });
   } else {
     const response = await fetch("/api/v1/market-data/acquisition", {
       method: "POST",
       cache: "no-store",
       headers: { "Content-Type": "application/json", "X-FinIntel-Client": "local-workstation" },
-      body: JSON.stringify({ symbol: ticker, outputsize }),
+      body: JSON.stringify({ symbol: ticker, outputsize, provider, period }),
     });
     if (!response.ok) throw new Error("HTTP " + response.status + ": " + await errorDetail(response));
     result = await response.json();
   }
   const parsed = parseAcquisitionResult(result);
-  if (parsed.symbol !== ticker) throw new Error("Provider returned a mismatched ticker.");
+  if (parsed.symbol !== ticker || parsed.provider !== provider) {
+    throw new Error("Provider returned a mismatched instrument or source.");
+  }
   return parsed;
 }

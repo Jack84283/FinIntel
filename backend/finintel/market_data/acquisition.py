@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 from finintel.market_data.__main__ import write_snapshot
+from finintel.market_data.alpaca import AlpacaDailyProvider, alpaca_configured
 from finintel.market_data.provider import (
     SYMBOL_PATTERN,
     AlphaVantageDailyProvider,
@@ -23,19 +24,33 @@ def key_configured() -> bool:
     return bool(os.environ.get("FININTEL_ALPHA_VANTAGE_API_KEY", "").strip())
 
 
-def acquire_and_store(symbol: str, *, outputsize: str = "compact") -> dict[str, object]:
+def acquire_and_store(
+    symbol: str,
+    *,
+    outputsize: str = "compact",
+    provider: str = "alpha_vantage",
+    period: str = "10y",
+) -> dict[str, object]:
     """Fetch one symbol on user request, never on page load or a timer."""
     ticker = symbol.strip().upper()
     if not SYMBOL_PATTERN.fullmatch(ticker):
         raise ProviderError("Enter a valid equity ticker symbol")
     if outputsize not in ("compact", "full"):
         raise ProviderError("Output size must be compact or full")
-    if not key_configured():
-        raise ProviderError(
-            "Configure FININTEL_ALPHA_VANTAGE_API_KEY in the backend environment and restart it"
-        )
-
-    batch = AlphaVantageDailyProvider().fetch_daily(ticker, outputsize=outputsize)
+    if provider == "alpha_vantage":
+        if not key_configured():
+            raise ProviderError("Configure FININTEL_ALPHA_VANTAGE_API_KEY and restart the backend")
+        batch = AlphaVantageDailyProvider().fetch_daily(ticker, outputsize=outputsize)
+    elif provider == "alpaca_sip":
+        if period not in ("5y", "10y", "max"):
+            raise ProviderError("Invalid Alpaca historical range")
+        if not alpaca_configured():
+            raise ProviderError(
+                "Configure FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY"
+            )
+        batch = AlpacaDailyProvider().fetch_daily(ticker, period=period)
+    else:
+        raise ProviderError("Unsupported price history source")
     # The provider returns a fully validated HistoricalBatch or raises an error.
     with tempfile.TemporaryDirectory(prefix="finintel-acquisition-") as temporary:
         snapshot = Path(temporary) / (ticker + ".json")

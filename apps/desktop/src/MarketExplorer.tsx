@@ -22,6 +22,7 @@ export function MarketExplorer() {
   const [indexState, setIndexState] = useState<LoadState>("loading");
   const [indexError, setIndexError] = useState("");
   const [symbol, setSymbol] = useState("");
+  const [priceProvider, setPriceProvider] = useState<"alpha_vantage" | "alpaca_sip">("alpha_vantage");
   const [draftStart, setDraftStart] = useState("");
   const [draftEnd, setDraftEnd] = useState("");
   const [range, setRange] = useState({ start: "", end: "" });
@@ -45,6 +46,11 @@ export function MarketExplorer() {
         setInstruments(catalog);
         setImports(history);
         setSymbol((previous) => catalog.some((item) => item.symbol === previous) ? previous : (catalog[0]?.symbol ?? ""));
+        setPriceProvider((previous) =>
+          catalog.some((item) => item.symbol === symbol && item.provider === previous)
+            ? previous
+            : (catalog.find((item) => item.symbol === symbol)?.provider ?? catalog[0]?.provider ?? "alpha_vantage") as "alpha_vantage" | "alpaca_sip"
+        );
         setIndexState("ready");
         setIndexError("");
       })
@@ -64,6 +70,7 @@ export function MarketExplorer() {
     setPage(0);
     fetchMarketDaily({
       symbol,
+      provider: priceProvider,
       startDate: range.start || undefined,
       endDate: range.end || undefined,
       limit: period === "recent" ? 100 : 4000,
@@ -80,13 +87,13 @@ export function MarketExplorer() {
         setSeriesError(error instanceof Error ? error.message : String(error));
       });
     return () => { ignore = true; };
-  }, [symbol, range, reload, indexState, period]);
+  }, [symbol, priceProvider, range, reload, indexState, period]);
 
   const bars = series?.observations ?? [];
   const sorted = useMemo(() => sortableBars(bars, sortColumn, descending), [bars, sortColumn, descending]);
   const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
   const visibleRows = sorted.slice(page * pageSize, (page + 1) * pageSize);
-  const currentInstrument = instruments.find((item) => item.symbol === symbol);
+  const currentInstrument = instruments.find((item) => item.symbol === symbol && item.provider === priceProvider);
   const last = bars[bars.length - 1];
   const first = bars[0];
   const prior = bars.length > 1 ? bars[bars.length - 2] : null;
@@ -144,8 +151,9 @@ export function MarketExplorer() {
         </div>
       </header>
 
-      <AcquisitionCard selectedSymbol={symbol} onAcquired={(ticker) => {
+      <AcquisitionCard selectedSymbol={symbol} onAcquired={(ticker, provider) => {
         setSymbol(ticker);
+        setPriceProvider(provider);
         setReload((value) => value + 1);
       }} />
 
@@ -184,8 +192,21 @@ export function MarketExplorer() {
               <form onSubmit={applyRange} className="flex flex-wrap items-end gap-3">
                 <label className="grid min-w-[155px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
                   Instrument
-                  <select value={symbol} onChange={(e) => setSymbol(e.target.value)} className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    {instruments.map((item) => <option key={item.symbol + item.provider} value={item.symbol}>{item.symbol} · {formatInteger(item.sessions)} sessions</option>)}
+                  <select
+                    value={symbol + "|" + priceProvider}
+                    onChange={(event) => {
+                      const [ticker, selected] = event.target.value.split("|");
+                      setSymbol(ticker);
+                      setPriceProvider(selected as "alpha_vantage" | "alpaca_sip");
+                    }}
+                    aria-label="Stored instrument and historical data source"
+                    className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {instruments.map((item) => (
+                      <option key={item.symbol + item.provider} value={item.symbol + "|" + item.provider}>
+                        {item.symbol} · {item.provider === "alpaca_sip" ? "Alpaca SIP" : "Alpha Vantage"} · {formatInteger(item.sessions)} sessions
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label className="grid min-w-[150px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
@@ -233,7 +254,7 @@ export function MarketExplorer() {
           {seriesState === "ready" && series && (
             <>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                <Metric label="Instrument" value={series.symbol} note={currentInstrument ? formatInteger(currentInstrument.sessions) + " stored sessions" : series.provider} />
+                <Metric label="Instrument" value={series.symbol} note={currentInstrument ? formatInteger(currentInstrument.sessions) + " stored sessions · " + priceProvider : series.provider} />
                 <Metric label="Last close" value={last ? price(last.close) : "—"} note={last?.session_date ?? "No trading sessions"} />
                 <Metric label="Daily change" value={closeChange === null ? "—" : (closeChange >= 0 ? "+" : "") + price(String(closeChange))} note="Compared with prior loaded session" />
                 <Metric label="Loaded observations" value={formatInteger(bars.length)} note={series.has_more ? "Bounded result · more stored" : "Available stored data"} />

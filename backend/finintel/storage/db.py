@@ -228,6 +228,39 @@ def _safe_source(batch: HistoricalBatch) -> None:
 
     url = urlsplit(batch.source_url)
     params = parse_qs(url.query)
+    if batch.provider == "alpaca_sip":
+        if (
+            url.scheme != "https"
+            or url.hostname != "data.alpaca.markets"
+            or url.port is not None
+            or url.path != "/v2/stocks/bars"
+            or url.username
+            or url.password
+            or set(params) != {
+                "symbols", "timeframe", "start", "end", "feed", "adjustment", "limit"
+            }
+            or params.get("symbols") != [batch.symbol]
+            or params.get("timeframe") != ["1Day"]
+            or params.get("feed") != ["sip"]
+            or params.get("adjustment") != ["raw"]
+            or params.get("limit") != ["10000"]
+        ):
+            raise StorageError("Alpaca source metadata failed sanitization")
+        from datetime import date as parsed_date
+
+        try:
+            first = parsed_date.fromisoformat(params["start"][0])
+            last = parsed_date.fromisoformat(params["end"][0])
+        except (ValueError, IndexError, KeyError) as exc:
+            raise StorageError("Invalid Alpaca date range in source metadata") from exc
+        if first > last:
+            raise StorageError("Invalid Alpaca source date ordering")
+        terms = urlsplit(batch.provider_terms_url)
+        if terms.scheme != "https" or terms.hostname != "alpaca.markets":
+            raise StorageError("Alpaca provider terms metadata is unapproved")
+        return
+    if batch.provider != "alpha_vantage":
+        raise StorageError("Unknown market-data provider")
     if (
         url.scheme != "https"
         or url.hostname != "www.alphavantage.co"
@@ -404,10 +437,13 @@ def read_daily(
     limit: int = 250,
     db: Path | None = None,
     latest: bool = False,
+    provider: str = "alpha_vantage",
 ) -> dict[str, object] | None:
     """Bounded, chronological read of stored daily prices; no live provider calls."""
     if limit < 1 or limit > 4000:
         raise ValueError("Daily price limit must be 1–4000")
+    if provider not in ("alpha_vantage", "alpaca_sip"):
+        raise ValueError("Invalid historical data provider")
     path = db if db is not None else database_path()
     conn = _read_connection(path)
     if conn is None:
@@ -415,9 +451,9 @@ def read_daily(
     try:
         series = conn.execute(
             "SELECT id, symbol, provider, frequency, adjustment, data_kind "
-            "FROM series WHERE symbol=? AND provider='alpha_vantage' "
+            "FROM series WHERE symbol=? AND provider=? "
             "AND frequency='1d' AND adjustment='raw_unadjusted'",
-            (symbol.upper(),),
+            (symbol.upper(), provider),
         ).fetchone()
         if series is None:
             return None

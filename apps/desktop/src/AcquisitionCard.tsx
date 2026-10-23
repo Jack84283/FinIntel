@@ -3,7 +3,7 @@ import { ArrowDownToLine, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { acquireMarketDaily, fetchAcquisitionStatus, type AcquisitionResult, type AcquisitionStatus, type OutputSize } from "./market-acquisition-api";
+import { acquireMarketDaily, fetchAcquisitionStatus, type AcquisitionResult, type AcquisitionStatus, type OutputSize, type AcquisitionProvider, type AlpacaPeriod } from "./market-acquisition-api";
 import { SymbolSelector } from "./SymbolSelector";
 import type { AssetType } from "./symbol-catalog-api";
 
@@ -12,11 +12,13 @@ export function AcquisitionCard({
   onAcquired,
 }: {
   selectedSymbol: string;
-  onAcquired: (symbol: string) => void;
+  onAcquired: (symbol: string, provider: AcquisitionProvider) => void;
 }) {
   const [symbol, setSymbol] = useState(selectedSymbol);
   const [selectedType, setSelectedType] = useState<AssetType | null>(null);
   const [outputsize, setOutputsize] = useState<OutputSize>("compact");
+  const [provider, setProvider] = useState<AcquisitionProvider>("alpaca_sip");
+  const [alpacaPeriod, setAlpacaPeriod] = useState<AlpacaPeriod>("10y");
   const [status, setStatus] = useState<AcquisitionStatus | null>(null);
   const [statusError, setStatusError] = useState("");
   const [pending, setPending] = useState(false);
@@ -47,6 +49,8 @@ export function AcquisitionCard({
     return () => { cancelled = true; };
   }, [statusTick]);
 
+  const configured = provider === "alpaca_sip" ? Boolean(status?.alpaca_configured) : Boolean(status?.key_configured);
+
   const acquire = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (pending || selectedType === "Index" || selectedType === "Mutual Fund") return;
@@ -54,9 +58,9 @@ export function AcquisitionCard({
     setError("");
     setPending(true);
     try {
-      const imported = await acquireMarketDaily(symbol, outputsize);
+      const imported = await acquireMarketDaily(symbol, outputsize, provider, alpacaPeriod);
       setResult(imported);
-      onAcquired(imported.symbol);
+      onAcquired(imported.symbol, provider);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -69,8 +73,8 @@ export function AcquisitionCard({
       <CardHeader>
         <CardTitle><span id="acquisition-title" className="flex items-center gap-2"><ArrowDownToLine aria-hidden="true" className="size-4" /> Data acquisition</span></CardTitle>
         <CardAction>
-          <Badge variant={status?.key_configured ? "success" : "outline"}>
-            {status === null ? "Checking provider" : status.key_configured ? "Provider configured" : "API key needed"}
+          <Badge variant={configured ? "success" : "outline"}>
+            {status === null ? "Checking provider" : configured ? "Provider configured" : "API key needed"}
           </Badge>
         </CardAction>
         <CardDescription className="col-span-2">
@@ -79,6 +83,19 @@ export function AcquisitionCard({
       </CardHeader>
       <CardContent className="space-y-2">
         <form onSubmit={(event) => void acquire(event)} className="flex flex-wrap items-end gap-2">
+          <label className="grid min-w-[180px] flex-1 gap-1 text-xs text-muted-foreground">
+            Data source
+            <select
+              aria-label="Historical market data provider"
+              value={provider}
+              onChange={(event) => setProvider(event.target.value as AcquisitionProvider)}
+              disabled={pending}
+              className="h-9 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="alpaca_sip">Alpaca · SIP daily (free delayed)</option>
+              <option value="alpha_vantage">Alpha Vantage · daily</option>
+            </select>
+          </label>
           <SymbolSelector
             value={symbol}
             onChange={(ticker, type) => { setSymbol(ticker); setSelectedType(type); }}
@@ -86,18 +103,33 @@ export function AcquisitionCard({
             disabled={pending}
           />
           <label className="grid min-w-[165px] flex-1 gap-1 text-xs text-muted-foreground">
-            History
-            <select
-              aria-label="Acquisition history size"
-              value={outputsize}
-              onChange={(event) => setOutputsize(event.target.value as OutputSize)}
-              className="h-9 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="compact">Latest 100 sessions (free)</option>
-              <option value="full">Full 25+ years, if available (premium)</option>
-            </select>
+            Download history
+            {provider === "alpaca_sip" ? (
+              <select
+                aria-label="Alpaca history length"
+                value={alpacaPeriod}
+                onChange={(event) => setAlpacaPeriod(event.target.value as AlpacaPeriod)}
+                disabled={pending}
+                className="h-9 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="5y">Last 5 years</option>
+                <option value="10y">Last 10 years</option>
+                <option value="max">Available since 2016</option>
+              </select>
+            ) : (
+              <select
+                aria-label="Alpha Vantage history size"
+                value={outputsize}
+                onChange={(event) => setOutputsize(event.target.value as OutputSize)}
+                disabled={pending}
+                className="h-9 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="compact">Latest 100 sessions (free)</option>
+                <option value="full">Full history (premium)</option>
+              </select>
+            )}
           </label>
-          <Button type="submit" disabled={pending || !status?.key_configured || !symbol.trim() || selectedType === "Index" || selectedType === "Mutual Fund"} size="sm">
+          <Button type="submit" disabled={pending || !configured || !symbol.trim() || selectedType === "Index" || selectedType === "Mutual Fund"} size="sm">
             {pending ? <RefreshCw aria-hidden="true" className="animate-spin" /> : <ArrowDownToLine aria-hidden="true" />}
             {pending ? "Fetching…" : "Fetch & store"}
           </Button>
@@ -108,12 +140,20 @@ export function AcquisitionCard({
             {selectedType} instruments are saved in the local catalog, but this Alpha Vantage stock/ETF daily-price integration cannot fetch their history yet.
           </p>
         )}
-        {status?.key_configured && (
-          <p className="text-xs text-muted-foreground">Alpha Vantage offers 100 daily records on free keys or full history on premium keys. Choose 5 or 10 years in the Explorer after full data has been stored. One click may retry transient errors; provider quotas and license apply.</p>
+        {configured && (
+          <p className="text-xs text-muted-foreground">
+            {provider === "alpaca_sip"
+              ? "Alpaca requests SIP daily OHLCV up to yesterday; free Basic accounts may access delayed historical SIP data. Access depends on your Alpaca account and feed entitlement. Each click calls the API."
+              : "Alpha Vantage's free key returns only 100 sessions; full history requires premium access."}
+            {" "}Raw prices are not split/dividend-adjusted. Provider quotas and licensing apply.
+          </p>
         )}
-        {status && !status.key_configured && (
+        {status && !configured && (
           <p role="status" className="text-xs text-muted-foreground">
-            Set <code>FININTEL_ALPHA_VANTAGE_API_KEY</code> in the Python backend environment, restart the backend, then reload the app. Your API key is never entered here.
+            {provider === "alpaca_sip"
+              ? "Configure FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY in the Python backend environment."
+              : "Configure FININTEL_ALPHA_VANTAGE_API_KEY in the Python backend environment."}
+            {" "}Restart the backend and reload this page. Credentials never enter the UI.
           </p>
         )}
         {statusError && <p role="alert" className="text-xs text-destructive">{statusError}</p>}

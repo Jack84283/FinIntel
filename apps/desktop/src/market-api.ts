@@ -23,6 +23,7 @@ export async function fetchMarketInstruments(): Promise<MarketInstrument[]> {
 
 export interface DailyQuery {
   symbol: string;
+  provider?: "alpha_vantage" | "alpaca_sip";
   startDate?: string;
   endDate?: string;
   limit?: number;
@@ -39,7 +40,11 @@ export async function fetchMarketDaily(query: DailyQuery): Promise<DailySeries> 
   if (query.startDate && query.endDate && query.startDate > query.endDate) {
     throw new Error("Start date must not exceed end date.");
   }
-  const params = new URLSearchParams({ limit: String(limit), latest: "true" });
+  const provider = query.provider ?? "alpha_vantage";
+  if (provider !== "alpha_vantage" && provider !== "alpaca_sip") {
+    throw new Error("Unsupported historical data provider.");
+  }
+  const params = new URLSearchParams({ limit: String(limit), latest: "true", provider });
   if (query.startDate) params.set("start_date", query.startDate);
   if (query.endDate) params.set("end_date", query.endDate);
   const payload = await getLocal(
@@ -47,6 +52,7 @@ export async function fetchMarketDaily(query: DailyQuery): Promise<DailySeries> 
     "market_daily",
     {
       symbol: query.symbol.toUpperCase(),
+      provider,
       startDate: query.startDate ?? null,
       endDate: query.endDate ?? null,
       limit,
@@ -54,7 +60,7 @@ export async function fetchMarketDaily(query: DailyQuery): Promise<DailySeries> 
     },
   );
   const parsed = parseDaily(payload);
-  if (parsed.symbol !== query.symbol.toUpperCase()) {
+  if (parsed.symbol !== query.symbol.toUpperCase() || parsed.provider !== provider) {
     throw new Error("Backend returned prices for the wrong instrument.");
   }
   return parsed;

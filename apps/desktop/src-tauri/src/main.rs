@@ -40,6 +40,8 @@ async fn market_acquisition_status() -> Result<serde_json::Value, String> {
 async fn market_acquire_daily(
     symbol: String,
     outputsize: String,
+    provider: String,
+    period: String,
 ) -> Result<serde_json::Value, String> {
     if !valid_symbol(&symbol) {
         return Err("Invalid ticker symbol.".to_string());
@@ -47,9 +49,15 @@ async fn market_acquire_daily(
     if outputsize != "compact" && outputsize != "full" {
         return Err("Output size must be compact or full.".to_string());
     }
+    if provider != "alpha_vantage" && provider != "alpaca_sip" {
+        return Err("Unsupported acquisition provider.".to_string());
+    }
+    if !matches!(period.as_str(), "5y" | "10y" | "max") {
+        return Err("Invalid Alpaca history period.".to_string());
+    }
 
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(45))
+        .timeout(Duration::from_secs(90))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Could not initialize the local HTTP client.".to_string())?;
@@ -58,7 +66,9 @@ async fn market_acquire_daily(
         .header("x-finintel-client", "local-workstation")
         .json(&serde_json::json!({
             "symbol": symbol.to_ascii_uppercase(),
-            "outputsize": outputsize
+            "outputsize": outputsize,
+            "provider": provider,
+            "period": period
         }))
         .send()
         .await
@@ -161,9 +171,13 @@ async fn market_daily(
     end_date: Option<String>,
     limit: u16,
     latest: bool,
+    provider: String,
 ) -> Result<serde_json::Value, String> {
     if !valid_symbol(&symbol) {
         return Err("Invalid ticker symbol.".to_string());
+    }
+    if provider != "alpha_vantage" && provider != "alpaca_sip" {
+        return Err("Unsupported price-history provider.".to_string());
     }
     if limit == 0 || limit > 4000 {
         return Err("Daily history limit must be 1–4000.".to_string());
@@ -178,7 +192,11 @@ async fn market_daily(
             return Err("Start date must not exceed end date.".to_string());
         }
     }
-    let mut params = vec![("limit", limit.to_string()), ("latest", latest.to_string())];
+    let mut params = vec![
+        ("limit", limit.to_string()),
+        ("latest", latest.to_string()),
+        ("provider", provider),
+    ];
     if let Some(start) = start_date {
         params.push(("start_date", start));
     }

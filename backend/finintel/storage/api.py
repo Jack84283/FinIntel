@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from finintel.market_data.acquisition import acquire_and_store, key_configured
+from finintel.market_data.alpaca import alpaca_configured
 from finintel.market_data.provider import (
     SYMBOL_PATTERN,
     ProviderError,
@@ -116,12 +117,14 @@ def get_daily(
     end_date: date | None = None,
     limit: int = Query(default=250, ge=1, le=4000),
     latest: bool = False,
+    provider: Literal["alpha_vantage", "alpaca_sip"] = "alpha_vantage",
 ) -> dict[str, object]:
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(status_code=422, detail="start_date must not exceed end_date")
     try:
         result = read_daily(
-            symbol.upper(), start=start_date, end=end_date, limit=limit, latest=latest
+            symbol.upper(), start=start_date, end=end_date, limit=limit, latest=latest,
+            provider=provider
         )
     except StorageError as exc:
         raise _unavailable(exc) from exc
@@ -182,6 +185,8 @@ class AcquisitionRequest(BaseModel):
 
     symbol: str = Field(min_length=1, max_length=15)
     outputsize: Literal["compact", "full"] = "compact"
+    provider: Literal["alpha_vantage", "alpaca_sip"] = "alpha_vantage"
+    period: Literal["5y", "10y", "max"] = "10y"
 
     @field_validator("symbol")
     @classmethod
@@ -200,6 +205,9 @@ class AcquisitionStatus(BaseModel):
     requires_explicit_action: bool = True
     api_key_environment_variable: str = "FININTEL_ALPHA_VANTAGE_API_KEY"
     full_requires_premium: bool = True
+    alpaca_configured: bool = False
+    alpaca_key_environment_variable: str = "FININTEL_ALPACA_API_KEY_ID"
+    alpaca_secret_environment_variable: str = "FININTEL_ALPACA_API_SECRET_KEY"
 
 
 class AcquisitionResult(BaseModel):
@@ -224,7 +232,9 @@ class AcquisitionResult(BaseModel):
 
 @router.get("/acquisition/status", response_model=AcquisitionStatus)
 def acquisition_status() -> AcquisitionStatus:
-    return AcquisitionStatus(key_configured=key_configured())
+    return AcquisitionStatus(
+        key_configured=key_configured(), alpaca_configured=alpaca_configured()
+    )
 
 
 @router.post("/acquisition", response_model=AcquisitionResult)
@@ -237,16 +247,26 @@ def acquire_market_data(payload: AcquisitionRequest, request: Request) -> dict[s
             status_code=422,
             detail=f"{asset_type} history is not supported by the current stock/ETF price provider",
         )
-    if not key_configured():
+    if payload.provider == "alpha_vantage" and not key_configured():
         raise HTTPException(
             status_code=503,
-            detail="Configure FININTEL_ALPHA_VANTAGE_API_KEY for the Python backend and restart it",
+            detail="Configure FININTEL_ALPHA_VANTAGE_API_KEY and restart the backend",
+        )
+    if payload.provider == "alpaca_sip" and not alpaca_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Configure FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY",
         )
     if not _ACQUIRE_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="An acquisition is already in progress")
     try:
         try:
-            return acquire_and_store(payload.symbol, outputsize=payload.outputsize)
+            return acquire_and_store(
+                payload.symbol,
+                outputsize=payload.outputsize,
+                provider=payload.provider,
+                period=payload.period,
+            )
         except ProviderRateLimited as exc:
             raise HTTPException(status_code=429, detail=str(exc)) from exc
         except ProviderUnavailable as exc:
