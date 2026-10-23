@@ -3,6 +3,7 @@
 The supplied CSV must be independently licensed/authorized for private use.
 No constituents are guessed from the ticker list or market prices.
 """
+
 import argparse
 import csv
 from datetime import date
@@ -12,8 +13,9 @@ from finintel.market_data.provider import SYMBOL_PATTERN
 from finintel.storage.db import _read_connection, _write_connection, database_path
 
 
-def load_membership(index_code: str, as_of: str, source: str, symbols: list[str],
-                    *, db: Path | None = None) -> int:
+def load_membership(
+    index_code: str, as_of: str, source: str, symbols: list[str], *, db: Path | None = None
+) -> int:
     if index_code not in ("SP500", "DJIA"):
         raise ValueError("Unknown index")
     date.fromisoformat(as_of)
@@ -25,8 +27,9 @@ def load_membership(index_code: str, as_of: str, source: str, symbols: list[str]
     conn = _write_connection(db if db is not None else database_path())
     try:
         with conn:
-            conn.execute("DELETE FROM index_memberships WHERE index_code=? AND as_of=?",
-                         (index_code, as_of))
+            conn.execute(
+                "DELETE FROM index_memberships WHERE index_code=? AND as_of=?", (index_code, as_of)
+            )
             conn.executemany(
                 "INSERT INTO index_memberships(index_code,symbol,as_of,source) VALUES (?,?,?,?)",
                 ((index_code, symbol, as_of, source) for symbol in sorted(tickers)),
