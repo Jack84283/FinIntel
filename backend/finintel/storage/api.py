@@ -1,8 +1,8 @@
 """Local historical market data reads and explicitly authorized acquisition."""
 
 import threading
-from time import monotonic
 from datetime import date
+from time import monotonic
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
