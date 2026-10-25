@@ -43,3 +43,24 @@ def test_diagnostics_coverage_and_provider_comparison(tmp_path):
     assert report["cross_provider_comparisons"][0]["close_divergence_over_1pct"] == 1
     assert report["weekday_gap_candidates"] == 4
     assert len(report["corporate_action_jump_candidates"]) == 1
+
+
+def test_nyse_holiday_is_not_missing_session(tmp_path):
+    db = tmp_path / "holiday.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE series (id INTEGER PRIMARY KEY, symbol TEXT, provider TEXT, adjustment TEXT);
+        CREATE TABLE daily_prices (
+            series_id INTEGER, session_date TEXT, close TEXT,
+            PRIMARY KEY (series_id, session_date)
+        );
+        INSERT INTO series VALUES (1, 'SPY', 'alpaca_sip', 'raw');
+        INSERT INTO daily_prices VALUES (1, '2026-11-25', '100');
+        INSERT INTO daily_prices VALUES (1, '2026-11-27', '101');
+        """
+    )
+    conn.close()
+    report = diagnostics(db)
+    assert report["xnys_internal_gap_candidates"] == 0
+    assert report["weekday_gap_candidates"] == 1
