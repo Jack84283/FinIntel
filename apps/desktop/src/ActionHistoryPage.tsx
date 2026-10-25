@@ -40,7 +40,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
   ), [items, provider, query]);
 
   return (
-    <section className="space-y-4" aria-labelledby="action-history-title">
+    <section className="space-y-2" aria-labelledby="action-history-title">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-2">
         <div>
           <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Data & Operations</p>
@@ -52,7 +52,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
         </Button>
       </header>
       <Card>
-        <CardHeader className="grid-cols-1 gap-y-2">
+        <CardHeader className="flex flex-col items-start gap-2">
           <CardTitle>Completed imports</CardTitle>
           <CardDescription>Most recent 100 persisted successful imports (including CLI). Failed requests, model executions, and AI actions are not yet captured by the current history store.</CardDescription>
         </CardHeader>
