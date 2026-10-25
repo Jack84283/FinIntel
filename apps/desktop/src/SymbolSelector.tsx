@@ -61,19 +61,19 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
 
   const selectedInResults = results.some((entry) => entry.symbol === value);
   return (
-    <div className="min-w-[225px] flex-[2] space-y-2">
+    <div className="min-w-0 w-full space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">Stock or ETF (supported by the chosen API)</span>
         <span className="text-[11px] text-muted-foreground">
           {catalogSource === "starter" ? "Starter directory" : "Provider directory"} · {catalogTotal.toLocaleString()} symbols
         </span>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_130px]">
         <input
           aria-label="Search instruments by symbol or name"
           type="search"
           placeholder="Search stocks and ETFs"
-          className="h-9 min-w-[140px] flex-1 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="h-10 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           value={query}
           maxLength={80}
           onChange={(event) => setQuery(event.target.value)}
@@ -83,7 +83,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
           aria-label="Filter by asset type"
           value={kind}
           onChange={(event) => setKind(event.target.value as AssetFilter)}
-          className="h-9 rounded-md border border-input bg-muted px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="h-10 w-full min-w-0 rounded-md border border-input bg-muted px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           disabled={disabled || syncing}
         >
           <option value="All">All</option>
