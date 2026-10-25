@@ -34,6 +34,27 @@ def request(endpoint: str, payload: dict | None = None) -> dict:
         raise RuntimeError("Cannot reach the local backend at 127.0.0.1:8765") from exc
 
 
+def start_or_join() -> str:
+    """Start a scan, or join an already-running compatible scan on HTTP 409."""
+    try:
+        job = request("/run", {"checks": CHECKS})
+    except RuntimeError as exc:
+        if not str(exc).startswith("Backend HTTP 409:"):
+            raise
+        job = request("/status")
+        if job.get("status") not in ("queued", "running"):
+            raise RuntimeError("Validation conflict, but no active job is available.") from exc
+        if set(job.get("checks", [])) != set(CHECKS):
+            raise RuntimeError(
+                "Another validation is running with different checks; cannot reuse its results."
+            ) from exc
+        print("Joining already-running five-check validation", flush=True)
+    job_id = job.get("id")
+    if not job_id:
+        raise RuntimeError("Validation backend did not return a job identifier.")
+    return job_id
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("data/acceptance-report.json"))
@@ -43,10 +64,12 @@ def main() -> int:
     if args.timeout < 1:
         parser.error("--timeout must be positive")
     print("Starting read-only local validation of all five checks", flush=True)
-    request("/run", {"checks": CHECKS})
+    job_id = start_or_join()
     deadline = time.monotonic() + args.timeout
     while True:
         status = request("/status")
+        if status.get("id") != job_id:
+            raise RuntimeError("Validation job changed while waiting; refusing unrelated results.")
         if status["status"] in ("completed", "failed"):
             break
         if time.monotonic() >= deadline:
