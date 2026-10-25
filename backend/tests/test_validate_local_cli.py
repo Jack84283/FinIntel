@@ -76,7 +76,9 @@ def test_409_joins_compatible_active_validation(monkeypatch, tmp_path):
     def mock_request(endpoint, payload=None):
         calls.append(endpoint)
         if endpoint == "/run":
-            raise RuntimeError('Backend HTTP 409: {"detail":"A validation job is already running."}')
+            raise RuntimeError(
+                'Backend HTTP 409: {"detail":"A validation job is already running."}'
+            )
         if endpoint == "/status":
             if calls.count("/status") == 1:
                 return {"id": "existing-job", "status": "running", "checks": module.CHECKS}
@@ -84,7 +86,12 @@ def test_409_joins_compatible_active_validation(monkeypatch, tmp_path):
                 "id": "existing-job",
                 "status": "completed",
                 "checks": module.CHECKS,
-                "results": {"integrity": {"issues": {}}, "coverage": {}, "provider": {}, "performance": {}},
+                "results": {
+                    "integrity": {"issues": {}},
+                    "coverage": {},
+                    "provider": {},
+                    "performance": {},
+                },
             }
         if endpoint == "/corporate-reference":
             return {"symbol": "AAPL", "events": [], "event_count": 0}
