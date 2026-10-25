@@ -286,20 +286,22 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                 </label>
                 <label className="grid min-w-0 gap-2 self-start text-sm font-medium text-muted-foreground">
                   From (optional)
-                  <input type="date" value={draftStart} onChange={(e) => setDraftStart(e.target.value)} className="h-12 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-base text-foreground [color-scheme:light] [[data-theme=dark]_&]:[color-scheme:dark] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input type="date" value={draftStart} onChange={(e) => setDraftStart(e.target.value)} className="h-12 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-lg text-foreground [color-scheme:light] [[data-theme=dark]_&]:[color-scheme:dark] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
                 <label className="grid min-w-0 gap-2 self-start text-sm font-medium text-muted-foreground">
                   To (optional)
-                  <input type="date" value={draftEnd} onChange={(e) => setDraftEnd(e.target.value)} className="h-12 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-base text-foreground [color-scheme:light] [[data-theme=dark]_&]:[color-scheme:dark] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input type="date" value={draftEnd} onChange={(e) => setDraftEnd(e.target.value)} className="h-12 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-lg text-foreground [color-scheme:light] [[data-theme=dark]_&]:[color-scheme:dark] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
-                <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:col-span-2 2xl:col-span-4">
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 sm:col-span-2 2xl:col-span-4">
+                  <p className="min-w-0 flex-1 text-xs leading-5 text-muted-foreground">Type to filter stored instruments; select a result to update the chart.</p>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
                   <Button type="submit" size="lg">Apply range</Button>
                 <Button type="button" size="lg" variant="ghost" onClick={() => {
                   setDraftStart(""); setDraftEnd(""); setRange({ start: "", end: "" }); setValidationError(""); setPeriod("recent");
                 }}>Clear</Button>
+                  </div>
                 </div>
               </form>
-              <p className="mt-2 text-[11px] text-muted-foreground">Type to filter stored instruments; select a result to update the chart.</p>
               {validationError && <p role="alert" className="mt-3 text-sm text-destructive">{validationError}</p>}
             </CardContent>
           </Card>
