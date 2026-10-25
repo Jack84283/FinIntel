@@ -199,9 +199,10 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
             </Button>
             <Button type="button" size="sm" onClick={onOpenAcquisition}>
               <Database aria-hidden="true" /> Data Acquisition
-            </Button></>} subtitleActions={<Button type="button" variant={showSearch ? "secondary" : "outline"} size="sm" aria-expanded={showSearch} aria-controls="market-search-panel" onClick={() => setShowSearch((current) => !current)}>
-            <SlidersHorizontal aria-hidden="true" /> {showSearch ? "Hide filters" : "Show filters"}
-          </Button>} />    {indexState === "loading" && (
+            </Button>
+            <Button type="button" variant={showSearch ? "secondary" : "outline"} size="sm" aria-expanded={showSearch} aria-controls="market-search-panel" onClick={() => setShowSearch((current) => !current)}>
+              <SlidersHorizontal aria-hidden="true" /> {showSearch ? "Hide filters" : "Show filters"}
+            </Button></>} />    {indexState === "loading" && (
         <Card><CardContent><Skeleton className="h-8 w-64" aria-label="Loading local instruments" /></CardContent></Card>
       )}
       {indexState === "error" && (
