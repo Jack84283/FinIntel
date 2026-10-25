@@ -36,10 +36,10 @@ def verify_events(
     try:
         try:
             response = http_client.get(
-            url,
-            params={"startDate": "2010-01-01", "endDate": date.today().isoformat()},
-            headers={"Authorization": "Token " + token, "Accept": "application/json"},
-        )
+                url,
+                params={"startDate": "2010-01-01", "endDate": date.today().isoformat()},
+                headers={"Authorization": "Token " + token, "Accept": "application/json"},
+            )
         except httpx.RequestError as exc:
             raise ProviderError("Tiingo reference provider is unavailable.") from exc
         if response.status_code != 200:
