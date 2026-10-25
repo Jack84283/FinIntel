@@ -114,3 +114,36 @@ def test_ten_year_query_limit_is_accepted(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert len(response.json()["observations"]) == 3
     assert response.json()["has_more"] is False
+
+
+def test_full_import_history_search_and_pagination(tmp_path, monkeypatch):
+    db = _seed(tmp_path, monkeypatch)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO symbol_catalog "
+            "(symbol, name, asset_type, exchange, source, updated_at) "
+            "VALUES ('IBM', 'International Business Machines', 'Stock', 'NYSE', 'starter', '2026-10-20')"
+        )
+        # Import-log rows are append-only. Repeat the fixture's run to exercise
+        # pages beyond the previous 100-record UI cap.
+        conn.execute(
+            "INSERT INTO ingestion_runs (series_id, retrieved_at, imported_at, payload_sha256, "
+            "first_session, last_session, observations, inserted, updated, unchanged, stale, source_url) "
+            "SELECT series_id, retrieved_at, imported_at, payload_sha256, first_session, "
+            "last_session, observations, inserted, updated, unchanged, stale, source_url "
+            "FROM ingestion_runs LIMIT 1"
+        )
+    with TestClient(app) as client:
+        first = client.get("/api/v1/market-data/imports/search?limit=1&offset=0")
+        second = client.get("/api/v1/market-data/imports/search?limit=1&offset=1")
+        named = client.get("/api/v1/market-data/imports/search?q=Business%20Machines")
+        absent = client.get("/api/v1/market-data/imports/search?q=not-a-company")
+        wrong_provider = client.get("/api/v1/market-data/imports/search?provider=tiingo")
+        bad = client.get("/api/v1/market-data/imports/search?limit=101")
+    assert first.status_code == second.status_code == named.status_code == 200
+    assert first.json()["total"] == 2
+    assert len(first.json()["items"]) == len(second.json()["items"]) == 1
+    assert first.json()["items"][0]["id"] != second.json()["items"][0]["id"]
+    assert named.json()["total"] == 2
+    assert absent.json()["total"] == wrong_provider.json()["total"] == 0
+    assert bad.status_code == 422
