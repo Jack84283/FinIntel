@@ -45,3 +45,13 @@ def test_price_issues_or_slow_queries_fail():
     report = fixture()
     report["performance"]["all_acceptance_targets_met"] = False
     assert module.assess(report)["verdict"] == "fail"
+
+
+def test_optional_corporate_lookup_error_is_review_not_failure():
+    report = fixture()
+    report.pop("corporate_reference")
+    report["corporate_reference_error"] = "Backend HTTP 422: Tiingo API key not configured"
+    verdict = module.assess(report)
+    assert verdict["verdict"] == "review"
+    assert any("lookup failed" in item for item in verdict["review"])
+    assert not verdict["blockers"]
