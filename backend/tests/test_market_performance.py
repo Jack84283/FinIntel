@@ -25,5 +25,8 @@ def test_benchmark_is_read_only_and_bounded(tmp_path):
     assert report["series_count"] == 1
     assert report["sample_count"] == 1
     assert report["sample_queries"][0]["rows"] == 1
+    assert "directory_under_2_seconds" in report["acceptance"]
+    assert report["acceptance"]["uses_price_index"]
+    assert report["thresholds"]["sample_price_query_seconds"] == 0.25
     assert report["performance_query_plan"]
     assert "not a full-table benchmark" in report["scope"]
