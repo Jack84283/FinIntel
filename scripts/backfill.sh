@@ -50,10 +50,14 @@ case "${1:-}" in
     fi
     check_setup
     # Provider and caps can be changed via environment variables, never hardcoded secrets.
-    MAX_REQUESTS="${FININTEL_BACKFILL_MAX_REQUESTS_PER_DAY:-100}"
-    DELAY="${FININTEL_BACKFILL_DELAY_SECONDS:-2}"
+    MAX_REQUESTS="${FININTEL_BACKFILL_MAX_REQUESTS_PER_DAY:-0}"
+    DELAY="${FININTEL_BACKFILL_DELAY_SECONDS:-0}"
     PERIOD="${FININTEL_BACKFILL_PERIOD:-10y}"
-    echo "Starting local historical backfill: $PROVIDER ($PERIOD); budget $MAX_REQUESTS requests/day."
+    if [[ "$MAX_REQUESTS" == "0" ]]; then
+      echo "Starting local historical backfill: $PROVIDER ($PERIOD); no daily cap. Provider rate limits apply."
+    else
+      echo "Starting local historical backfill: $PROVIDER ($PERIOD); optional safety cap $MAX_REQUESTS instruments/day."
+    fi
     nohup env PYTHONPATH="$ROOT/backend" FININTEL_DB_PATH="${FININTEL_DB_PATH:-$ROOT/data/finintel.sqlite3}" \
       "$PYTHON" -u -m "$MODULE" \
       --provider "$PROVIDER" --period "$PERIOD" \
@@ -102,7 +106,7 @@ case "${1:-}" in
     ;;
   *)
     echo "Usage: bash scripts/backfill.sh {start|status|logs|stop}" >&2
-    echo "Optional env: FININTEL_BACKFILL_PROVIDER=alpaca_sip FININTEL_BACKFILL_MAX_REQUESTS_PER_DAY=100 FININTEL_BACKFILL_DELAY_SECONDS=2 FININTEL_BACKFILL_PERIOD=10y" >&2
+    echo "Optional env: FININTEL_BACKFILL_PROVIDER=alpaca_sip FININTEL_BACKFILL_MAX_REQUESTS_PER_DAY=0 (unlimited) FININTEL_ALPACA_REQUESTS_PER_MINUTE=180 FININTEL_BACKFILL_DELAY_SECONDS=0 FININTEL_BACKFILL_PERIOD=10y" >&2
     exit 2
     ;;
 esac
