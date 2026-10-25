@@ -6,7 +6,7 @@ async fn read_backend(path: &str, params: &[(&str, String)]) -> Result<serde_jso
     // Fixed loopback host, strictly bounded routes and parameters.
     // No generic proxy, client-selected host or credentials in the webview.
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Could not initialize the local HTTP client.".to_string())?;
