@@ -184,7 +184,6 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
           <div className="min-w-0">
             <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Markets</p>
             <h1 id="markets-title" className="mt-2 text-2xl font-semibold tracking-tight">Market Data Explorer</h1>
-            <p className="mt-2 text-sm text-muted-foreground">Historical daily prices stored in local SQLite. No live quotes.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline">Local SQLite</Badge>
@@ -196,12 +195,13 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
             </Button>
           </div>
         </div>
-        <div className="flex justify-end">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+          <p className="min-w-0 text-sm text-muted-foreground">Historical daily prices stored in local SQLite. No live quotes.</p>
           <Button type="button" variant={showSearch ? "secondary" : "outline"} size="sm" aria-expanded={showSearch} aria-controls="market-search-panel" onClick={() => setShowSearch((current) => !current)}>
             <SlidersHorizontal aria-hidden="true" /> {showSearch ? "Hide filters" : "Show filters"}
           </Button>
         </div>
-      </header>      {indexState === "loading" && (
+      </header>    {indexState === "loading" && (
         <Card><CardContent><Skeleton className="h-8 w-64" aria-label="Loading local instruments" /></CardContent></Card>
       )}
       {indexState === "error" && (
