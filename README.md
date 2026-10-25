@@ -366,3 +366,96 @@ FinIntel desktop navigation now has three primary sections:
 
 This is a frontend-only navigation and composition change: existing
 local FastAPI/Tauri commands, validation and SQLite tables remain unchanged.
+
+
+### Read-only historical data validation
+
+After the local download completes, run the streaming price audit from the repository root:
+
+```bash
+python -m finintel.market_data.validation --db data/finintel.sqlite3 --json data/market-validation-report.json
+```
+
+Use the path configured by `FININTEL_DB_PATH` if different from the default. The audit checks OHLC price consistency, positive finite prices, negative volume, duplicate/out-of-order trading sessions, and empty price series, and summarizes provider series counts. It reads each stored price row once without loading the full price database into memory. This can still take time for large databases. The JSON file is an optional local report; the SQLite database remains read-only. A nonzero process exit status indicates invalid price rows. Exchange-calendar gap analysis, price-adjustment verification, and cross-provider reconciliation are separate follow-up checks.
+
+
+### Coverage, corporate-action and performance diagnostics (P0–P2)
+
+Run this **separate, read-only** diagnostic after the primary OHLCV audit:
+
+```bash
+python -m finintel.market_data.diagnostics --db data/finintel.sqlite3 --json data/market-diagnostics.json
+```
+
+It reports observed first/last sessions, candidate gaps against both SPY observations
+and the **XNYS exchange calendar** (provided by `exchange-calendars`), possible
+split-like price jumps, overlapping compatible-adjustment cross-provider
+differences above 1%, and slowest full-scan per-series read durations.
+The scan is read-only and never downloads prices or performs repairs.
+
+An XNYS internal gap is evidence that the market had a scheduled trading
+session between two stored dates. It is **not conclusive** that a given stock
+should have traded on that date: listing histories, halts, venue differences,
+data entitlements and ticker reuse can explain discrepancies. A short observed
+series is not necessarily incomplete. The scan does not independently validate
+IPO dates, delistings or ten-year provider entitlements.
+
+The desktop **Data & Operations → Data Validation** page provides the same
+read-only P0–P2 checks, a structured results dashboard, and local JSON export.
+The P2-only benchmark deliberately reads just a small sample of 250-bar price
+queries and the instrument directory; its 2-second directory and 250 ms
+per-price-query acceptance thresholds are workstation targets, not guarantees
+and not a substitute for full desktop responsiveness tests.
+
+For P1 split/dividend reference checks, the page also has an **explicit**
+single-ticker Tiingo lookup. Set `FININTEL_TIINGO_API_KEY` in the local Python
+backend environment and use **Verify corporate events**. This provider request
+does not run as part of the five local checks, stores no reference prices, and
+does not modify SQLite. Split-ratio checks are heuristic: dividends are shown
+as reference events, not certified adjustment matches. Provider comparisons
+only run when compatible adjustment series actually overlap; a zero count is
+**not** a passing provider accuracy result.
+
+For local acceptance, select all five checks, export the report and review
+candidate issues with the relevant source/provider. The assistant cannot
+execute the scan against a database stored only on your Mac through GitHub.
+The PR must remain draft until this full-data acceptance, provider sample checks
+and desktop functional review are completed.
+
+
+#### Final local acceptance (PR #12)
+
+After installing `python -m pip install -e "./backend[dev]"` and starting the
+Python backend on `127.0.0.1:8765`, run this from the repository root:
+
+```bash
+python scripts/validate_local.py --output data/acceptance-report.json
+```
+
+This invokes the same five read-only checks as the desktop Data Validation page,
+waits for a completed run, writes the JSON findings locally and reports OHLCV
+issues, XNYS gap candidates, provider-pair counts, and performance targets.
+This is a full-dataset scan and may be slow. It does not implicitly contact
+Tiingo or repair prices. If an explicitly requested Tiingo check fails, the
+completed five-check JSON report is still saved with a
+`corporate_reference_error`; the CLI exits 2 to request manual review rather
+than discarding the audit. Missing provider credentials never cause a core
+local scan to fail. To request an **additional, explicit** Tiingo reference
+lookup, supply `--corporate-symbol AAPL` with the provider key configured in
+the process running the backend. Review the report rather than treating a zero
+provider-pair count or an unexplained XNYS gap as automatic acceptance.
+
+
+#### Review an existing acceptance report without rescanning
+
+```bash
+python scripts/review_validation_report.py data/acceptance-report.json
+```
+
+This reports **PASS** for machine-checkable acceptance with no outstanding
+candidates, **REVIEW** for gaps, price jumps or other unresolved data-quality
+signals, and **FAIL** for data-integrity/performance failures or malformed
+reports. Exit codes are 0, 2 and 1 respectively. A REVIEW result is not a
+failed system scan, and reported gaps must not be erased or suppressed to get
+a green status. A PASS is not proof of provider accuracy or exchange listing
+eligibility; manual examination of source-specific findings remains important.

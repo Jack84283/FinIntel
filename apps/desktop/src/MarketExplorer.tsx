@@ -1,3 +1,4 @@
+import { PageHeader } from "./PageHeader";
 import { useEffect, useMemo, useState, useId, type FormEvent } from "react";
 import { AlertCircle, BarChart3, Database, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -192,29 +193,16 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
 
   return (
     <section className="space-y-2" aria-labelledby="markets-title">
-      <header className="grid min-w-0 gap-2 border-b border-border pb-2">
-        <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Markets</p>
-            <h1 id="markets-title" className="mt-2 text-2xl font-semibold tracking-tight">Market Data Explorer</h1>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">Local SQLite</Badge>
+      <PageHeader id="markets-title" breadcrumb="FinIntel / Markets" title="Market Data Explorer" subtitle="Historical daily prices stored in local SQLite. No live quotes." actions={<><Badge variant="outline">Local SQLite</Badge>
             <Button type="button" variant="secondary" size="sm" onClick={() => setReload((v) => v + 1)}>
               <RefreshCw aria-hidden="true" /> Reload local data
             </Button>
             <Button type="button" size="sm" onClick={onOpenAcquisition}>
               <Database aria-hidden="true" /> Data Acquisition
             </Button>
-          </div>
-        </div>
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-          <p className="min-w-0 text-sm text-muted-foreground">Historical daily prices stored in local SQLite. No live quotes.</p>
-          <Button type="button" variant={showSearch ? "secondary" : "outline"} size="sm" aria-expanded={showSearch} aria-controls="market-search-panel" onClick={() => setShowSearch((current) => !current)}>
-            <SlidersHorizontal aria-hidden="true" /> {showSearch ? "Hide filters" : "Show filters"}
-          </Button>
-        </div>
-      </header>    {indexState === "loading" && (
+            <Button type="button" variant={showSearch ? "secondary" : "outline"} size="sm" aria-expanded={showSearch} aria-controls="market-search-panel" onClick={() => setShowSearch((current) => !current)}>
+              <SlidersHorizontal aria-hidden="true" /> {showSearch ? "Hide filters" : "Show filters"}
+            </Button></>} />    {indexState === "loading" && (
         <Card><CardContent><Skeleton className="h-8 w-64" aria-label="Loading local instruments" /></CardContent></Card>
       )}
       {indexState === "error" && (

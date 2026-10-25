@@ -1,5 +1,6 @@
+import { PageHeader } from "./PageHeader";
 import { useCallback, useEffect, useState } from "react";
-import { Activity, BarChart3, BrainCircuit, BriefcaseBusiness, CircleCheck, CircleOff, Clock3, Database, Download, History, RefreshCw, Settings } from "lucide-react";
+import { Activity, BarChart3, BrainCircuit, BriefcaseBusiness, CircleCheck, CircleOff, Clock3, Database, Download, History, ShieldCheck, RefreshCw, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,10 +9,11 @@ import { fetchBackendHealth } from "./api";
 import { MarketExplorer } from "./MarketExplorer";
 import { PreferencesPage } from "./PreferencesPage";
 import { ActionHistoryPage } from "./ActionHistoryPage";
+import { DataValidationPage } from "./DataValidationPage";
 import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
 import type { BackendHealth } from "./health";
 
-type Screen = "overview" | "market" | "intelligence" | "data-acquisition" | "action-history" | "portfolio" | "settings";
+type Screen = "overview" | "market" | "intelligence" | "data-acquisition" | "data-validation" | "action-history" | "portfolio" | "settings";
 const groups = [
   { heading: "Workspace", items: [
     { id: "overview", label: "Overview", icon: Activity },
@@ -20,6 +22,7 @@ const groups = [
   ] },
   { heading: "Data & Operations", items: [
     { id: "data-acquisition", label: "Data Acquisition", icon: Database },
+    { id: "data-validation", label: "Data Validation", icon: ShieldCheck },
     { id: "action-history", label: "Action History", icon: History },
   ] },
   { heading: "Workspace & Preferences", items: [
@@ -96,6 +99,8 @@ export default function App() {
           <MarketExplorer initialSelection={marketSelection} onOpenAcquisition={() => setScreen("data-acquisition")} />
         ) : screen === "data-acquisition" ? (
           <DataAcquisitionPage onViewMarket={openMarkets} />
+        ) : screen === "data-validation" ? (
+          <DataValidationPage />
         ) : screen === "action-history" ? (
           <ActionHistoryPage onViewMarket={openMarkets} />
         ) : screen === "settings" ? (
@@ -106,29 +111,15 @@ export default function App() {
           />
         ) : screen !== "overview" ? (
           <section aria-labelledby="placeholder-title">
-            <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-2">
-              <div>
-                <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / {placeholders[screen]?.title}</p>
-                <h1 id="placeholder-title" className="mt-2 text-2xl font-semibold tracking-tight">{placeholders[screen]?.title}</h1>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">{placeholders[screen]?.description}</p>
-              </div>
-              <Badge variant="outline">Not implemented</Badge>
-            </header>
-            <Card className="mt-6 max-w-[820px]">
+            <PageHeader id="placeholder-title" breadcrumb={`FinIntel / ${placeholders[screen]?.title}`} title={placeholders[screen]?.title} subtitle={placeholders[screen]?.description} actions={<Badge variant="outline">Not implemented</Badge>} />
+            <Card className="mt-2 max-w-[820px]">
               <CardHeader><CardTitle>Coming in a future milestone</CardTitle><CardDescription>{placeholders[screen]?.description}</CardDescription></CardHeader>
               <CardContent><p className="text-sm text-muted-foreground">This is a navigation placeholder. No live data or actions are available on this page yet.</p></CardContent>
             </Card>
           </section>
         ) : (
           <section aria-labelledby="overview-title">
-            <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-2">
-              <div>
-                <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Overview</p>
-                <h1 id="overview-title" className="mt-2 text-2xl font-semibold tracking-tight">Private Financial Intelligence</h1>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">Explore locally stored market data and build your private research workspace.</p>
-              </div>
-              <Badge variant="outline">M1 · Local workstation</Badge>
-            </header>
+            <PageHeader id="overview-title" breadcrumb="FinIntel / Overview" title="Private Financial Intelligence" subtitle="Explore locally stored market data and build your private research workspace." actions={<Badge variant="outline">M1 · Local workstation</Badge>} />
             <section className="max-w-[820px] py-6 lg:py-8">
               <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">Historical research</p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Your local market workspace.</h2>
