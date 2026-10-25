@@ -208,8 +208,8 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
               <CardAction><Badge variant="secondary">{instruments.length} local series</Badge></CardAction>
             </CardHeader>
             <CardContent>
-              <form onSubmit={applyRange} className="flex flex-wrap items-end gap-3">
-                <div className="grid min-w-0 flex-[2] basis-[225px] gap-2 text-xs font-medium text-muted-foreground">
+              <form onSubmit={applyRange} className="grid min-w-0 grid-cols-1 items-end gap-4 sm:grid-cols-2 2xl:grid-cols-[minmax(220px,1.7fr)_minmax(170px,1fr)_minmax(190px,1fr)_minmax(190px,1fr)]">
+                <div className="grid min-w-0 gap-2 self-start text-sm font-medium text-muted-foreground">
                   <label htmlFor={instrumentListId + "-input"}>Instrument</label>
                   <div className="relative min-w-0">
                     <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-3 size-4" />
@@ -245,7 +245,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                       placeholder="Search stored ticker, e.g. AAPL"
                       maxLength={80}
                       autoComplete="off"
-                      className="h-10 w-full min-w-0 rounded-md border border-input bg-muted pl-9 pr-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="h-12 w-full min-w-0 rounded-md border border-input bg-muted pl-9 pr-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
                     {instrumentFocused && instrumentQuery.trim() && (
                       <div id={instrumentListId + "-list"} role="listbox" aria-label="Stored instrument matches" className="absolute inset-x-0 top-full z-30 mt-1 max-h-72 overflow-y-auto rounded-md border border-border bg-card p-1 shadow-lg">
@@ -268,15 +268,14 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                       </div>
                     )}
                   </div>
-                  <p className="text-[11px] font-normal">Type to filter stored instruments; select a result to update the chart.</p>
                 </div>
-                <label className="grid min-w-[150px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
+                <label className="grid min-w-0 gap-2 self-start text-sm font-medium text-muted-foreground">
                   Display period
                   <select
                     aria-label="Historical time range"
                     value={period}
                     onChange={(event) => selectPeriod(event.target.value as HistoryPeriod)}
-                    className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="h-12 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <option value="recent">Latest 100 sessions</option>
                     <option value="1y">Last 1 year</option>
@@ -285,19 +284,22 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                     <option value="custom">Custom dates</option>
                   </select>
                 </label>
-                <label className="grid min-w-[195px] flex-[1.25] gap-2 text-sm font-medium text-muted-foreground">
+                <label className="grid min-w-0 gap-2 self-start text-sm font-medium text-muted-foreground">
                   From (optional)
                   <input type="date" value={draftStart} onChange={(e) => setDraftStart(e.target.value)} className="h-12 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-base text-foreground [color-scheme:light] [[data-theme=dark]_&]:[color-scheme:dark] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
-                <label className="grid min-w-[195px] flex-[1.25] gap-2 text-sm font-medium text-muted-foreground">
+                <label className="grid min-w-0 gap-2 self-start text-sm font-medium text-muted-foreground">
                   To (optional)
                   <input type="date" value={draftEnd} onChange={(e) => setDraftEnd(e.target.value)} className="h-12 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-base text-foreground [color-scheme:light] [[data-theme=dark]_&]:[color-scheme:dark] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
-                <Button type="submit" size="lg">Apply range</Button>
+                <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:col-span-2 2xl:col-span-4">
+                  <Button type="submit" size="lg">Apply range</Button>
                 <Button type="button" size="lg" variant="ghost" onClick={() => {
                   setDraftStart(""); setDraftEnd(""); setRange({ start: "", end: "" }); setValidationError(""); setPeriod("recent");
                 }}>Clear</Button>
+                </div>
               </form>
+              <p className="mt-2 text-[11px] text-muted-foreground">Type to filter stored instruments; select a result to update the chart.</p>
               {validationError && <p role="alert" className="mt-3 text-sm text-destructive">{validationError}</p>}
             </CardContent>
           </Card>
