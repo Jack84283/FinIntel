@@ -121,8 +121,8 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
 
         <aside className="flex min-w-0 flex-col gap-6" aria-label="Workspace information">
           <Card className="min-w-0">
-            <CardHeader className="min-w-0 gap-y-2">
-              <div className="flex items-center gap-2"><Activity aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle>Local backend</CardTitle></div>
+            <CardHeader className="flex min-w-0 flex-col items-start gap-2">
+              <div className="flex min-w-0 items-center gap-2"><Activity aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">Local backend</CardTitle></div>
               <CardDescription>Connection to FinIntel's local Python service.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -138,8 +138,8 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
             </CardContent>
           </Card>
           <Card className="min-w-0">
-            <CardHeader className="min-w-0 gap-y-2">
-              <div className="flex items-center gap-2"><LockKeyhole aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle>Privacy & storage</CardTitle></div>
+            <CardHeader className="flex min-w-0 flex-col items-start gap-2">
+              <div className="flex min-w-0 items-center gap-2"><LockKeyhole aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">Privacy & storage</CardTitle></div>
               <CardDescription>Built for a private, local-first financial workspace.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
