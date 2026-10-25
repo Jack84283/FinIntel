@@ -224,7 +224,8 @@ def test_access_denied_pauses_and_preserves_retry_candidate(tmp_path, monkeypatc
 def test_three_transient_provider_errors_skip_symbol_and_continue(tmp_path, monkeypatch):
     monkeypatch.setattr(backfill_worker, "alpaca_configured", lambda: True)
     monkeypatch.setattr(
-        backfill_worker, "pending_symbols",
+        backfill_worker,
+        "pending_symbols",
         lambda **kwargs: ["AAPL", "MSFT"],
     )
     calls = []
@@ -254,6 +255,7 @@ def test_three_transient_provider_errors_skip_symbol_and_continue(tmp_path, monk
     state = json.loads(checkpoint.read_text())
     assert state["failed_symbols"]["AAPL"]["reason"] == "provider_unavailable"
     assert state["last_status"] == "retry_next_day"
+
 
 def test_three_symbol_errors_do_not_stop_bulk_download(tmp_path, monkeypatch):
     monkeypatch.setattr(backfill_worker, "alpaca_configured", lambda: True)
