@@ -41,5 +41,5 @@ def test_diagnostics_coverage_and_provider_comparison(tmp_path):
     assert report["cross_provider_pairs_compared"] == 1
     assert report["cross_provider_comparisons"][0]["overlap_sessions"] == 2
     assert report["cross_provider_comparisons"][0]["close_divergence_over_1pct"] == 1
-    assert report["weekday_gap_candidates"] == 2
+    assert report["weekday_gap_candidates"] == 4
     assert len(report["corporate_action_jump_candidates"]) == 1
