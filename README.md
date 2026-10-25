@@ -421,3 +421,22 @@ candidate issues with the relevant source/provider. The assistant cannot
 execute the scan against a database stored only on your Mac through GitHub.
 The PR must remain draft until this full-data acceptance, provider sample checks
 and desktop functional review are completed.
+
+
+#### Final local acceptance (PR #12)
+
+After installing `python -m pip install -e "./backend[dev]"` and starting the
+Python backend on `127.0.0.1:8765`, run this from the repository root:
+
+```bash
+python scripts/validate_local.py --output data/acceptance-report.json
+```
+
+This invokes the same five read-only checks as the desktop Data Validation page,
+waits for a completed run, writes the JSON findings locally and reports OHLCV
+issues, XNYS gap candidates, provider-pair counts, and performance targets.
+This is a full-dataset scan and may be slow. It does not implicitly contact
+Tiingo or repair prices. To request an **additional, explicit** Tiingo reference
+lookup, supply `--corporate-symbol AAPL` with the provider key configured in
+the process running the backend. Review the report rather than treating a zero
+provider-pair count or an unexplained XNYS gap as automatic acceptance.
