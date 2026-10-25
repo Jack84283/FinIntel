@@ -118,7 +118,9 @@ def run(
             candidates = pending_symbols(provider=provider, maximum=100000, asset_type=asset_type)
             excluded = state["failed_symbols"]
             remaining = [
-                symbol for symbol in candidates if symbol not in attempted and symbol not in excluded
+                symbol
+                for symbol in candidates
+                if symbol not in attempted and symbol not in excluded
             ]
             if not remaining:
                 outstanding = [symbol for symbol in candidates if symbol not in excluded]
@@ -302,7 +304,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--state-path", type=Path, default=None)
     parser.add_argument("--once", action="store_true")
     parser.add_argument(
-        "--retry-failed", action="store_true",
+        "--retry-failed",
+        action="store_true",
         help="Explicitly revisit previously unavailable/quarantined instruments",
     )
     args = parser.parse_args(argv)
