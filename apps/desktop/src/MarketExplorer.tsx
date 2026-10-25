@@ -285,13 +285,13 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                     <option value="custom">Custom dates</option>
                   </select>
                 </label>
-                <label className="grid min-w-[155px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
+                <label className="grid min-w-[195px] flex-[1.25] gap-2 text-sm font-medium text-muted-foreground">
                   From (optional)
-                  <input type="date" value={draftStart} onChange={(e) => setDraftStart(e.target.value)} className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input type="date" value={draftStart} onChange={(e) => setDraftStart(e.target.value)} className="h-12 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-base text-foreground scheme-light dark:scheme-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
-                <label className="grid min-w-[155px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
+                <label className="grid min-w-[195px] flex-[1.25] gap-2 text-sm font-medium text-muted-foreground">
                   To (optional)
-                  <input type="date" value={draftEnd} onChange={(e) => setDraftEnd(e.target.value)} className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input type="date" value={draftEnd} onChange={(e) => setDraftEnd(e.target.value)} className="h-12 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-base text-foreground scheme-light dark:scheme-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
                 <Button type="submit" size="lg">Apply range</Button>
                 <Button type="button" size="lg" variant="ghost" onClick={() => {
