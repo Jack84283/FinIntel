@@ -22,17 +22,19 @@ export function DataAcquisitionPage({
   return (
     <section className="min-w-0 space-y-2" aria-labelledby="acquisition-page-title">
       <header className="grid min-w-0 gap-2 border-b border-border pb-2">
-        <div className="min-w-0">
-          <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Data Acquisition</p>
-          <h1 id="acquisition-page-title" className="mt-2 text-2xl font-semibold tracking-tight">Data Acquisition</h1>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground lg:whitespace-nowrap">Fetch, validate, and store provider data. Review completed import actions separately from market analysis.</p>
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Data Acquisition</p>
+            <h1 id="acquisition-page-title" className="mt-2 text-2xl font-semibold tracking-tight">Data Acquisition</h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">Local SQLite</Badge>
+            <Button type="button" variant="secondary" size="sm" onClick={() => onViewMarket(latest ?? undefined)}>
+              <BarChart3 aria-hidden="true" /> Open Markets
+            </Button>
+          </div>
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Badge variant="outline">Local SQLite</Badge>
-          <Button type="button" variant="secondary" size="sm" onClick={() => onViewMarket(latest ?? undefined)}>
-            <BarChart3 aria-hidden="true" /> Open Markets
-          </Button>
-        </div>
+        <p className="min-w-0 text-sm leading-6 text-muted-foreground">Fetch, validate, and store provider data. Review completed import actions separately from market analysis.</p>
       </header>
 
       <div className="grid min-w-0 items-start gap-2 2xl:grid-cols-[minmax(0,1fr)_300px]">
