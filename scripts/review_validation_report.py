@@ -63,6 +63,9 @@ def assess(report: dict) -> dict:
         if isinstance(divergence, int) and divergence > 0:
             review.append(f"{divergence:,} provider price differences over 1%")
 
+    reference_error = report.get("corporate_reference_error")
+    if reference_error:
+        review.append("Optional corporate-reference lookup failed: " + str(reference_error))
     reference = report.get("corporate_reference")
     if isinstance(reference, dict):
         events = reference.get("events", [])
@@ -75,7 +78,7 @@ def assess(report: dict) -> dict:
             )
             if needs_review:
                 review.append(f"{needs_review:,} split-reference events require manual review")
-    else:
+    elif not reference_error:
         review.append("Optional live corporate-reference lookup not present in report")
 
     return {
