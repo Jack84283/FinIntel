@@ -97,8 +97,11 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                 if prev_day is not None:
                     missing = _weekdays_between(prev_day, day)
                     if reference_days and prev_day < day:
-                        confirmed_by_reference = bisect_left(reference_days, day.isoformat()) - (
-                            bisect_left(reference_days, prev_day.isoformat()) + 1
+                        confirmed_by_reference = max(
+                            0,
+                            bisect_left(reference_days, day.isoformat())
+                            - bisect_left(reference_days, prev_day.isoformat())
+                            - (1 if bisect_left(reference_days, prev_day.isoformat()) < len(reference_days) and reference_days[bisect_left(reference_days, prev_day.isoformat())] == prev_day.isoformat() else 0),
                         )
                         if confirmed_by_reference > 0:
                             reference_gaps["sessions"] += confirmed_by_reference
