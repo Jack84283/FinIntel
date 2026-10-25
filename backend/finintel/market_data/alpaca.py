@@ -19,6 +19,8 @@ from finintel.market_data.models import DailyOHLCV, HistoricalBatch
 from finintel.market_data.provider import (
     SYMBOL_PATTERN,
     ProviderError,
+    ProviderAccessDenied,
+    ProviderSymbolUnavailable,
     ProviderPayloadInvalid,
     ProviderRateLimited,
     ProviderUnavailable,
@@ -81,9 +83,11 @@ def _decode_page(content: bytes, symbol: str) -> tuple[list[DailyOHLCV], str | N
         if not isinstance(obj, dict) or set(obj) - {"bars", "next_page_token", "symbol"}:
             raise ValueError("Unexpected Alpaca JSON fields")
         raw = obj["bars"]
-        if not isinstance(raw, dict) or set(raw) != {symbol}:
-            raise ValueError("Alpaca returned a different ticker or no prices")
-        records = raw[symbol]
+        if not isinstance(raw, dict) or (raw and set(raw) != {symbol}):
+            raise ValueError("Alpaca returned a different ticker")
+        # Alpaca may legitimately return an empty bars object for an
+        # unsupported symbol or one without history in the selected window.
+        records = raw.get(symbol, [])
         if not isinstance(records, list) or len(records) > 10000:
             raise ValueError("Invalid Alpaca historical bars")
         token = obj.get("next_page_token")
@@ -175,9 +179,7 @@ class AlpacaDailyProvider:
             ) as client:
                 bars = self._fetch_pages(client, public_params, ticker)
         if not bars:
-            raise ProviderPayloadInvalid(
-                "Alpaca returned no daily sessions for the selected period"
-            )
+            raise ProviderSymbolUnavailable("Alpaca has no daily sessions for this instrument")
         return HistoricalBatch(
             provider="alpaca_sip",
             symbol=ticker,
@@ -211,14 +213,16 @@ class AlpacaDailyProvider:
             if response.status_code == 429:
                 raise ProviderRateLimited("Alpaca quota reached; retry manually later")
             if response.status_code in (401, 403):
-                raise ProviderError(
+                raise ProviderAccessDenied(
                     "Alpaca credentials or historical SIP entitlement were rejected"
                 )
+            if response.status_code in (404, 422):
+                raise ProviderSymbolUnavailable("Alpaca does not support this instrument")
             if response.status_code != 200:
                 raise ProviderUnavailable("Alpaca daily-history request was unsuccessful")
             new_bars, next_token = _decode_page(response.content, symbol)
             if not new_bars and next_token is None and not bars:
-                raise ProviderPayloadInvalid("Alpaca returned no bars for this instrument")
+                raise ProviderSymbolUnavailable("Alpaca has no bars for this instrument")
             for bar in new_bars:
                 if bars and bar.session_date <= bars[-1].session_date:
                     raise ProviderPayloadInvalid(
