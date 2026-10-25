@@ -24,18 +24,16 @@ def test_alpaca_auth_and_entitlement_rejection_is_fatal(credentials, code):
         assert request.headers["APCA-API-KEY-ID"] == "TEST_KEY"
         return httpx.Response(code, json={"message": "not authorized"})
 
-    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
-        with pytest.raises(ProviderAccessDenied):
-            alpaca.AlpacaDailyProvider(client=client).fetch_daily("AAPL")
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client, pytest.raises(ProviderAccessDenied):
+        alpaca.AlpacaDailyProvider(client=client).fetch_daily("AAPL")
 
 
 @pytest.mark.parametrize("code", [404, 422])
 def test_alpaca_unsupported_symbols_are_isolated(credentials, code):
     with httpx.Client(
         transport=httpx.MockTransport(lambda request: httpx.Response(code))
-    ) as client:
-        with pytest.raises(ProviderSymbolUnavailable):
-            alpaca.AlpacaDailyProvider(client=client).fetch_daily("AAC-WS")
+    ) as client, pytest.raises(ProviderSymbolUnavailable):
+        alpaca.AlpacaDailyProvider(client=client).fetch_daily("AAC-WS")
 
 
 @pytest.mark.parametrize("body", [
@@ -45,9 +43,8 @@ def test_alpaca_unsupported_symbols_are_isolated(credentials, code):
 def test_alpaca_no_bars_is_symbol_unavailable(credentials, body):
     with httpx.Client(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=body))
-    ) as client:
-        with pytest.raises(ProviderSymbolUnavailable):
-            alpaca.AlpacaDailyProvider(client=client).fetch_daily("AAC-U")
+    ) as client, pytest.raises(ProviderSymbolUnavailable):
+        alpaca.AlpacaDailyProvider(client=client).fetch_daily("AAC-U")
 
 
 def test_alpaca_wrong_symbol_remains_invalid_payload(credentials):
@@ -55,6 +52,5 @@ def test_alpaca_wrong_symbol_remains_invalid_payload(credentials):
         transport=httpx.MockTransport(
             lambda request: httpx.Response(200, json={"bars": {"MSFT": []}})
         )
-    ) as client:
-        with pytest.raises(ProviderPayloadInvalid):
-            alpaca.AlpacaDailyProvider(client=client).fetch_daily("AAPL")
+    ) as client, pytest.raises(ProviderPayloadInvalid):
+        alpaca.AlpacaDailyProvider(client=client).fetch_daily("AAPL")
