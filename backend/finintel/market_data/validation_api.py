@@ -75,7 +75,7 @@ def _run(job_id: str, checks: list[str]) -> None:
             if _job and _job["id"] == job_id:
                 _job.update(status="completed", stage="Complete", results=results,
                             finished_at=datetime.now(UTC).isoformat())
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - background worker must surface failures
         with _lock:
             if _job and _job["id"] == job_id:
                 _job.update(status="failed", stage="Failed", error=str(exc),
