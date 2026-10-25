@@ -440,3 +440,18 @@ Tiingo or repair prices. To request an **additional, explicit** Tiingo reference
 lookup, supply `--corporate-symbol AAPL` with the provider key configured in
 the process running the backend. Review the report rather than treating a zero
 provider-pair count or an unexplained XNYS gap as automatic acceptance.
+
+
+#### Review an existing acceptance report without rescanning
+
+```bash
+python scripts/review_validation_report.py data/acceptance-report.json
+```
+
+This reports **PASS** for machine-checkable acceptance with no outstanding
+candidates, **REVIEW** for gaps, price jumps or other unresolved data-quality
+signals, and **FAIL** for data-integrity/performance failures or malformed
+reports. Exit codes are 0, 2 and 1 respectively. A REVIEW result is not a
+failed system scan, and reported gaps must not be erased or suppressed to get
+a green status. A PASS is not proof of provider accuracy or exchange listing
+eligibility; manual examination of source-specific findings remains important.
