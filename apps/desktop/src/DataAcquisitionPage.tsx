@@ -34,7 +34,7 @@ export function DataAcquisitionPage({
             </Button>
           </div>
         </div>
-        <p className="min-w-0 text-sm leading-6 text-muted-foreground">Fetch, validate, and store provider data. Review completed import actions separately from market analysis.</p>
+        <p className="min-w-0 text-sm text-muted-foreground">Fetch, validate, and store provider data. Review completed import actions separately from market analysis.</p>
       </header>
 
       <div className="grid min-w-0 items-start gap-2 2xl:grid-cols-[minmax(0,1fr)_300px]">
