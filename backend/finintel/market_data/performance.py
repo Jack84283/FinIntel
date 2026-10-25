@@ -44,7 +44,21 @@ def benchmark(db: Path, *, samples: int = 12) -> dict:
                 (0,),
             )
         ]
+        # Conservative cold/warm-workstation targets; record actual values for review.
+        # A failing target is a diagnostic signal, not proof of a database defect.
+        slowest = max((item["seconds"] for item in sample_timings), default=0.0)
+        acceptance = {
+            "directory_under_2_seconds": directory_seconds <= 2.0,
+            "sample_price_query_under_250ms": slowest <= 0.25,
+            "uses_price_index": any("INDEX" in step or "PRIMARY KEY" in step for step in plan),
+        }
         return {
+            "acceptance": acceptance,
+            "all_acceptance_targets_met": all(acceptance.values()),
+            "thresholds": {
+                "directory_seconds": 2.0,
+                "sample_price_query_seconds": 0.25,
+            },
             "series_count": len(instrument_rows),
             "directory_seconds": directory_seconds,
             "sample_count": len(sample_timings),
