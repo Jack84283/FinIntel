@@ -3,7 +3,12 @@
 import json
 
 from finintel.market_data import backfill_worker
-from finintel.market_data.provider import ProviderRateLimited
+from finintel.market_data.provider import (
+    ProviderAccessDenied,
+    ProviderRateLimited,
+    ProviderSymbolUnavailable,
+    ProviderUnavailable,
+)
 
 
 def test_backfill_checkpoint_prevents_duplicate_requests(tmp_path, monkeypatch):
@@ -123,3 +128,93 @@ def test_rate_limit_backs_off_and_retries_without_waiting_for_midnight(tmp_path,
     saved = json.loads(checkpoint.read_text())
     assert saved["requests"] == 2
     assert saved["last_status"] == "complete"
+
+
+def test_unavailable_symbols_are_quarantined_and_dont_trip_circuit_breaker(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(backfill_worker, "alpaca_configured", lambda: True)
+    monkeypatch.setattr(
+        backfill_worker, "pending_symbols",
+        lambda **kwargs: ["AAC-U", "AAC-WS", "AACB"],
+    )
+    calls = []
+
+    def acquire(symbol, **kwargs):
+        calls.append(symbol)
+        if symbol in {"AAC-U", "AAC-WS"}:
+            raise ProviderSymbolUnavailable("No bars")
+        return {"import_id": 23}
+
+    monkeypatch.setattr(backfill_worker, "acquire_and_store", acquire)
+    checkpoint = tmp_path / "history.json"
+    args = dict(
+        provider="alpaca_sip", asset_type="all", max_per_day=0,
+        delay=0, state_path=checkpoint, once=True,
+    )
+    assert backfill_worker.run(**args) == 0
+    assert calls == ["AAC-U", "AAC-WS", "AACB"]
+    state = json.loads(checkpoint.read_text())
+    assert state["last_status"] == "retry_next_day"
+    assert set(state["failed_symbols"]) == {"AAC-U", "AAC-WS"}
+    assert state["failed_count"] == 2
+    assert backfill_worker.run(**args) == 0
+    assert len(calls) == 3
+
+    # The explicit retry action rechecks only failed symbols on the same day.
+    assert backfill_worker.run(**args, retry_failed=True) == 0
+    assert calls[3:] == ["AAC-U", "AAC-WS"]
+
+
+def test_all_unavailable_symbols_finish_with_failures(tmp_path, monkeypatch):
+    monkeypatch.setattr(backfill_worker, "alpaca_configured", lambda: True)
+    monkeypatch.setattr(backfill_worker, "pending_symbols", lambda **kwargs: ["AAC-U"])
+    monkeypatch.setattr(
+        backfill_worker, "acquire_and_store",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ProviderSymbolUnavailable()),
+    )
+    checkpoint = tmp_path / "unavailable.json"
+    assert backfill_worker.run(
+        provider="alpaca_sip", asset_type="all", max_per_day=0,
+        delay=0, state_path=checkpoint, once=False,
+    ) == 0
+    state = json.loads(checkpoint.read_text())
+    assert state["last_status"] == "complete_with_failures"
+
+
+def test_access_denied_pauses_and_preserves_retry_candidate(tmp_path, monkeypatch):
+    monkeypatch.setattr(backfill_worker, "alpaca_configured", lambda: True)
+    monkeypatch.setattr(backfill_worker, "pending_symbols", lambda **kwargs: ["AAPL"])
+    monkeypatch.setattr(
+        backfill_worker, "acquire_and_store",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ProviderAccessDenied()),
+    )
+    checkpoint = tmp_path / "access.json"
+    assert backfill_worker.run(
+        provider="alpaca_sip", asset_type="all", max_per_day=0,
+        delay=0, state_path=checkpoint, once=True,
+    ) == 2
+    state = json.loads(checkpoint.read_text())
+    assert state["last_status"] == "paused_provider_access"
+    assert state["attempted"] == []
+    assert "AAPL" not in state["failed_symbols"]
+
+
+def test_three_transient_provider_errors_pause_safely(tmp_path, monkeypatch):
+    monkeypatch.setattr(backfill_worker, "alpaca_configured", lambda: True)
+    monkeypatch.setattr(backfill_worker, "pending_symbols", lambda **kwargs: ["AAPL"])
+    monkeypatch.setattr(
+        backfill_worker, "acquire_and_store",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ProviderUnavailable()),
+    )
+    delays = []
+    monkeypatch.setattr(backfill_worker.time, "sleep", delays.append)
+    checkpoint = tmp_path / "network.json"
+    assert backfill_worker.run(
+        provider="alpaca_sip", asset_type="all", max_per_day=0,
+        delay=0, state_path=checkpoint, once=False,
+    ) == 2
+    assert delays == [5, 10]
+    state = json.loads(checkpoint.read_text())
+    assert state["last_status"] == "paused_provider_unavailable"
+    assert state["attempted"] == []
