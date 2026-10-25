@@ -24,9 +24,9 @@ def test_optional_tiingo_failure_preserves_completed_report(monkeypatch, tmp_pat
 
     def mock_request(endpoint, payload=None):
         if endpoint == "/run":
-            return {"status": "running"}
+            return {"id": "test-job", "status": "running"}
         if endpoint == "/status":
-            return {"status": "completed", "results": results}
+            return {"id": "test-job", "status": "completed", "results": results}
         if endpoint == "/corporate-reference":
             raise RuntimeError("Backend HTTP 422: missing Tiingo key")
         raise AssertionError(endpoint)
@@ -49,9 +49,10 @@ def test_without_optional_reference_keeps_success_exit(monkeypatch, tmp_path):
 
     def mock_request(endpoint, payload=None):
         if endpoint == "/run":
-            return {"status": "running"}
+            return {"id": "test-job", "status": "running"}
         if endpoint == "/status":
             return {
+                "id": "test-job",
                 "status": "completed",
                 "results": {
                     "integrity": {"issues": {}},
@@ -66,3 +67,64 @@ def test_without_optional_reference_keeps_success_exit(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "argv", ["validate_local.py", "--output", str(output)])
     assert module.main() == 0
     assert output.is_file()
+
+
+def test_409_joins_compatible_active_validation(monkeypatch, tmp_path):
+    output = tmp_path / "joined.json"
+    calls = []
+
+    def mock_request(endpoint, payload=None):
+        calls.append(endpoint)
+        if endpoint == "/run":
+            raise RuntimeError('Backend HTTP 409: {"detail":"A validation job is already running."}')
+        if endpoint == "/status":
+            if calls.count("/status") == 1:
+                return {"id": "existing-job", "status": "running", "checks": module.CHECKS}
+            return {
+                "id": "existing-job",
+                "status": "completed",
+                "checks": module.CHECKS,
+                "results": {"integrity": {"issues": {}}, "coverage": {}, "provider": {}, "performance": {}},
+            }
+        if endpoint == "/corporate-reference":
+            return {"symbol": "AAPL", "events": [], "event_count": 0}
+        raise AssertionError(endpoint)
+
+    monkeypatch.setattr(module, "request", mock_request)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["validate_local.py", "--output", str(output), "--corporate-symbol", "AAPL"],
+    )
+    assert module.main() == 0
+    assert json.loads(output.read_text())["corporate_reference"]["symbol"] == "AAPL"
+    assert calls.count("/run") == 1
+
+
+def test_409_rejects_incompatible_checks(monkeypatch):
+    def mock_request(endpoint, payload=None):
+        if endpoint == "/run":
+            raise RuntimeError("Backend HTTP 409: conflict")
+        return {"id": "other", "status": "running", "checks": ["integrity"]}
+
+    monkeypatch.setattr(module, "request", mock_request)
+    import pytest
+
+    with pytest.raises(RuntimeError, match="different checks"):
+        module.start_or_join()
+
+
+def test_join_rejects_replaced_job(monkeypatch, tmp_path):
+    def mock_request(endpoint, payload=None):
+        if endpoint == "/run":
+            return {"id": "original", "status": "running"}
+        return {"id": "replacement", "status": "completed", "results": {}}
+
+    monkeypatch.setattr(module, "request", mock_request)
+    monkeypatch.setattr(
+        sys, "argv", ["validate_local.py", "--output", str(tmp_path / "wrong.json")]
+    )
+    import pytest
+
+    with pytest.raises(RuntimeError, match="job changed"):
+        module.main()
