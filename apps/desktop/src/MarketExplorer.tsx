@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchMarketDaily, fetchMarketInstruments } from "./market-api";
+import { searchAcquirableSymbols } from "./symbol-catalog-api";
 import type { MarketSelection } from "./DataAcquisitionPage";
 import { MarketCharts } from "./market-chart";
 import { MarketDatePicker } from "./components/MarketDatePicker";
@@ -40,6 +41,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
   const [page, setPage] = useState(0);
   const [reload, setReload] = useState(0);
   const [showSearch, setShowSearch] = useState(false);
+  const [instrumentNames, setInstrumentNames] = useState<Record<string, string>>({});
   const [instrumentQuery, setInstrumentQuery] = useState(initialSelection?.symbol ?? "");
   const [instrumentFocused, setInstrumentFocused] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState(-1);
@@ -96,14 +98,31 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
     return () => { ignore = true; };
   }, [symbol, priceProvider, range, reload, indexState, period]);
 
+  useEffect(() => {
+    const query = instrumentQuery.trim();
+    if (!query) return;
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      searchAcquirableSymbols(query, "All", 40).then((result) => {
+        if (cancelled) return;
+        setInstrumentNames((previous) => {
+          const next = { ...previous };
+          result.results.forEach((item) => { next[item.symbol] = item.name; });
+          return next;
+        });
+      }).catch(() => { /* A missing catalog must not hide locally stored prices. */ });
+    }, 180);
+    return () => { cancelled = true; window.clearTimeout(timeout); };
+  }, [instrumentQuery]);
+
   const matchingInstruments = useMemo(() => {
     const q = instrumentQuery.trim().toUpperCase();
     if (!q) return [];
     return instruments
-      .filter((item) => item.symbol.toUpperCase().includes(q) || item.provider.toUpperCase().includes(q))
+      .filter((item) => item.symbol.toUpperCase().includes(q) || item.provider.toUpperCase().includes(q) || (instrumentNames[item.symbol] ?? "").toUpperCase().includes(q))
       .sort((a, b) => Number(!a.symbol.toUpperCase().startsWith(q)) - Number(!b.symbol.toUpperCase().startsWith(q)) || a.symbol.localeCompare(b.symbol))
       .slice(0, 8);
-  }, [instrumentQuery, instruments]);
+  }, [instrumentQuery, instruments, instrumentNames]);
   const chooseInstrument = (item: MarketInstrument) => {
     setSymbol(item.symbol);
     setPriceProvider(item.provider as "alpha_vantage" | "alpaca_sip" | "tiingo");
@@ -160,23 +179,25 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
 
   return (
     <section className="space-y-2" aria-labelledby="markets-title">
-      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-2">
+      <header className="grid min-w-0 gap-2 border-b border-border pb-2">
         <div>
           <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Markets</p>
           <h1 id="markets-title" className="mt-2 text-2xl font-semibold tracking-tight">Market Data Explorer</h1>
           <p className="mt-2 text-sm text-muted-foreground">Historical daily prices stored in local SQLite. No live quotes.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="outline">Local SQLite</Badge>
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
           <Button type="button" variant={showSearch ? "secondary" : "outline"} size="sm" aria-expanded={showSearch} aria-controls="market-search-panel" onClick={() => setShowSearch((current) => !current)}>
-            <SlidersHorizontal aria-hidden="true" /> {showSearch ? "Hide search" : "Show search"}
+            <SlidersHorizontal aria-hidden="true" /> {showSearch ? "Hide filters" : "Show filters"}
           </Button>
+          <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline">Local SQLite</Badge>
           <Button type="button" variant="secondary" size="sm" onClick={() => setReload((v) => v + 1)}>
             <RefreshCw aria-hidden="true" /> Reload local data
           </Button>
           <Button type="button" size="sm" onClick={onOpenAcquisition}>
             <Database aria-hidden="true" /> Data Acquisition
           </Button>
+          </div>
         </div>
       </header>
 
@@ -228,7 +249,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                       aria-controls={instrumentListId + "-list"}
                       aria-activedescendant={instrumentFocused && activeSuggestion >= 0 ? instrumentListId + "-option-" + activeSuggestion : undefined}
                       type="search"
-                      value={instrumentQuery}
+                      value={instrumentFocused ? instrumentQuery : (instrumentNames[symbol] ? `${symbol} — ${instrumentNames[symbol]}` : instrumentQuery)}
                       onChange={(event) => { setInstrumentQuery(event.target.value); setActiveSuggestion(-1); }}
                       onFocus={() => setInstrumentFocused(true)}
                       onBlur={() => { setInstrumentFocused(false); setActiveSuggestion(-1); }}
@@ -249,7 +270,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                           if (match) chooseInstrument(match);
                         }
                       }}
-                      placeholder="Search stored ticker, e.g. AAPL"
+                      placeholder="Search ticker, company or ETF name"
                       maxLength={80}
                       autoComplete="off"
                       className="h-12 w-full min-w-0 rounded-md border border-input bg-muted pl-9 pr-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -268,7 +289,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                             className={`flex w-full min-w-0 items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-accent ${activeSuggestion === index ? "bg-accent" : ""}`}
                           >
                             <span className="font-semibold text-foreground">{item.symbol}</span>
-                            <span className="min-w-0 flex-1 truncate">{item.provider === "tiingo" ? "Tiingo" : item.provider === "alpaca_sip" ? "Alpaca SIP" : "Alpha Vantage"}</span>
+                            <span className="min-w-0 flex-1 truncate">{instrumentNames[item.symbol] ?? (item.provider === "tiingo" ? "Tiingo" : item.provider === "alpaca_sip" ? "Alpaca SIP" : "Alpha Vantage")}</span>
                             <span className="shrink-0 text-[11px]">{formatInteger(item.sessions)} sessions</span>
                           </button>
                         )) : <p className="px-3 py-2 text-xs">No stored instruments match. Try a different ticker or use Data Acquisition.</p>}
