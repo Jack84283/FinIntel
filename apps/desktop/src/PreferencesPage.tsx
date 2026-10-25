@@ -142,7 +142,7 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
               <div className="flex min-w-0 items-center gap-2"><LockKeyhole aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">Privacy & storage</CardTitle></div>
               <CardDescription>Built for a private, local-first financial workspace.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm>
+            <CardContent className="space-y-3 text-sm">
               <div className="flex min-w-0 gap-3"><HardDrive aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Historical prices and research data are stored locally.</p></div>
               <div className="flex min-w-0 gap-3"><ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Provider credentials remain in your backend environment, not in these preferences.</p></div>
               <div className="flex min-w-0 gap-3"><Monitor aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Appearance preferences are saved only on this device.</p></div>
