@@ -74,3 +74,23 @@ export async function fetchMarketImports(limit = 10): Promise<ImportRecord[]> {
   );
   return parseImports(payload);
 }
+
+export interface ImportHistoryPage {
+  items: ImportRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export async function searchMarketImports(query: string, provider: string, offset: number, limit = 20): Promise<ImportHistoryPage> {
+  if (query.length > 80 || provider.length > 40 || !Number.isSafeInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error("Invalid import history search parameters.");
+  }
+  const params = new URLSearchParams({ q: query, provider, offset: String(offset), limit: String(limit) });
+  const raw = await getLocal("/api/v1/market-data/imports/search?" + params, "market_imports_search", { q: query, provider, offset, limit });
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid import history result.");
+  const result = raw as Record<string, unknown>;
+  if (!Number.isSafeInteger(result.total) || (result.total as number) < 0 ||
+      result.limit !== limit || result.offset !== offset) throw new Error("Invalid history pagination metadata.");
+  return { items: parseImports(result.items), total: result.total as number, limit, offset };
+}
