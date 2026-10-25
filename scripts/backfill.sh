@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FinIntel local historical backfill controller. Run with: bash scripts/backfill.sh start|status|logs|stop
+# FinIntel local historical backfill controller. Run with: bash scripts/backfill.sh start|retry-failed|status|logs|stop
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -43,7 +43,11 @@ check_setup() {
 }
 
 case "${1:-}" in
-  start)
+  start|retry-failed)
+    if is_running && [[ "${1}" == "retry-failed" ]]; then
+      echo "Stop the current worker before retrying failed instruments." >&2
+      exit 2
+    fi
     if is_running; then
       echo "Already running (PID $(cat "$PID_FILE"))."
       exit 0
@@ -53,6 +57,10 @@ case "${1:-}" in
     MAX_REQUESTS="${FININTEL_BACKFILL_MAX_REQUESTS_PER_DAY:-0}"
     DELAY="${FININTEL_BACKFILL_DELAY_SECONDS:-0}"
     PERIOD="${FININTEL_BACKFILL_PERIOD:-10y}"
+    EXTRA_ARGS=()
+    if [[ "${1}" == "retry-failed" ]]; then
+      EXTRA_ARGS+=(--retry-failed)
+    fi
     if [[ "$MAX_REQUESTS" == "0" ]]; then
       echo "Starting local historical backfill: $PROVIDER ($PERIOD); no daily cap. Provider rate limits apply."
     else
@@ -62,7 +70,7 @@ case "${1:-}" in
       "$PYTHON" -u -m "$MODULE" \
       --provider "$PROVIDER" --period "$PERIOD" \
       --max-requests-per-day "$MAX_REQUESTS" --delay-seconds "$DELAY" \
-      --state-path "$STATE_FILE" >> "$LOG_FILE" 2>&1 < /dev/null &
+      --state-path "$STATE_FILE" "${EXTRA_ARGS[@]}" >> "$LOG_FILE" 2>&1 < /dev/null &
     pid=$!
     printf '%s\n' "$pid" > "$PID_FILE"
     sleep 1
@@ -82,7 +90,7 @@ case "${1:-}" in
     fi
     if [[ -f "$STATE_FILE" ]]; then
       if [[ -x "$PYTHON" ]]; then
-        "$PYTHON" -c 'import json,sys; p=json.load(open(sys.argv[1])); print("Provider:",p.get("provider")," Status:",p.get("last_status")," Requests today:",p.get("requests")," Current:",p.get("current_symbol"))' "$STATE_FILE"
+        "$PYTHON" -c 'import json,sys; p=json.load(open(sys.argv[1])); print("Provider:",p.get("provider")," Status:",p.get("last_status")," Attempts today:",p.get("requests")," Current:",p.get("current_symbol")," Failed symbols:",len(p.get("failed_symbols",{})))' "$STATE_FILE"
       else
         cat "$STATE_FILE"
       fi
@@ -105,7 +113,7 @@ case "${1:-}" in
     rm -f "$PID_FILE"
     ;;
   *)
-    echo "Usage: bash scripts/backfill.sh {start|status|logs|stop}" >&2
+    echo "Usage: bash scripts/backfill.sh {start|retry-failed|status|logs|stop}" >&2
     echo "Optional env: FININTEL_BACKFILL_PROVIDER=alpaca_sip FININTEL_BACKFILL_MAX_REQUESTS_PER_DAY=0 (unlimited) FININTEL_ALPACA_REQUESTS_PER_MINUTE=180 FININTEL_BACKFILL_DELAY_SECONDS=0 FININTEL_BACKFILL_PERIOD=10y" >&2
     exit 2
     ;;
