@@ -50,7 +50,21 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
   useEffect(() => {
     let ignore = false;
     setIndexState("loading");
-    fetchMarketInstruments()
+    const fetchWithRetry = async () => {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          return await fetchMarketInstruments();
+        } catch (error: unknown) {
+          lastError = error;
+          if (attempt < 2) {
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 400 * (attempt + 1)));
+          }
+        }
+      }
+      throw lastError;
+    };
+    fetchWithRetry()
       .then((catalog) => {
         if (ignore) return;
         setInstruments(catalog);
