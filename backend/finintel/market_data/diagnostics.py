@@ -54,7 +54,7 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
             cursor = conn.execute(
                 "SELECT session_date, close FROM daily_prices "
                 "WHERE series_id=? ORDER BY session_date",
-                (sid,)
+                (sid,),
             )
             prev_day = None
             prev_close = None
@@ -80,14 +80,14 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                         gaps["series_with_gaps_" + str(sid)] += 1
                         if len(gap_examples) < examples_limit:
                             gap_examples.append(
-                            {
-                                "symbol": item["symbol"],
-                                "provider": item["provider"],
-                                "previous": prev_day.isoformat(),
-                                "next": day.isoformat(),
-                                "weekday_candidates": missing,
-                            }
-                        )
+                                {
+                                    "symbol": item["symbol"],
+                                    "provider": item["provider"],
+                                    "previous": prev_day.isoformat(),
+                                    "next": day.isoformat(),
+                                    "weekday_candidates": missing,
+                                }
+                            )
                     if prev_close is not None:
                         ratio = close / prev_close
                         if (ratio >= 2 or ratio <= Decimal("0.5")) and len(
