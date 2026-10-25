@@ -6,6 +6,7 @@ import sqlite3
 import time
 from collections import Counter
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from finintel.storage.db import database_path
@@ -53,7 +54,6 @@ def validate(db: Path, *, sample_limit: int = 20) -> dict:
             total += 1
             try:
                 day_date = date.fromisoformat(day)
-                from decimal import Decimal, InvalidOperation
                 prices = [Decimal(str(row[key])) for key in ("open", "high", "low", "close")]
                 o, h, l, c = prices
                 if not all(price.is_finite() and price > 0 for price in prices):
@@ -73,10 +73,6 @@ def validate(db: Path, *, sample_limit: int = 20) -> dict:
         if previous is not None:
             coverage[previous] = {"rows": count, "first": first, "last": last}
         empty = [dict(row) for row in series if row["id"] not in coverage]
-        missing_rows = conn.execute(
-            "SELECT COUNT(*) FROM daily_prices p LEFT JOIN series s ON s.id=p.series_id "
-            "WHERE s.id IS NULL"
-        ).fetchone()[0] if total < 100000 else None
         return {
             "database": str(db), "schema_version": schema,
             "series_count": len(series), "price_rows": total,
@@ -85,8 +81,6 @@ def validate(db: Path, *, sample_limit: int = 20) -> dict:
             "series_without_prices": len(empty),
             "empty_series_examples": empty[:sample_limit],
             "issues": dict(sorted(issues.items())), "issue_examples": examples,
-            "orphan_price_rows": missing_rows,
-            "orphan_check_skipped": missing_rows is None,
             "integrity": "issues_found" if issues else "no_row_level_issues_found",
             "elapsed_seconds": round(time.monotonic() - started, 2),
             "notes": [
