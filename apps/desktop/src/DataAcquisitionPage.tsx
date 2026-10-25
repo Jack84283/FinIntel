@@ -21,7 +21,7 @@ export function DataAcquisitionPage({
 
   return (
     <section className="min-w-0 space-y-2" aria-labelledby="acquisition-page-title">
-      <header className="grid min-w-0 gap-2 border-b border-border pb-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+      <header className="grid min-w-0 gap-2 border-b border-border pb-2">
         <div className="min-w-0">
           <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Data Acquisition</p>
           <h1 id="acquisition-page-title" className="mt-2 text-2xl font-semibold tracking-tight">Data Acquisition</h1>
