@@ -14,7 +14,6 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-import exchange_calendars as xcals
 
 from finintel.storage.db import database_path
 
@@ -61,6 +60,12 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                     (reference["id"],),
                 )
             ]
+        try:
+            import exchange_calendars as xcals
+        except ImportError as exc:
+            raise RuntimeError(
+                "Data Validation needs exchange-calendars. Run: python -m pip install -e ./backend"
+            ) from exc
         # Calendar sessions are authoritative for NYSE-listed equities and ETFs.
         nyse = xcals.get_calendar(
             "XNYS", start="2000-01-01", end=(date.today() + timedelta(days=365)).isoformat()
