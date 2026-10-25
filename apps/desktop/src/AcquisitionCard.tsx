@@ -94,7 +94,7 @@ export function AcquisitionCard({
   };
 
   return (
-    <Card aria-labelledby="acquisition-title" className="min-w-0 gap-3 py-4">
+    <Card aria-labelledby="acquisition-title" className="min-w-0">
       <CardHeader className="min-w-0 gap-y-3 sm:px-6">
         <div className="col-span-2 flex min-w-0 flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
