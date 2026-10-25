@@ -136,13 +136,15 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                         official_gaps["sessions"] += official_count
                         official_gaps["series_" + str(sid)] += 1
                         if len(official_examples) < examples_limit:
-                            official_examples.append({
-                                "symbol": item["symbol"],
-                                "provider": item["provider"],
-                                "previous": prev_day.isoformat(),
-                                "next": day.isoformat(),
-                                "expected_xnys_sessions": official_count,
-                            })
+                            official_examples.append(
+                                {
+                                    "symbol": item["symbol"],
+                                    "provider": item["provider"],
+                                    "previous": prev_day.isoformat(),
+                                    "next": day.isoformat(),
+                                    "expected_xnys_sessions": official_count,
+                                }
+                            )
                     if missing:
                         gaps["weekday_gap_candidates"] += missing
                         gaps["series_with_gaps_" + str(sid)] += 1
