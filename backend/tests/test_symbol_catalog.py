@@ -184,6 +184,18 @@ def test_csv_checks_active_type_and_duplicate_conflicts():
         parse_listing_csv(b'{"Note":"quota exceeded"}')
 
 
+
+def test_listing_skips_isolated_invalid_metadata_without_losing_valid_rows():
+    # A real-world listing may contain an empty or malformed name in one row.
+    feed = (
+        LISTING
+        + b"BAD,Name\\tWithTab,NYSE,Stock,2020-01-01,null,Active\\n"
+        + b"EMPTY,,NASDAQ,Stock,2020-01-01,null,Active\\n"
+    )
+    rows = parse_listing_csv(feed)
+    assert [row["symbol"] for row in rows] == ["AAPL", "SPY"]
+
+
 def test_remote_listing_uses_secure_request_without_logging_key(monkeypatch):
     monkeypatch.setenv("FININTEL_ALPHA_VANTAGE_API_KEY", "DUMMY_SECRET")
     captured = []
