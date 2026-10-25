@@ -221,14 +221,21 @@ def test_access_denied_pauses_and_preserves_retry_candidate(tmp_path, monkeypatc
     assert "AAPL" not in state["failed_symbols"]
 
 
-def test_three_transient_provider_errors_pause_safely(tmp_path, monkeypatch):
+def test_three_transient_provider_errors_skip_symbol_and_continue(tmp_path, monkeypatch):
     monkeypatch.setattr(backfill_worker, "alpaca_configured", lambda: True)
-    monkeypatch.setattr(backfill_worker, "pending_symbols", lambda **kwargs: ["AAPL"])
     monkeypatch.setattr(
-        backfill_worker,
-        "acquire_and_store",
-        lambda *args, **kwargs: (_ for _ in ()).throw(ProviderUnavailable()),
+        backfill_worker, "pending_symbols",
+        lambda **kwargs: ["AAPL", "MSFT"],
     )
+    calls = []
+
+    def acquire(symbol, **kwargs):
+        calls.append(symbol)
+        if symbol == "AAPL":
+            raise ProviderUnavailable()
+        return {"import_id": 10}
+
+    monkeypatch.setattr(backfill_worker, "acquire_and_store", acquire)
     delays = []
     monkeypatch.setattr(backfill_worker.time, "sleep", delays.append)
     checkpoint = tmp_path / "network.json"
@@ -239,15 +246,14 @@ def test_three_transient_provider_errors_pause_safely(tmp_path, monkeypatch):
             max_per_day=0,
             delay=0,
             state_path=checkpoint,
-            once=False,
+            once=True,
         )
-        == 2
+        == 0
     )
-    assert delays == [5, 10]
+    assert calls == ["AAPL", "AAPL", "AAPL", "MSFT"]
     state = json.loads(checkpoint.read_text())
-    assert state["last_status"] == "paused_provider_unavailable"
-    assert state["attempted"] == []
-
+    assert state["failed_symbols"]["AAPL"]["reason"] == "provider_unavailable"
+    assert state["last_status"] == "retry_next_day"
 
 def test_three_symbol_errors_do_not_stop_bulk_download(tmp_path, monkeypatch):
     monkeypatch.setattr(backfill_worker, "alpaca_configured", lambda: True)
