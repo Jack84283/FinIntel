@@ -28,3 +28,18 @@ async function request(path: string, command: string, checks?: ValidationCheck[]
 export const fetchValidationStatus = () => request("/api/v1/validation/status", "validation_status");
 export const startValidation = (checks: ValidationCheck[]) =>
   request("/api/v1/validation/run", "validation_start", checks);
+
+export async function verifyCorporateReference(symbol: string): Promise<Record<string, unknown>> {
+  const normalized = symbol.trim().toUpperCase();
+  if (!/^[A-Z0-9][A-Z0-9.-]{0,14}$/.test(normalized)) throw new Error("Invalid ticker.");
+  if (isTauri()) return invoke<Record<string, unknown>>("validation_corporate_reference", { symbol: normalized });
+  const response = await fetch("/api/v1/validation/corporate-reference", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbol: normalized }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail ?? `Reference lookup HTTP ${response.status}`);
+  }
+  return response.json();
+}
