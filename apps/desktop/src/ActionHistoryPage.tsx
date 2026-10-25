@@ -41,7 +41,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
 
   return (
     <section className="space-y-4" aria-labelledby="action-history-title">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-5">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-2">
         <div>
           <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Data & Operations</p>
           <h1 id="action-history-title" className="mt-2 text-2xl font-semibold tracking-tight">Action History</h1>
