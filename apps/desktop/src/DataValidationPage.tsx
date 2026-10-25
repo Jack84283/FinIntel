@@ -2,7 +2,7 @@ import { PageHeader } from "./PageHeader";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { fetchValidationStatus, startValidation, type ValidationCheck, type ValidationJob } from "./validation-api";
+import { fetchValidationStatus, startValidation, verifyCorporateReference, type ValidationCheck, type ValidationJob } from "./validation-api";
 
 const options: { id: ValidationCheck; label: string; detail: string }[] = [
   { id: "coverage", label: "P0 · Historical coverage", detail: "Observed ranges and potential weekday gaps (holidays not excluded)" },
@@ -17,6 +17,10 @@ export function DataValidationPage() {
   const [job, setJob] = useState<ValidationJob>({ status: "idle" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [referenceSymbol, setReferenceSymbol] = useState("AAPL");
+  const [referenceBusy, setReferenceBusy] = useState(false);
+  const [referenceReport, setReferenceReport] = useState<Record<string, unknown> | null>(null);
+  const [referenceError, setReferenceError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -91,6 +95,28 @@ export function DataValidationPage() {
           <Button onClick={() => { void run(); }} disabled={busy || running || selected.length === 0}>
             {running ? "Validation running…" : busy ? "Starting…" : "Run selected checks"}
           </Button>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>P1 · Split and dividend reference</CardTitle>
+          <CardDescription>Optional, explicit Tiingo lookup for a single symbol. Requires a configured local Tiingo token; does not modify stored prices.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <input className="h-9 w-32 rounded-md border border-input bg-background px-3 text-sm" aria-label="Reference ticker" value={referenceSymbol} maxLength={15} onChange={(event) => setReferenceSymbol(event.target.value)} />
+            <Button disabled={referenceBusy} variant="secondary" onClick={() => {
+              setReferenceBusy(true); setReferenceError(""); setReferenceReport(null);
+              void verifyCorporateReference(referenceSymbol)
+                .then(setReferenceReport)
+                .catch((cause: unknown) => setReferenceError(String(cause)))
+                .finally(() => setReferenceBusy(false));
+            }}>{referenceBusy ? "Checking…" : "Verify corporate events"}</Button>
+          </div>
+          {referenceError && <p role="alert" className="text-sm text-destructive">{referenceError}</p>}
+          {referenceReport && <details open className="rounded-md border border-border p-3">
+            <summary className="cursor-pointer text-sm font-medium">Reference events ({String(referenceReport.event_count ?? 0)})</summary>
+            <pre className="mt-2 max-h-[360px] overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(referenceReport, null, 2)}</pre>
+          </details>}
         </CardContent>
       </Card>
       <Card>
