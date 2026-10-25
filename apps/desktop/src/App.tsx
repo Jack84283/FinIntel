@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, BarChart3, BrainCircuit, BriefcaseBusiness, CircleCheck, CircleOff, Clock3, Database, Download, History, RefreshCw, Settings } from "lucide-react";
+import { Activity, BarChart3, BrainCircuit, BriefcaseBusiness, CircleCheck, CircleOff, Clock3, Database, Download, History, ShieldCheck, RefreshCw, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,10 +8,11 @@ import { fetchBackendHealth } from "./api";
 import { MarketExplorer } from "./MarketExplorer";
 import { PreferencesPage } from "./PreferencesPage";
 import { ActionHistoryPage } from "./ActionHistoryPage";
+import { DataValidationPage } from "./DataValidationPage";
 import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
 import type { BackendHealth } from "./health";
 
-type Screen = "overview" | "market" | "intelligence" | "data-acquisition" | "action-history" | "portfolio" | "settings";
+type Screen = "overview" | "market" | "intelligence" | "data-acquisition" | "data-validation" | "action-history" | "portfolio" | "settings";
 const groups = [
   { heading: "Workspace", items: [
     { id: "overview", label: "Overview", icon: Activity },
@@ -20,6 +21,7 @@ const groups = [
   ] },
   { heading: "Data & Operations", items: [
     { id: "data-acquisition", label: "Data Acquisition", icon: Database },
+    { id: "data-validation", label: "Data Validation", icon: ShieldCheck },
     { id: "action-history", label: "Action History", icon: History },
   ] },
   { heading: "Workspace & Preferences", items: [
@@ -96,6 +98,8 @@ export default function App() {
           <MarketExplorer initialSelection={marketSelection} onOpenAcquisition={() => setScreen("data-acquisition")} />
         ) : screen === "data-acquisition" ? (
           <DataAcquisitionPage onViewMarket={openMarkets} />
+        ) : screen === "data-validation" ? (
+          <DataValidationPage />
         ) : screen === "action-history" ? (
           <ActionHistoryPage onViewMarket={openMarkets} />
         ) : screen === "settings" ? (
