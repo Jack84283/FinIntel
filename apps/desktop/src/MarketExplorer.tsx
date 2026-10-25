@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useId, type FormEvent } from "react";
-import { AlertCircle, BarChart3, Database, RefreshCw, Search } from "lucide-react";
+import { AlertCircle, BarChart3, Database, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,6 +39,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
   const [descending, setDescending] = useState(true);
   const [page, setPage] = useState(0);
   const [reload, setReload] = useState(0);
+  const [showSearch, setShowSearch] = useState(false);
   const [instrumentQuery, setInstrumentQuery] = useState(initialSelection?.symbol ?? "");
   const [instrumentFocused, setInstrumentFocused] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState(-1);
@@ -167,6 +168,9 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="outline">Local SQLite</Badge>
+          <Button type="button" variant={showSearch ? "secondary" : "outline"} size="sm" aria-expanded={showSearch} aria-controls="market-search-panel" onClick={() => setShowSearch((current) => !current)}>
+            <SlidersHorizontal aria-hidden="true" /> {showSearch ? "Hide search" : "Show search"}
+          </Button>
           <Button type="button" variant="secondary" size="sm" onClick={() => setReload((v) => v + 1)}>
             <RefreshCw aria-hidden="true" /> Reload local data
           </Button>
@@ -203,6 +207,8 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
 
       {indexState === "ready" && instruments.length > 0 && (
         <>
+          {showSearch && (
+          <div id="market-search-panel">
           <Card>
             <CardHeader>
               <CardTitle>Instrument & time range</CardTitle>
@@ -300,6 +306,8 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
               {validationError && <p role="alert" className="mt-3 text-sm text-destructive">{validationError}</p>}
             </CardContent>
           </Card>
+          </div>
+          )
 
           {seriesState === "loading" && (
             <Card><CardContent className="space-y-4"><Skeleton className="h-7 w-44" aria-label="Loading historical prices" /><Skeleton className="h-72 w-full" /></CardContent></Card>
