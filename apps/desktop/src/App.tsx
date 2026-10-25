@@ -110,6 +110,7 @@ export default function App() {
               <div>
                 <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / {placeholders[screen]?.title}</p>
                 <h1 id="placeholder-title" className="mt-2 text-2xl font-semibold tracking-tight">{placeholders[screen]?.title}</h1>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{placeholders[screen]?.description}</p>
               </div>
               <Badge variant="outline">Not implemented</Badge>
             </header>
@@ -124,6 +125,7 @@ export default function App() {
               <div>
                 <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Overview</p>
                 <h1 id="overview-title" className="mt-2 text-2xl font-semibold tracking-tight">Private Financial Intelligence</h1>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">Explore locally stored market data and build your private research workspace.</p>
               </div>
               <Badge variant="outline">M1 · Local workstation</Badge>
             </header>
