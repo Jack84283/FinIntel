@@ -271,12 +271,37 @@ async fn validation_start(checks: Vec<String>) -> Result<serde_json::Value, Stri
     Ok(payload)
 }
 
+#[tauri::command]
+async fn validation_corporate_reference(symbol: String) -> Result<serde_json::Value, String> {
+    if !valid_symbol(&symbol) {
+        return Err("Invalid equity ticker.".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(75))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize local HTTP client.".to_string())?;
+    let response = client
+        .post(format!("{BACKEND}/api/v1/validation/corporate-reference"))
+        .json(&serde_json::json!({"symbol": symbol}))
+        .send().await
+        .map_err(|_| "Could not reach local validation backend.".to_string())?;
+    let status = response.status();
+    let payload = response.json::<serde_json::Value>().await
+        .map_err(|_| "Corporate-action backend returned malformed JSON.".to_string())?;
+    if !status.is_success() {
+        return Err(format!("HTTP {}: {}", status.as_u16(), payload["detail"].as_str().unwrap_or("Reference verification failed.")));
+    }
+    Ok(payload)
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             backend_health,
             validation_status,
             validation_start,
+            validation_corporate_reference,
             market_instruments,
             market_instrument_directory,
             market_daily,
