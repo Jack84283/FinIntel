@@ -17,7 +17,14 @@ from pathlib import Path
 from finintel.market_data.acquisition import acquire_and_store, key_configured
 from finintel.market_data.alpaca import alpaca_configured
 from finintel.market_data.batch import pending_symbols
-from finintel.market_data.provider import ProviderError, ProviderRateLimited
+from finintel.market_data.provider import (
+    ProviderAccessDenied,
+    ProviderError,
+    ProviderPayloadInvalid,
+    ProviderRateLimited,
+    ProviderSymbolUnavailable,
+    ProviderUnavailable,
+)
 from finintel.market_data.tiingo import tiingo_configured
 from finintel.storage.db import StorageError, database_path
 
@@ -45,6 +52,9 @@ def _load(path: Path, *, provider: str, asset_type: str) -> dict[str, object]:
             raise ValueError("Existing checkpoint belongs to another provider or universe")
     else:
         state = {"provider": provider, "asset_type": asset_type}
+    if not isinstance(state.get("failed_symbols", {}), dict):
+        raise ValueError("Backfill checkpoint contains invalid failed-symbol metadata")
+    state.setdefault("failed_symbols", {})
     if state.get("day") != _day():
         state.update(day=_day(), requests=0, attempted=[], last_status="resumed")
     return state
@@ -66,6 +76,7 @@ def run(
     period: str = "10y",
     outputsize: str = "compact",
     once: bool = False,
+    retry_failed: bool = False,
 ) -> int:
     if provider == "alpaca_sip" and not alpaca_configured():
         print("Alpaca API credentials are not configured; no requests were sent.", file=sys.stderr)
@@ -86,6 +97,11 @@ def run(
             return 2
         consecutive_provider_errors = 0
         consecutive_rate_limits = 0
+        if retry_failed:
+            checkpoint = _load(state_path, provider=provider, asset_type=asset_type)
+            checkpoint["failed_symbols"] = {}
+            checkpoint["last_status"] = "rechecking_failed"
+            _save(state_path, checkpoint)
         while True:
             state = _load(state_path, provider=provider, asset_type=asset_type)
             attempted = set(state["attempted"])
@@ -97,11 +113,32 @@ def run(
                 _sleep_until_next_utc_day()
                 continue
             candidates = pending_symbols(provider=provider, maximum=100000, asset_type=asset_type)
-            remaining = [symbol for symbol in candidates if symbol not in attempted]
+            excluded = state["failed_symbols"]
+            remaining = [
+                symbol for symbol in candidates if symbol not in attempted and symbol not in excluded
+            ]
             if not remaining:
-                state["last_status"] = "complete" if not candidates else "retry_next_day"
+                outstanding = [symbol for symbol in candidates if symbol not in excluded]
+                state["failed_count"] = len(excluded)
+                state["last_status"] = (
+                    "retry_next_day"
+                    if outstanding
+                    else "complete_with_failures"
+                    if excluded
+                    else "complete"
+                )
                 _save(state_path, state)
-                if not candidates or once:
+                if not outstanding or once:
+                    print(
+                        json.dumps(
+                            {
+                                "status": state["last_status"],
+                                "failed_symbols": len(excluded),
+                                "pending_today": len(outstanding),
+                            }
+                        ),
+                        flush=True,
+                    )
                     return 0
                 _sleep_until_next_utc_day()
                 continue
@@ -121,6 +158,69 @@ def run(
                 state["last_status"] = "stored"
                 state["last_import_id"] = result["import_id"]
                 print(json.dumps({"symbol": symbol, "status": "stored"}), flush=True)
+            except ProviderSymbolUnavailable:
+                consecutive_provider_errors = 0
+                state["failed_symbols"][symbol] = {
+                    "reason": "unavailable",
+                    "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                }
+                state["failed_count"] = len(state["failed_symbols"])
+                state["last_status"] = "symbol_unavailable"
+                print(
+                    json.dumps({"symbol": symbol, "status": "unavailable"}),
+                    flush=True,
+                )
+            except ProviderAccessDenied:
+                state["attempted"] = sorted(attempted)
+                state["last_status"] = "paused_provider_access"
+                state["last_error_type"] = "ProviderAccessDenied"
+                print(
+                    json.dumps({"symbol": symbol, "status": "provider_access_denied"}),
+                    flush=True,
+                )
+                return 2
+            except ProviderUnavailable:
+                consecutive_provider_errors += 1
+                state["attempted"] = sorted(attempted)
+                state["last_error_type"] = "ProviderUnavailable"
+                state["last_status"] = "provider_unavailable"
+                print(
+                    json.dumps(
+                        {
+                            "symbol": symbol,
+                            "status": "provider_unavailable",
+                            "consecutive": consecutive_provider_errors,
+                        }
+                    ),
+                    flush=True,
+                )
+                if consecutive_provider_errors >= 3:
+                    state["last_status"] = "paused_provider_unavailable"
+                    return 2
+                if not once:
+                    time.sleep(5 * consecutive_provider_errors)
+                continue
+            except ProviderPayloadInvalid:
+                state["failed_symbols"][symbol] = {
+                    "reason": "invalid_payload",
+                    "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                }
+                state["failed_count"] = len(state["failed_symbols"])
+                state["last_status"] = "invalid_payload"
+                consecutive_provider_errors += 1
+                print(
+                    json.dumps(
+                        {
+                            "symbol": symbol,
+                            "status": "invalid_payload",
+                            "consecutive": consecutive_provider_errors,
+                        }
+                    ),
+                    flush=True,
+                )
+                if consecutive_provider_errors >= 3:
+                    state["last_status"] = "paused_provider_errors"
+                    return 2
             except ProviderRateLimited:
                 # A rate limit is temporary, not a daily quota or a permanent
                 # symbol failure. Retry the same instrument after backoff.
@@ -166,7 +266,7 @@ def run(
                     )
                     return 2
             except (StorageError, OSError, ValueError) as exc:
-                state["last_status"] = "failed"
+                state["last_status"] = "paused_storage"
                 state["last_error_type"] = type(exc).__name__
                 print(
                     json.dumps(
@@ -174,6 +274,7 @@ def run(
                     ),
                     flush=True,
                 )
+                return 2
             finally:
                 state["current_symbol"] = None
                 _save(state_path, state)
@@ -198,6 +299,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--outputsize", choices=("compact", "full"), default="compact")
     parser.add_argument("--state-path", type=Path, default=None)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument(
+        "--retry-failed", action="store_true",
+        help="Explicitly revisit previously unavailable/quarantined instruments",
+    )
     args = parser.parse_args(argv)
     if not 0 <= args.max_requests_per_day <= 100000:
         parser.error("Daily safety cap must be between 0 (unlimited) and 100000")
@@ -214,6 +319,7 @@ def main(argv: list[str] | None = None) -> int:
             period=args.period,
             outputsize=args.outputsize,
             once=args.once,
+            retry_failed=args.retry_failed,
         )
     except (StorageError, sqlite3.Error, ValueError, OSError) as exc:
         print("Backfill stopped: " + type(exc).__name__, file=sys.stderr)
