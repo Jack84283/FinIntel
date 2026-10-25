@@ -110,13 +110,15 @@ export default function App() {
           />
         ) : screen !== "overview" ? (
           <section aria-labelledby="placeholder-title">
-            <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-2">
+            <header className="grid min-w-0 gap-2 border-b border-border pb-2">
+              <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
               <div>
                 <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / {placeholders[screen]?.title}</p>
                 <h1 id="placeholder-title" className="mt-2 text-2xl font-semibold tracking-tight">{placeholders[screen]?.title}</h1>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">{placeholders[screen]?.description}</p>
               </div>
               <Badge variant="outline">Not implemented</Badge>
+              </div>
+              <p className="min-w-0 text-sm text-muted-foreground">{placeholders[screen]?.description}</p>
             </header>
             <Card className="mt-2 max-w-[820px]">
               <CardHeader><CardTitle>Coming in a future milestone</CardTitle><CardDescription>{placeholders[screen]?.description}</CardDescription></CardHeader>
@@ -125,13 +127,15 @@ export default function App() {
           </section>
         ) : (
           <section aria-labelledby="overview-title">
-            <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-2">
+            <header className="grid min-w-0 gap-2 border-b border-border pb-2">
+              <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
               <div>
                 <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Overview</p>
                 <h1 id="overview-title" className="mt-2 text-2xl font-semibold tracking-tight">Private Financial Intelligence</h1>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">Explore locally stored market data and build your private research workspace.</p>
               </div>
               <Badge variant="outline">M1 · Local workstation</Badge>
+              </div>
+              <p className="min-w-0 text-sm text-muted-foreground">Explore locally stored market data and build your private research workspace.</p>
             </header>
             <section className="max-w-[820px] py-6 lg:py-8">
               <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">Historical research</p>
