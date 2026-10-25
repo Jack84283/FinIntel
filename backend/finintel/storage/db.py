@@ -602,6 +602,59 @@ def list_imports(*, db: Path | None = None, limit: int = 25) -> list[dict[str, o
         conn.close()
 
 
+
+def search_import_history(
+    *, db: Path | None = None, query: str = "", provider: str = "",
+    limit: int = 20, offset: int = 0,
+) -> dict[str, object]:
+    """Filter all persisted ingestion runs before applying SQLite pagination."""
+    if not 1 <= limit <= 100 or offset < 0 or len(query) > 80 or len(provider) > 40:
+        raise ValueError("Invalid import-history search parameters")
+    path = db if db is not None else database_path()
+    conn = _read_connection(path)
+    if conn is None:
+        return {"items": [], "total": 0, "limit": limit, "offset": offset}
+    try:
+        catalog_available = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='symbol_catalog'"
+        ).fetchone() is not None
+        terms = ["1=1"]
+        params: list[object] = []
+        if provider:
+            terms.append("s.provider = ?")
+            params.append(provider)
+        if query.strip():
+            pattern = "%" + query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            matches = [
+                "s.symbol LIKE ? ESCAPE '\\'",
+                "s.provider LIKE ? ESCAPE '\\'",
+            ]
+            params.extend([pattern, pattern])
+            if catalog_available:
+                matches.append(
+                    "EXISTS (SELECT 1 FROM symbol_catalog c WHERE c.symbol=s.symbol "
+                    "AND c.name LIKE ? ESCAPE '\\')"
+                )
+                params.append(pattern)
+            terms.append("(" + " OR ".join(matches) + ")")
+        joins = "FROM ingestion_runs r JOIN series s ON r.series_id=s.id"
+        where = " WHERE " + " AND ".join(terms)
+        total = conn.execute("SELECT COUNT(*) " + joins + where, params).fetchone()[0]
+        rows = conn.execute(
+            "SELECT r.id, s.symbol, s.provider, r.retrieved_at, r.imported_at, "
+            "r.payload_sha256, r.first_session, r.last_session, r.observations, "
+            "r.inserted, r.updated, r.unchanged, r.stale, r.source_url "
+            + joins + where + " ORDER BY r.id DESC LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        ).fetchall()
+        return {"items": [dict(row) for row in rows], "total": total,
+                "limit": limit, "offset": offset}
+    except sqlite3.Error as exc:
+        raise StorageError("Could not search local import history") from exc
+    finally:
+        conn.close()
+
+
 def search_symbols(
     *,
     query: str = "",
