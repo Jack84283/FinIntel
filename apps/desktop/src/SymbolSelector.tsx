@@ -68,7 +68,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
           {catalogSource === "starter" ? "Starter directory" : "Provider directory"} · {catalogTotal.toLocaleString()} symbols
         </span>
       </div>
-      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_130px]">
+      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <input
           aria-label="Search instruments by symbol or name"
           type="search"
@@ -102,7 +102,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
           autoComplete="off"
           spellCheck={false}
           disabled={disabled || syncing}
-          className="h-9 w-full rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="h-9 w-full min-w-0 rounded-md border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       ) : (
         <select
