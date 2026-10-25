@@ -5,6 +5,8 @@ import json
 from finintel.market_data import backfill_worker
 from finintel.market_data.provider import (
     ProviderAccessDenied,
+    ProviderError,
+    ProviderPayloadInvalid,
     ProviderRateLimited,
     ProviderSymbolUnavailable,
     ProviderUnavailable,
@@ -218,3 +220,35 @@ def test_three_transient_provider_errors_pause_safely(tmp_path, monkeypatch):
     state = json.loads(checkpoint.read_text())
     assert state["last_status"] == "paused_provider_unavailable"
     assert state["attempted"] == []
+
+
+def test_three_symbol_errors_do_not_stop_bulk_download(tmp_path, monkeypatch):
+    monkeypatch.setattr(backfill_worker, "alpaca_configured", lambda: True)
+    symbols = ["AAC-U", "AAC-WS", "AACIW", "AACB"]
+    monkeypatch.setattr(backfill_worker, "pending_symbols", lambda **kwargs: symbols)
+    calls = []
+
+    def acquire(symbol, **kwargs):
+        calls.append(symbol)
+        if symbol == "AACIW":
+            raise ProviderPayloadInvalid("invalid payload")
+        if symbol != "AACB":
+            raise ProviderError("unsupported instrument")
+        return {"import_id": 42}
+
+    monkeypatch.setattr(backfill_worker, "acquire_and_store", acquire)
+    state_path = tmp_path / "three-failures.json"
+    result = backfill_worker.run(
+        provider="alpaca_sip",
+        asset_type="all",
+        max_per_day=0,
+        delay=0,
+        state_path=state_path,
+        once=True,
+    )
+    state = json.loads(state_path.read_text())
+    assert result == 0
+    assert calls == symbols
+    assert state["last_status"] == "retry_next_day"
+    assert state["failed_count"] == 3
+    assert set(state["failed_symbols"]) == set(symbols[:-1])
