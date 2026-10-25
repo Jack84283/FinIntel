@@ -53,7 +53,8 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
             # Primary-key order supports bounded per-series reads.
             cursor = conn.execute(
                 "SELECT session_date, close FROM daily_prices "
-                "WHERE series_id=? ORDER BY session_date", (sid,)
+                "WHERE series_id=? ORDER BY session_date",
+                (sid,)
             )
             prev_day = None
             prev_close = None
@@ -78,26 +79,32 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                         gaps["weekday_gap_candidates"] += missing
                         gaps["series_with_gaps_" + str(sid)] += 1
                         if len(gap_examples) < examples_limit:
-                            gap_examples.append({
-                                "symbol": item["symbol"], "provider": item["provider"],
-                                "previous": prev_day.isoformat(), "next": day.isoformat(),
+                            gap_examples.append(
+                            {
+                                "symbol": item["symbol"],
+                                "provider": item["provider"],
+                                "previous": prev_day.isoformat(),
+                                "next": day.isoformat(),
                                 "weekday_candidates": missing,
-                            })
+                            }
+                        )
                     if prev_close is not None:
                         ratio = close / prev_close
                         if (ratio >= 2 or ratio <= Decimal("0.5")) and len(
                             corporate_candidates
                         ) < examples_limit:
-                            corporate_candidates.append({
-                                "symbol": item["symbol"], "provider": item["provider"],
-                                "date": day.isoformat(), "close_ratio": str(round(ratio, 4)),
-                                "adjustment": item["adjustment"],
-                            })
+                            corporate_candidates.append(
+                                {
+                                    "symbol": item["symbol"],
+                                    "provider": item["provider"],
+                                    "date": day.isoformat(),
+                                    "close_ratio": str(round(ratio, 4)),
+                                    "adjustment": item["adjustment"],
+                                }
+                            )
                 prev_day, prev_close = day, close
             totals[sid] = {"rows": count, "first": first, "last": last}
-            timings[item["symbol"] + "/" + item["provider"]] = round(
-                time.monotonic() - begin, 4
-            )
+            timings[item["symbol"] + "/" + item["provider"]] = round(time.monotonic() - begin, 4)
 
         # Compare only exact overlapping sessions of two providers for the same symbol.
         # Never combine adjusted and raw series.
@@ -105,7 +112,7 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
             if len(variants) < 2:
                 continue
             for i, left in enumerate(variants):
-                for right in variants[i + 1:]:
+                for right in variants[i + 1 :]:
                     if left["provider"] == right["provider"] or (
                         left["adjustment"] != right["adjustment"]
                     ):
@@ -129,15 +136,20 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                             mismatches += 1
                     compared += 1
                     if len(comparisons) < examples_limit:
-                        comparisons.append({
-                            "symbol": symbol, "providers": [left["provider"], right["provider"]],
-                            "overlap_sessions": overlap, "close_divergence_over_1pct": mismatches,
-                            "elapsed_seconds": round(time.monotonic() - begin, 4),
-                        })
+                        comparisons.append(
+                            {
+                                "symbol": symbol,
+                                "providers": [left["provider"], right["provider"]],
+                                "overlap_sessions": overlap,
+                                "close_divergence_over_1pct": mismatches,
+                                "elapsed_seconds": round(time.monotonic() - begin, 4),
+                            }
+                        )
 
         slowest = sorted(timings.items(), key=lambda pair: pair[1], reverse=True)[:examples_limit]
         return {
-            "database": str(db), "series_count": len(series),
+            "database": str(db),
+            "series_count": len(series),
             "series_without_prices": sum(x["rows"] == 0 for x in totals.values()),
             "coverage_examples": [
                 {"symbol": item["symbol"], "provider": item["provider"], **totals[item["id"]]}
