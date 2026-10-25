@@ -142,9 +142,13 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
               } else if (showSuggestions && event.key === "ArrowUp") {
                 event.preventDefault();
                 setActive((index) => Math.max(index - 1, 0));
-              } else if (event.key === "Enter" && showSuggestions && active >= 0 && results[active]) {
+              } else if (event.key === "Enter") {
+                // Enter selects an autocomplete option; it must not submit
+                // the outer acquisition form or unexpectedly call a provider.
                 event.preventDefault();
-                choose(results[active]);
+                if (showSuggestions && active >= 0 && results[active]) {
+                  choose(results[active]);
+                }
               }
             }}
             disabled={disabled || syncing}
