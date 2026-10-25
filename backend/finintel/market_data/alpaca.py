@@ -119,8 +119,10 @@ class AlpacaDailyProvider:
         ticker = symbol.strip().upper()
         if not SYMBOL_PATTERN.fullmatch(ticker):
             raise ProviderError("Invalid stock or ETF symbol")
-        # Free historical SIP requests should end well before the delayed window.
-        end = datetime.now(UTC).date() - timedelta(days=1)
+        # A YYYY-MM-DD end is interpreted as midnight UTC. On free SIP access,
+        # yesterday can fall inside the restricted 15-minute window shortly
+        # after UTC midnight. Use the day before yesterday for a safe margin.
+        end = datetime.now(UTC).date() - timedelta(days=2)
         try:
             start = _start_date(period, end)
         except ValueError:
