@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { AlertCircle, BarChart3, Database, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useState, useId, type FormEvent } from "react";
+import { AlertCircle, BarChart3, Database, RefreshCw, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,6 +38,10 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
   const [descending, setDescending] = useState(true);
   const [page, setPage] = useState(0);
   const [reload, setReload] = useState(0);
+  const [instrumentQuery, setInstrumentQuery] = useState(initialSelection?.symbol ?? "");
+  const [instrumentFocused, setInstrumentFocused] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(-1);
+  const instrumentListId = useId();
 
   useEffect(() => {
     let ignore = false;
@@ -50,6 +54,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
           ?? catalog.find((item) => item.symbol === symbol)
           ?? catalog[0];
         setSymbol(matched?.symbol ?? "");
+        setInstrumentQuery(matched?.symbol ?? "");
         setPriceProvider((matched?.provider ?? "alpha_vantage") as "alpha_vantage" | "alpaca_sip" | "tiingo");
         setIndexState("ready");
         setIndexError("");
@@ -88,6 +93,22 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
       });
     return () => { ignore = true; };
   }, [symbol, priceProvider, range, reload, indexState, period]);
+
+  const matchingInstruments = useMemo(() => {
+    const q = instrumentQuery.trim().toUpperCase();
+    if (!q) return [];
+    return instruments
+      .filter((item) => item.symbol.toUpperCase().includes(q) || item.provider.toUpperCase().includes(q))
+      .sort((a, b) => Number(!a.symbol.toUpperCase().startsWith(q)) - Number(!b.symbol.toUpperCase().startsWith(q)) || a.symbol.localeCompare(b.symbol))
+      .slice(0, 8);
+  }, [instrumentQuery, instruments]);
+  const chooseInstrument = (item: MarketInstrument) => {
+    setSymbol(item.symbol);
+    setPriceProvider(item.provider as "alpha_vantage" | "alpaca_sip" | "tiingo");
+    setInstrumentQuery(item.symbol);
+    setInstrumentFocused(false);
+    setActiveSuggestion(-1);
+  };
 
   const bars = series?.observations ?? [];
   const sorted = useMemo(() => sortableBars(bars, sortColumn, descending), [bars, sortColumn, descending]);
@@ -188,25 +209,67 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
             </CardHeader>
             <CardContent>
               <form onSubmit={applyRange} className="flex flex-wrap items-end gap-3">
-                <label className="grid min-w-[155px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
-                  Instrument
-                  <select
-                    value={symbol + "|" + priceProvider}
-                    onChange={(event) => {
-                      const [ticker, selected] = event.target.value.split("|");
-                      setSymbol(ticker);
-                      setPriceProvider(selected as "alpha_vantage" | "alpaca_sip" | "tiingo");
-                    }}
-                    aria-label="Stored instrument and historical data source"
-                    className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {instruments.map((item) => (
-                      <option key={item.symbol + item.provider} value={item.symbol + "|" + item.provider}>
-                        {item.symbol} · {item.provider === "tiingo" ? "Tiingo" : item.provider === "alpaca_sip" ? "Alpaca SIP" : "Alpha Vantage"} · {formatInteger(item.sessions)} sessions
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div className="grid min-w-0 flex-[2] basis-[225px] gap-2 text-xs font-medium text-muted-foreground">
+                  <label htmlFor={instrumentListId + "-input"}>Instrument</label>
+                  <div className="relative min-w-0">
+                    <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-3 size-4" />
+                    <input
+                      id={instrumentListId + "-input"}
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded={instrumentFocused && instrumentQuery.trim().length > 0}
+                      aria-controls={instrumentListId + "-list"}
+                      aria-activedescendant={instrumentFocused && activeSuggestion >= 0 ? instrumentListId + "-option-" + activeSuggestion : undefined}
+                      type="search"
+                      value={instrumentQuery}
+                      onChange={(event) => { setInstrumentQuery(event.target.value); setActiveSuggestion(-1); }}
+                      onFocus={() => setInstrumentFocused(true)}
+                      onBlur={() => { setInstrumentFocused(false); setActiveSuggestion(-1); }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          setInstrumentFocused(false);
+                          setActiveSuggestion(-1);
+                          event.currentTarget.blur();
+                        } else if (event.key === "ArrowDown") {
+                          event.preventDefault();
+                          setActiveSuggestion((previous) => Math.min(previous + 1, matchingInstruments.length - 1));
+                        } else if (event.key === "ArrowUp") {
+                          event.preventDefault();
+                          setActiveSuggestion((previous) => Math.max(previous - 1, 0));
+                        } else if (event.key === "Enter") {
+                          event.preventDefault();
+                          const match = matchingInstruments[activeSuggestion] ?? matchingInstruments.find((item) => item.symbol.toUpperCase() === instrumentQuery.trim().toUpperCase());
+                          if (match) chooseInstrument(match);
+                        }
+                      }}
+                      placeholder="Search stored ticker, e.g. AAPL"
+                      maxLength={80}
+                      autoComplete="off"
+                      className="h-10 w-full min-w-0 rounded-md border border-input bg-muted pl-9 pr-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    {instrumentFocused && instrumentQuery.trim() && (
+                      <div id={instrumentListId + "-list"} role="listbox" aria-label="Stored instrument matches" className="absolute inset-x-0 top-full z-30 mt-1 max-h-72 overflow-y-auto rounded-md border border-border bg-card p-1 shadow-lg">
+                        {matchingInstruments.length ? matchingInstruments.map((item, index) => (
+                          <button
+                            key={item.symbol + "|" + item.provider}
+                            id={instrumentListId + "-option-" + index}
+                            type="button"
+                            role="option"
+                            aria-selected={activeSuggestion === index}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => chooseInstrument(item)}
+                            className={`flex w-full min-w-0 items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-accent ${activeSuggestion === index ? "bg-accent" : ""}`}
+                          >
+                            <span className="font-semibold text-foreground">{item.symbol}</span>
+                            <span className="min-w-0 flex-1 truncate">{item.provider === "tiingo" ? "Tiingo" : item.provider === "alpaca_sip" ? "Alpaca SIP" : "Alpha Vantage"}</span>
+                            <span className="shrink-0 text-[11px]">{formatInteger(item.sessions)} sessions</span>
+                          </button>
+                        )) : <p className="px-3 py-2 text-xs">No stored instruments match. Try a different ticker or use Data Acquisition.</p>}
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[11px] font-normal">Type to filter stored instruments; select a result to update the chart.</p>
+                </div>
                 <label className="grid min-w-[150px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
                   Display period
                   <select
