@@ -118,7 +118,7 @@ export default function App() {
               </div>
               <Badge variant="outline">Not implemented</Badge>
             </header>
-            <Card className="mt-6 max-w-[820px]">
+            <Card className="mt-2 max-w-[820px]">
               <CardHeader><CardTitle>Coming in a future milestone</CardTitle><CardDescription>{placeholders[screen]?.description}</CardDescription></CardHeader>
               <CardContent><p className="text-sm text-muted-foreground">This is a navigation placeholder. No live data or actions are available on this page yet.</p></CardContent>
             </Card>
