@@ -74,13 +74,16 @@ def validate(db: Path, *, sample_limit: int = 20) -> dict:
             coverage[previous] = {"rows": count, "first": first, "last": last}
         empty = [dict(row) for row in series if row["id"] not in coverage]
         return {
-            "database": str(db), "schema_version": schema,
-            "series_count": len(series), "price_rows": total,
+            "database": str(db),
+            "schema_version": schema,
+            "series_count": len(series),
+            "price_rows": total,
             "provider_series": dict(sorted(providers.items())),
             "series_with_prices": len(coverage),
             "series_without_prices": len(empty),
             "empty_series_examples": empty[:sample_limit],
-            "issues": dict(sorted(issues.items())), "issue_examples": examples,
+            "issues": dict(sorted(issues.items())),
+            "issue_examples": examples,
             "integrity": "issues_found" if issues else "no_row_level_issues_found",
             "elapsed_seconds": round(time.monotonic() - started, 2),
             "notes": [
