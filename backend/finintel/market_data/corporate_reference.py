@@ -34,11 +34,14 @@ def verify_events(
     own_client = client is None
     http_client = client or httpx.Client(timeout=httpx.Timeout(60.0, connect=5.0))
     try:
-        response = http_client.get(
+        try:
+            response = http_client.get(
             url,
             params={"startDate": "2010-01-01", "endDate": date.today().isoformat()},
             headers={"Authorization": "Token " + token, "Accept": "application/json"},
         )
+        except httpx.RequestError as exc:
+            raise ProviderError("Tiingo reference provider is unavailable.") from exc
         if response.status_code != 200:
             raise ProviderError("Tiingo corporate-action reference request was unsuccessful.")
         if len(response.content) > 8 * 1024 * 1024:
@@ -81,7 +84,7 @@ def verify_events(
         finally:
             conn.close()
         for event in events:
-            if event["split_factor"] == "1":
+            if Decimal(event["split_factor"]) == 1:
                 event["check"] = "dividend_reference_only"
                 continue
             earlier = [day for day in closes if day < event["date"]]
