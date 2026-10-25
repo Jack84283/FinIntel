@@ -6,6 +6,8 @@ headers. No provider response, key, or secret is logged or saved in SQLite.
 
 import json
 import os
+import threading
+import time
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
@@ -27,6 +29,31 @@ ALPACA_TERMS = "https://alpaca.markets/disclosures"
 MAX_PAGES = 8
 MAX_BARS = 12000
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
+# Basic permits 200 historical HTTP requests per minute; leave a safety margin.
+DEFAULT_REQUESTS_PER_MINUTE = 180
+_PACE_LOCK = threading.Lock()
+_LAST_REQUEST_STARTED = 0.0
+
+
+def _pace_request() -> None:
+    """Pace every Alpaca HTTP request, including subsequent pagination pages."""
+    global _LAST_REQUEST_STARTED
+    configured = os.environ.get("FININTEL_ALPACA_REQUESTS_PER_MINUTE", "180")
+    try:
+        per_minute = int(configured)
+    except ValueError as exc:
+        raise ProviderError("FININTEL_ALPACA_REQUESTS_PER_MINUTE must be an integer") from exc
+    if not 1 <= per_minute <= 10000:
+        raise ProviderError("Alpaca requests per minute must be between 1 and 10000")
+    interval = 60.0 / per_minute
+    with _PACE_LOCK:
+        now = time.monotonic()
+        delay = max(0.0, _LAST_REQUEST_STARTED + interval - now)
+        if delay:
+            time.sleep(delay)
+        _LAST_REQUEST_STARTED = time.monotonic()
+
+
 
 
 def alpaca_configured() -> bool:
@@ -170,6 +197,7 @@ class AlpacaDailyProvider:
             if page_token:
                 payload["page_token"] = page_token
             try:
+                _pace_request()
                 response = client.get(
                     ALPACA_ENDPOINT,
                     params=payload,
