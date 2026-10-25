@@ -47,6 +47,9 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
         comparisons = []
         compared = 0
         timings = {}
+        provider_pair_divergences = 0
+        jump_count = 0
+        coverage_years = Counter()
         for item in series:
             sid = item["id"]
             begin = time.monotonic()
@@ -90,6 +93,8 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                             )
                     if prev_close is not None:
                         ratio = close / prev_close
+                        if ratio >= 2 or ratio <= Decimal("0.5"):
+                            jump_count += 1
                         if (ratio >= 2 or ratio <= Decimal("0.5")) and len(
                             corporate_candidates
                         ) < examples_limit:
@@ -104,6 +109,9 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                             )
                 prev_day, prev_close = day, close
             totals[sid] = {"rows": count, "first": first, "last": last}
+            if first and last:
+                span = (date.fromisoformat(last) - date.fromisoformat(first)).days
+                coverage_years["under_1_year" if span < 365 else "under_5_years" if span < 1826 else "under_9_years" if span < 3287 else "9_plus_years"] += 1
             timings[item["symbol"] + "/" + item["provider"]] = round(time.monotonic() - begin, 4)
 
         # Compare only exact overlapping sessions of two providers for the same symbol.
@@ -135,6 +143,7 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                         except (InvalidOperation, TypeError):
                             mismatches += 1
                     compared += 1
+                    provider_pair_divergences += mismatches
                     if len(comparisons) < examples_limit:
                         comparisons.append(
                             {
@@ -160,16 +169,29 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                 key.startswith("series_with_gaps_") for key in gaps
             ),
             "gap_examples": gap_examples,
+            "observed_span_groups": dict(coverage_years),
+            "series_with_less_than_9_years_observed": sum(
+                value for key, value in coverage_years.items() if key != "9_plus_years"
+            ),
             "corporate_action_jump_candidates": corporate_candidates,
+            "corporate_action_jump_candidate_count": jump_count,
             "cross_provider_pairs_compared": compared,
+            "cross_provider_close_divergences_over_1pct": provider_pair_divergences,
             "cross_provider_comparisons": comparisons,
+            "performance_query_plan": [
+                row["detail"] for row in conn.execute(
+                    "EXPLAIN QUERY PLAN SELECT session_date, close FROM daily_prices "
+                    "WHERE series_id=? ORDER BY session_date", (0,)
+                ).fetchall()
+            ],
             "slowest_series_queries_seconds": [
                 {"series": name, "seconds": duration} for name, duration in slowest
             ],
             "elapsed_seconds": round(time.monotonic() - start, 2),
             "limitations": [
                 "Weekday gaps include exchange holidays and must not be treated as confirmed missing data.",
-                "Coverage is observed first/last date, not proof of full 10-year history.",
+                "Coverage groups use observed span; newer listings and delisted stocks may be shorter.",
+                "Gap candidates are not certified against an official exchange calendar.",
                 "Large price jumps may be splits or actual market moves; dividends are not verified.",
                 "Cross-provider comparisons require matching adjustment labels and overlapping dates.",
                 "Timings reflect this workstation and current SQLite cache, not fixed benchmarks.",
