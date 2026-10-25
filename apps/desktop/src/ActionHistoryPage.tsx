@@ -52,7 +52,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
         </Button>
       </header>
       <Card>
-        <CardHeader>
+        <CardHeader className="grid-cols-1 gap-y-2">
           <CardTitle>Completed imports</CardTitle>
           <CardDescription>Most recent 100 persisted successful imports (including CLI). Failed requests, model executions, and AI actions are not yet captured by the current history store.</CardDescription>
         </CardHeader>
