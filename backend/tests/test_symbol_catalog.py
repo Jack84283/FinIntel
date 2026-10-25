@@ -188,8 +188,8 @@ def test_listing_skips_isolated_invalid_metadata_without_losing_valid_rows():
     # A real-world listing may contain an empty or malformed name in one row.
     feed = (
         LISTING
-        + b"BAD,Name\\tWithTab,NYSE,Stock,2020-01-01,null,Active\\n"
-        + b"EMPTY,,NASDAQ,Stock,2020-01-01,null,Active\\n"
+        + b"BAD,Name\tWithTab,NYSE,Stock,2020-01-01,null,Active\n"
+        + b"EMPTY,,NASDAQ,Stock,2020-01-01,null,Active\n"
     )
     rows = parse_listing_csv(feed)
     assert [row["symbol"] for row in rows] == ["AAPL", "SPY"]
