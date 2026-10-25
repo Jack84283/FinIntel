@@ -63,15 +63,15 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
 
   return (
     <section aria-labelledby="preferences-title" className="min-w-0 space-y-2">
-      <header className="flex min-w-0 flex-wrap items-start justify-between gap-4 border-b border-border pb-2">
+      <header className="grid min-w-0 gap-2 border-b border-border pb-2">
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8aa5c3]">FinIntel / Preferences</p>
           <h1 id="preferences-title" className="mt-2 text-2xl font-semibold tracking-tight">Preferences</h1>
-          <p className="mt-2 max-w-none text-sm leading-6 text-muted-foreground">
-            Personalize the workspace and review local data settings. Changes to appearance stay on this device.
-          </p>
         </div>
         <Badge variant="outline" className="shrink-0">Device-local</Badge>
+        </div>
+        <p className="min-w-0 text-sm text-muted-foreground">Personalize the workspace and review local data settings. Changes to appearance stay on this device.</p>
       </header>
 
       <div className="grid min-w-0 items-start gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
