@@ -377,3 +377,14 @@ python -m finintel.market_data.validation --db data/finintel.sqlite3 --json data
 ```
 
 Use the path configured by `FININTEL_DB_PATH` if different from the default. The audit checks OHLC price consistency, positive finite prices, negative volume, duplicate/out-of-order trading sessions, and empty price series, and summarizes provider series counts. It reads each stored price row once without loading the full price database into memory. This can still take time for large databases. The JSON file is an optional local report; the SQLite database remains read-only. A nonzero process exit status indicates invalid price rows. Exchange-calendar gap analysis, price-adjustment verification, and cross-provider reconciliation are separate follow-up checks.
+
+
+### Coverage, corporate-action and performance diagnostics (P0–P2)
+
+Run this **separate, read-only** diagnostic after the primary OHLCV audit:
+
+```bash
+python -m finintel.market_data.diagnostics --db data/finintel.sqlite3 --json data/market-diagnostics.json
+```
+
+It reports observed first/last sessions, weekday-gap *candidates*, potential split-like price jumps, overlapping raw-vs-raw or similarly adjusted cross-provider close differences above 1%, and slowest per-series read durations. No network calls, Tiingo download, database writes, or implicit repairs occur. Weekday gaps are **not exchange-calendar validated** (holidays can appear as candidates), and large jumps are not proof of splits. No price adjustment or dividend correctness is guaranteed. Query timings are observational benchmarks, not performance limits. The diagnostic streams each series and can take several minutes on a large local database. More precise official exchange-calendar checks and split/dividend event verification require additional reference datasets.
