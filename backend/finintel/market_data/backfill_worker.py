@@ -99,7 +99,10 @@ def run(
         consecutive_rate_limits = 0
         if retry_failed:
             checkpoint = _load(state_path, provider=provider, asset_type=asset_type)
+            failed = set(checkpoint["failed_symbols"])
+            checkpoint["attempted"] = sorted(set(checkpoint["attempted"]) - failed)
             checkpoint["failed_symbols"] = {}
+            checkpoint["failed_count"] = 0
             checkpoint["last_status"] = "rechecking_failed"
             _save(state_path, checkpoint)
         while True:
