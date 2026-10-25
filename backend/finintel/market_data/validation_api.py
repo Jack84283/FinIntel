@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from finintel.market_data.diagnostics import diagnostics
+from finintel.market_data.performance import benchmark
 from finintel.market_data.validation import validate
 from finintel.storage.db import database_path
 
@@ -34,7 +35,7 @@ def _run(job_id: str, checks: list[str]) -> None:
                 assert _job is not None
                 _job["stage"] = "Scanning OHLCV integrity"
             results["integrity"] = validate(database_path())
-        if any(check in checks for check in ("coverage", "corporate", "provider", "performance")):
+        if any(check in checks for check in ("coverage", "corporate", "provider")):
             with _lock:
                 assert _job is not None
                 _job["stage"] = "Scanning historical coverage and comparisons"
@@ -78,15 +79,13 @@ def _run(job_id: str, checks: list[str]) -> None:
                         ],
                         "cross_provider_comparisons": diagnostic["cross_provider_comparisons"],
                     }
-                elif check == "performance":
-                    results["performance"] = {
-                        "elapsed_seconds": diagnostic["elapsed_seconds"],
-                        "performance_query_plan": diagnostic["performance_query_plan"],
-                        "slowest_series_queries_seconds": diagnostic[
-                            "slowest_series_queries_seconds"
-                        ],
-                    }
+
             results["limitations"] = diagnostic["limitations"]
+        if "performance" in checks:
+            with _lock:
+                assert _job is not None
+                _job["stage"] = "Benchmarking indexed SQLite queries"
+            results["performance"] = benchmark(database_path())
         with _lock:
             if _job and _job["id"] == job_id:
                 _job.update(
