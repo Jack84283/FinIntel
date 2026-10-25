@@ -184,7 +184,6 @@ def test_csv_checks_active_type_and_duplicate_conflicts():
         parse_listing_csv(b'{"Note":"quota exceeded"}')
 
 
-
 def test_listing_skips_isolated_invalid_metadata_without_losing_valid_rows():
     # A real-world listing may contain an empty or malformed name in one row.
     feed = (
