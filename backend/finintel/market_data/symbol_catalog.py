@@ -169,7 +169,9 @@ def parse_listing_csv(payload: bytes) -> list[dict[str, str]]:
                 or len(exchange) > 80
                 or any(ord(char) < 32 for char in name + exchange)
             ):
-                raise ProviderPayloadInvalid("Listing feed contains invalid instrument metadata")
+                # A small number of dirty provider rows must not invalidate a
+                # complete listing. Exclude unusable records; never persist them.
+                continue
             candidate = {
                 "symbol": ticker,
                 "name": name,
