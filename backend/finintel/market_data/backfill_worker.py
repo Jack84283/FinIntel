@@ -53,7 +53,7 @@ def _load(path: Path, *, provider: str, asset_type: str) -> dict[str, object]:
     else:
         state = {"provider": provider, "asset_type": asset_type}
     if not isinstance(state.get("failed_symbols", {}), dict):
-        raise ValueError("Backfill checkpoint contains invalid failed-symbol metadata")
+        raise TypeError("Backfill checkpoint contains invalid failed-symbol metadata")
     state.setdefault("failed_symbols", {})
     if state.get("day") != _day():
         state.update(day=_day(), requests=0, attempted=[], last_status="resumed")
@@ -323,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
             once=args.once,
             retry_failed=args.retry_failed,
         )
-    except (StorageError, sqlite3.Error, ValueError, OSError) as exc:
+    except (StorageError, sqlite3.Error, ValueError, TypeError, OSError) as exc:
         print("Backfill stopped: " + type(exc).__name__, file=sys.stderr)
         return 2
 
