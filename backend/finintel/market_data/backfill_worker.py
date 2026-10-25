@@ -85,10 +85,11 @@ def run(
             print("Another historical backfill is already using this checkpoint.", file=sys.stderr)
             return 2
         consecutive_provider_errors = 0
+        consecutive_rate_limits = 0
         while True:
             state = _load(state_path, provider=provider, asset_type=asset_type)
             attempted = set(state["attempted"])
-            if int(state["requests"]) >= max_per_day:
+            if max_per_day and int(state["requests"]) >= max_per_day:
                 state["last_status"] = "daily_limit"
                 _save(state_path, state)
                 if once:
@@ -116,16 +117,28 @@ def run(
                     symbol, provider=provider, outputsize=outputsize, period=period
                 )
                 consecutive_provider_errors = 0
+                consecutive_rate_limits = 0
                 state["last_status"] = "stored"
                 state["last_import_id"] = result["import_id"]
                 print(json.dumps({"symbol": symbol, "status": "stored"}), flush=True)
             except ProviderRateLimited:
+                # A rate limit is temporary, not a daily quota or a permanent
+                # symbol failure. Retry the same instrument after backoff.
+                consecutive_rate_limits += 1
+                retry_seconds = min(900, 60 * (2 ** min(consecutive_rate_limits - 1, 4)))
+                state["attempted"] = sorted(attempted)
                 state["last_status"] = "rate_limited"
-                print(json.dumps({"symbol": symbol, "status": "rate_limited"}), flush=True)
+                state["retry_after_seconds"] = retry_seconds
+                print(
+                    json.dumps(
+                        {"symbol": symbol, "status": "rate_limited", "retry_after_seconds": retry_seconds}
+                    ),
+                    flush=True,
+                )
                 _save(state_path, state)
                 if once:
                     return 0
-                _sleep_until_next_utc_day()
+                time.sleep(retry_seconds)
                 continue
             except ProviderError as exc:
                 consecutive_provider_errors += 1
@@ -170,15 +183,18 @@ def main(argv: list[str] | None = None) -> int:
         "--provider", choices=("alpaca_sip", "alpha_vantage", "tiingo"), default="alpaca_sip"
     )
     parser.add_argument("--asset-type", choices=("all", "Stock", "ETF"), default="all")
-    parser.add_argument("--max-requests-per-day", type=int, default=20)
-    parser.add_argument("--delay-seconds", type=float, default=15.0)
+    parser.add_argument(
+        "--max-requests-per-day", type=int, default=0,
+        help="Optional per-day safety cap; 0 means no daily cap (default)",
+    )
+    parser.add_argument("--delay-seconds", type=float, default=0.0)
     parser.add_argument("--period", choices=("5y", "10y", "max"), default="10y")
     parser.add_argument("--outputsize", choices=("compact", "full"), default="compact")
     parser.add_argument("--state-path", type=Path, default=None)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
-    if not 1 <= args.max_requests_per_day <= 100000:
-        parser.error("Daily request cap must be 1–100000")
+    if not 0 <= args.max_requests_per_day <= 100000:
+        parser.error("Daily safety cap must be between 0 (unlimited) and 100000")
     if not 0 <= args.delay_seconds <= 3600:
         parser.error("Delay must be 0–3600 seconds")
     path = args.state_path or database_path().with_suffix(".backfill.json")
