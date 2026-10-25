@@ -8,7 +8,7 @@ import argparse
 import json
 import sqlite3
 import time
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -100,8 +100,7 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                         confirmed_by_reference = max(
                             0,
                             bisect_left(reference_days, day.isoformat())
-                            - bisect_left(reference_days, prev_day.isoformat())
-                            - (1 if bisect_left(reference_days, prev_day.isoformat()) < len(reference_days) and reference_days[bisect_left(reference_days, prev_day.isoformat())] == prev_day.isoformat() else 0),
+                            - bisect_right(reference_days, prev_day.isoformat()),
                         )
                         if confirmed_by_reference > 0:
                             reference_gaps["sessions"] += confirmed_by_reference
