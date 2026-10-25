@@ -436,7 +436,11 @@ This invokes the same five read-only checks as the desktop Data Validation page,
 waits for a completed run, writes the JSON findings locally and reports OHLCV
 issues, XNYS gap candidates, provider-pair counts, and performance targets.
 This is a full-dataset scan and may be slow. It does not implicitly contact
-Tiingo or repair prices. To request an **additional, explicit** Tiingo reference
+Tiingo or repair prices. If an explicitly requested Tiingo check fails, the
+completed five-check JSON report is still saved with a
+`corporate_reference_error`; the CLI exits 2 to request manual review rather
+than discarding the audit. Missing provider credentials never cause a core
+local scan to fail. To request an **additional, explicit** Tiingo reference
 lookup, supply `--corporate-symbol AAPL` with the provider key configured in
 the process running the backend. Review the report rather than treating a zero
 provider-pair count or an unexplained XNYS gap as automatic acceptance.
