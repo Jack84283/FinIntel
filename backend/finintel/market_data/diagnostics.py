@@ -14,6 +14,8 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+import exchange_calendars as xcals
+
 from finintel.storage.db import database_path
 
 
@@ -59,6 +61,13 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                     (reference["id"],),
                 )
             ]
+        # Calendar sessions are authoritative for NYSE-listed equities and ETFs.
+        nyse = xcals.get_calendar(
+            "XNYS", start="2000-01-01", end=(date.today() + timedelta(days=365)).isoformat()
+        )
+        official_days = [session.date().isoformat() for session in nyse.sessions]
+        official_gaps = Counter()
+        official_examples = []
         gaps = Counter()
         reference_gaps = Counter()
         reference_gap_examples = []
@@ -118,6 +127,22 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                                         "reference_sessions_missing": confirmed_by_reference,
                                     }
                                 )
+                    official_count = max(
+                        0,
+                        bisect_left(official_days, day.isoformat())
+                        - bisect_right(official_days, prev_day.isoformat()),
+                    )
+                    if official_count:
+                        official_gaps["sessions"] += official_count
+                        official_gaps["series_" + str(sid)] += 1
+                        if len(official_examples) < examples_limit:
+                            official_examples.append({
+                                "symbol": item["symbol"],
+                                "provider": item["provider"],
+                                "previous": prev_day.isoformat(),
+                                "next": day.isoformat(),
+                                "expected_xnys_sessions": official_count,
+                            })
                     if missing:
                         gaps["weekday_gap_candidates"] += missing
                         gaps["series_with_gaps_" + str(sid)] += 1
@@ -217,6 +242,11 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                 key.startswith("series_with_gaps_") for key in gaps
             ),
             "gap_examples": gap_examples,
+            "xnys_internal_gap_candidates": official_gaps["sessions"],
+            "series_with_xnys_internal_gaps": sum(
+                key.startswith("series_") for key in official_gaps
+            ),
+            "xnys_gap_examples": official_examples,
             "reference_symbol": reference["symbol"] if reference else None,
             "reference_provider": reference["provider"] if reference else None,
             "reference_session_gap_candidates": reference_gaps["sessions"],
@@ -250,7 +280,7 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                 "Coverage groups use observed span; newer listings and delisted stocks may be shorter.",
                 "Reference gaps use observed SPY sessions, not an authoritative exchange calendar.",
                 "SPY and other assets can have different listing calendars, trading halts or provider outages.",
-                "Gap candidates are not certified against an official exchange calendar.",
+                "XNYS gaps use the official exchange calendar, but venue, listing and halt status still require verification.",
                 "Large price jumps may be splits or actual market moves; dividends are not verified.",
                 "Cross-provider comparisons require matching adjustment labels and overlapping dates.",
                 "Timings reflect this workstation and current SQLite cache, not fixed benchmarks.",
