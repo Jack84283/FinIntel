@@ -50,16 +50,24 @@ def _run(job_id: str, checks: list[str]) -> None:
                             "weekday_gap_candidates",
                             "series_with_weekday_gap_candidates",
                             "gap_examples",
+                            "observed_span_groups",
+                            "series_with_less_than_9_years_observed",
                         )
                     }
                 elif check == "corporate":
                     results["corporate"] = {
+                        "corporate_action_jump_candidate_count": diagnostic[
+                            "corporate_action_jump_candidate_count"
+                        ],
                         "corporate_action_jump_candidates": diagnostic[
                             "corporate_action_jump_candidates"
                         ]
                     }
                 elif check == "provider":
                     results["provider"] = {
+                        "cross_provider_close_divergences_over_1pct": diagnostic[
+                            "cross_provider_close_divergences_over_1pct"
+                        ],
                         "cross_provider_pairs_compared": diagnostic[
                             "cross_provider_pairs_compared"
                         ],
@@ -68,6 +76,7 @@ def _run(job_id: str, checks: list[str]) -> None:
                 elif check == "performance":
                     results["performance"] = {
                         "elapsed_seconds": diagnostic["elapsed_seconds"],
+                        "performance_query_plan": diagnostic["performance_query_plan"],
                         "slowest_series_queries_seconds": diagnostic[
                             "slowest_series_queries_seconds"
                         ],
