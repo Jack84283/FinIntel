@@ -492,10 +492,10 @@ def list_instruments(db: Path | None = None) -> list[dict[str, object]]:
     try:
         rows = conn.execute(
             "SELECT s.symbol, s.provider, s.frequency, s.adjustment, s.data_kind, "
-            "COUNT(p.session_date) AS sessions, MIN(p.session_date) AS first_session, "
-            "MAX(p.session_date) AS last_session "
-            "FROM series s LEFT JOIN daily_prices p ON s.id=p.series_id "
-            "GROUP BY s.id ORDER BY s.symbol, s.provider"
+            "(SELECT COUNT(*) FROM daily_prices p WHERE p.series_id=s.id) AS sessions, "
+            "(SELECT MIN(p.session_date) FROM daily_prices p WHERE p.series_id=s.id) AS first_session, "
+            "(SELECT MAX(p.session_date) FROM daily_prices p WHERE p.series_id=s.id) AS last_session "
+            "FROM series s ORDER BY s.symbol, s.provider"
         ).fetchall()
         return [dict(row) for row in rows]
     except sqlite3.Error as exc:
