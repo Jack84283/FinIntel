@@ -28,8 +28,8 @@ from finintel.storage.db import (
     lookup_symbol_type,
     read_daily,
     replace_symbol_catalog,
-    search_symbols,
     search_import_history,
+    search_symbols,
 )
 
 router = APIRouter(prefix="/api/v1/market-data", tags=["historical-market-data"])
