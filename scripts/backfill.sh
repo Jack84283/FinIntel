@@ -57,20 +57,22 @@ case "${1:-}" in
     MAX_REQUESTS="${FININTEL_BACKFILL_MAX_REQUESTS_PER_DAY:-0}"
     DELAY="${FININTEL_BACKFILL_DELAY_SECONDS:-0}"
     PERIOD="${FININTEL_BACKFILL_PERIOD:-10y}"
-    EXTRA_ARGS=()
-    if [[ "${1}" == "retry-failed" ]]; then
-      EXTRA_ARGS+=(--retry-failed)
-    fi
+    RETRY_FAILED="${1}"
     if [[ "$MAX_REQUESTS" == "0" ]]; then
       echo "Starting local historical backfill: $PROVIDER ($PERIOD); no daily cap. Provider rate limits apply."
     else
       echo "Starting local historical backfill: $PROVIDER ($PERIOD); optional safety cap $MAX_REQUESTS instruments/day."
     fi
+    if [[ "$RETRY_FAILED" == "retry-failed" ]]; then
+      set -- --retry-failed
+    else
+      set --
+    fi
     nohup env PYTHONPATH="$ROOT/backend" FININTEL_DB_PATH="${FININTEL_DB_PATH:-$ROOT/data/finintel.sqlite3}" \
       "$PYTHON" -u -m "$MODULE" \
       --provider "$PROVIDER" --period "$PERIOD" \
       --max-requests-per-day "$MAX_REQUESTS" --delay-seconds "$DELAY" \
-      --state-path "$STATE_FILE" "${EXTRA_ARGS[@]}" >> "$LOG_FILE" 2>&1 < /dev/null &
+      --state-path "$STATE_FILE" "$@" >> "$LOG_FILE" 2>&1 < /dev/null &
     pid=$!
     printf '%s\n' "$pid" > "$PID_FILE"
     sleep 1
