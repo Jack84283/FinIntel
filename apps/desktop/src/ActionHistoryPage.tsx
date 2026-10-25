@@ -1,3 +1,4 @@
+import { PageHeader } from "./PageHeader";
 import { useEffect, useState } from "react";
 import { BarChart3, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -50,18 +51,9 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
 
   return (
     <section className="space-y-2" aria-labelledby="action-history-title">
-      <header className="grid min-w-0 gap-2 border-b border-border pb-2">
-        <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Data & Operations</p>
-          <h1 id="action-history-title" className="mt-2 text-2xl font-semibold tracking-tight">Action History</h1>
-        </div>
-        <Button type="button" variant="secondary" size="sm" disabled={state === "loading"} onClick={() => { setState("loading"); setRevision((value) => value + 1); }}>
+      <PageHeader id="action-history-title" breadcrumb="FinIntel / Data & Operations" title="Action History" subtitle="Audit successful local ingestion actions separately from market analysis and acquisition controls." actions={<Button type="button" variant="secondary" size="sm" disabled={state === "loading"} onClick={() => { setState("loading"); setRevision((value) => value + 1); }}>
           <RefreshCw aria-hidden="true" /> Refresh
-        </Button>
-        </div>
-        <p className="min-w-0 text-sm text-muted-foreground">Audit successful local ingestion actions separately from market analysis and acquisition controls.</p>
-      </header>
+        </Button>} />
       <Card>
         <CardHeader className="flex flex-col items-start gap-2">
           <CardTitle>Completed imports</CardTitle>
