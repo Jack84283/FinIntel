@@ -14,7 +14,6 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-
 from finintel.storage.db import database_path
 
 
