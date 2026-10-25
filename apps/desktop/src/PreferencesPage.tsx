@@ -62,8 +62,8 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
   };
 
   return (
-    <section aria-labelledby="preferences-title" className="min-w-0 space-y-4 pb-6">
-      <header className="flex min-w-0 flex-wrap items-start justify-between gap-4 border-b border-border pb-4">
+    <section aria-labelledby="preferences-title" className="min-w-0 space-y-2">
+      <header className="flex min-w-0 flex-wrap items-start justify-between gap-4 border-b border-border pb-5">
         <div className="min-w-0">
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8aa5c3]">FinIntel / Preferences</p>
           <h1 id="preferences-title" className="mt-2 text-2xl font-semibold tracking-tight">Preferences</h1>
@@ -74,9 +74,9 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
         <Badge variant="outline" className="shrink-0">Device-local</Badge>
       </header>
 
-      <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
-        <div className="flex min-w-0 flex-col gap-4">
-          <Card className="min-w-0 gap-3 py-4">
+      <div className="grid min-w-0 items-start gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
+        <div className="flex min-w-0 flex-col gap-2">
+          <Card className="min-w-0">
             <CardHeader className="min-w-0 gap-y-2">
               <CardTitle>Appearance</CardTitle>
               <CardDescription>Keep the interface readable and comfortable at any window size.</CardDescription>
