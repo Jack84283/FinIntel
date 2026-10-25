@@ -43,5 +43,8 @@ def test_reference_action_explicit(monkeypatch, tmp_path):
         validation_api, "verify_events", lambda path, symbol: {"symbol": symbol, "events": []}
     )
     client = TestClient(app)
-    assert client.post("/api/v1/validation/corporate-reference", json={"symbol": "SPY"}).status_code == 200
+    assert (
+        client.post("/api/v1/validation/corporate-reference", json={"symbol": "SPY"}).status_code
+        == 200
+    )
     assert client.post("/api/v1/validation/corporate-reference", json={"symbol": ""}).status_code == 422
