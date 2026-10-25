@@ -106,7 +106,7 @@ export default function App() {
           />
         ) : screen !== "overview" ? (
           <section aria-labelledby="placeholder-title">
-            <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
+            <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-2">
               <div>
                 <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / {placeholders[screen]?.title}</p>
                 <h1 id="placeholder-title" className="mt-2 text-2xl font-semibold tracking-tight">{placeholders[screen]?.title}</h1>
@@ -121,7 +121,7 @@ export default function App() {
           </section>
         ) : (
           <section aria-labelledby="overview-title">
-            <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
+            <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-2">
               <div>
                 <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Overview</p>
                 <h1 id="overview-title" className="mt-2 text-2xl font-semibold tracking-tight">Private Financial Intelligence</h1>
