@@ -7,8 +7,10 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from finintel.market_data.corporate_reference import verify_events
 from finintel.market_data.diagnostics import diagnostics
 from finintel.market_data.performance import benchmark
+from finintel.market_data.provider import ProviderError
 from finintel.market_data.validation import validate
 from finintel.storage.db import database_path
 
@@ -140,3 +142,16 @@ def start_validation(request: StartRequest) -> dict:
 def validation_status() -> dict:
     with _lock:
         return _snapshot() if _job else {"status": "idle"}
+
+
+class CorporateReferenceRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=15)
+
+
+@router.post("/corporate-reference")
+def verify_corporate_reference(request: CorporateReferenceRequest) -> dict:
+    """Explicit provider verification; not triggered by ordinary local scans."""
+    try:
+        return verify_events(database_path(), request.symbol)
+    except (ProviderError, ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
