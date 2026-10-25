@@ -21,6 +21,10 @@ export async function fetchMarketInstruments(): Promise<MarketInstrument[]> {
   return parseInstruments(await getLocal("/api/v1/market-data/instruments", "market_instruments"));
 }
 
+export async function fetchMarketInstrumentDirectory(): Promise<MarketInstrument[]> {
+  return parseInstruments(await getLocal("/api/v1/market-data/instruments/directory", "market_instrument_directory"));
+}
+
 export interface DailyQuery {
   symbol: string;
   provider?: "alpha_vantage" | "alpaca_sip" | "tiingo";
