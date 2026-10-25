@@ -131,7 +131,11 @@ def run(
                 state["retry_after_seconds"] = retry_seconds
                 print(
                     json.dumps(
-                        {"symbol": symbol, "status": "rate_limited", "retry_after_seconds": retry_seconds}
+                        {
+                            "symbol": symbol,
+                            "status": "rate_limited",
+                            "retry_after_seconds": retry_seconds,
+                        }
                     ),
                     flush=True,
                 )
@@ -184,7 +188,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--asset-type", choices=("all", "Stock", "ETF"), default="all")
     parser.add_argument(
-        "--max-requests-per-day", type=int, default=0,
+        "--max-requests-per-day",
+        type=int,
+        default=0,
         help="Optional per-day safety cap; 0 means no daily cap (default)",
     )
     parser.add_argument("--delay-seconds", type=float, default=0.0)
