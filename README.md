@@ -387,4 +387,37 @@ Run this **separate, read-only** diagnostic after the primary OHLCV audit:
 python -m finintel.market_data.diagnostics --db data/finintel.sqlite3 --json data/market-diagnostics.json
 ```
 
-It reports observed first/last sessions, weekday-gap *candidates*, potential split-like price jumps, overlapping raw-vs-raw or similarly adjusted cross-provider close differences above 1%, and slowest per-series read durations. No network calls, Tiingo download, database writes, or implicit repairs occur. Weekday gaps are **not exchange-calendar validated** (holidays can appear as candidates), and large jumps are not proof of splits. No price adjustment or dividend correctness is guaranteed. Query timings are observational benchmarks, not performance limits. The diagnostic streams each series and can take several minutes on a large local database. More precise official exchange-calendar checks and split/dividend event verification require additional reference datasets.
+It reports observed first/last sessions, candidate gaps against both SPY observations
+and the **XNYS exchange calendar** (provided by `exchange-calendars`), possible
+split-like price jumps, overlapping compatible-adjustment cross-provider
+differences above 1%, and slowest full-scan per-series read durations.
+The scan is read-only and never downloads prices or performs repairs.
+
+An XNYS internal gap is evidence that the market had a scheduled trading
+session between two stored dates. It is **not conclusive** that a given stock
+should have traded on that date: listing histories, halts, venue differences,
+data entitlements and ticker reuse can explain discrepancies. A short observed
+series is not necessarily incomplete. The scan does not independently validate
+IPO dates, delistings or ten-year provider entitlements.
+
+The desktop **Data & Operations → Data Validation** page provides the same
+read-only P0–P2 checks, a structured results dashboard, and local JSON export.
+The P2-only benchmark deliberately reads just a small sample of 250-bar price
+queries and the instrument directory; its 2-second directory and 250 ms
+per-price-query acceptance thresholds are workstation targets, not guarantees
+and not a substitute for full desktop responsiveness tests.
+
+For P1 split/dividend reference checks, the page also has an **explicit**
+single-ticker Tiingo lookup. Set `FININTEL_TIINGO_API_KEY` in the local Python
+backend environment and use **Verify corporate events**. This provider request
+does not run as part of the five local checks, stores no reference prices, and
+does not modify SQLite. Split-ratio checks are heuristic: dividends are shown
+as reference events, not certified adjustment matches. Provider comparisons
+only run when compatible adjustment series actually overlap; a zero count is
+**not** a passing provider accuracy result.
+
+For local acceptance, select all five checks, export the report and review
+candidate issues with the relevant source/provider. The assistant cannot
+execute the scan against a database stored only on your Mac through GitHub.
+The PR must remain draft until this full-data acceptance, provider sample checks
+and desktop functional review are completed.
