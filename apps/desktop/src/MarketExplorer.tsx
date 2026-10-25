@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchMarketDaily, fetchMarketInstruments } from "./market-api";
+import { fetchMarketDaily, fetchMarketInstrumentDirectory } from "./market-api";
 import { searchAcquirableSymbols } from "./symbol-catalog-api";
 import type { MarketSelection } from "./DataAcquisitionPage";
 import { MarketCharts } from "./market-chart";
@@ -54,7 +54,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
       let lastError: unknown;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          return await fetchMarketInstruments();
+          return await fetchMarketInstrumentDirectory();
         } catch (error: unknown) {
           lastError = error;
           if (attempt < 2) {
@@ -149,7 +149,6 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
   const sorted = useMemo(() => sortableBars(bars, sortColumn, descending), [bars, sortColumn, descending]);
   const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
   const visibleRows = sorted.slice(page * pageSize, (page + 1) * pageSize);
-  const currentInstrument = instruments.find((item) => item.symbol === symbol && item.provider === priceProvider);
   const last = bars[bars.length - 1];
   const first = bars[0];
   const prior = bars.length > 1 ? bars[bars.length - 2] : null;
@@ -304,7 +303,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                           >
                             <span className="font-semibold text-foreground">{item.symbol}</span>
                             <span className="min-w-0 flex-1 truncate">{instrumentNames[item.symbol] ?? (item.provider === "tiingo" ? "Tiingo" : item.provider === "alpaca_sip" ? "Alpaca SIP" : "Alpha Vantage")}</span>
-                            <span className="shrink-0 text-[11px]">{formatInteger(item.sessions)} sessions</span>
+                            <span className="shrink-0 text-[11px]">Stored locally</span>
                           </button>
                         )) : <p className="px-3 py-2 text-xs">No stored instruments match. Try a different ticker or use Data Acquisition.</p>}
                       </div>
@@ -357,7 +356,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
           {seriesState === "ready" && series && (
             <>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                <Metric label="Instrument" value={series.symbol} note={currentInstrument ? formatInteger(currentInstrument.sessions) + " stored sessions · " + priceProvider : series.provider} />
+                <Metric label="Instrument" value={series.symbol} note={priceProvider + " · " + formatInteger(bars.length) + " loaded sessions"} />
                 <Metric label="Last close" value={last ? price(last.close) : "—"} note={last?.session_date ?? "No trading sessions"} />
                 <Metric label="Daily change" value={closeChange === null ? "—" : (closeChange >= 0 ? "+" : "") + price(String(closeChange))} note="Compared with prior loaded session" />
                 <Metric label="Loaded observations" value={formatInteger(bars.length)} note={series.has_more ? "Bounded result · more stored" : "Available stored data"} />
@@ -437,7 +436,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                   <p>Data kind: <span className="text-foreground">{series.data_kind}</span></p>
                   <p>Retrieved at: <span className="text-foreground">{series.retrieved_at ?? "Unavailable"}</span></p>
                   <p>Provider last refreshed: <span className="text-foreground">{series.provider_last_refreshed ?? "Unavailable"}</span></p>
-                  <p>Stored sessions: <span className="text-foreground">{formatInteger(currentInstrument?.sessions ?? bars.length)}</span></p>
+                  <p>Stored sessions: <span className="text-foreground">{formatInteger(bars.length) + (series.has_more ? " (partial)" : "")}</span></p>
                   <p className="sm:col-span-2 break-all">Source URL: <span className="text-foreground">{series.source_url ?? "Unavailable"}</span></p>
                 </CardContent>
               </Card>
