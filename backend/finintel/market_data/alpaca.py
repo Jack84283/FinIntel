@@ -38,7 +38,7 @@ _LAST_REQUEST_STARTED = 0.0
 def _pace_request() -> None:
     """Pace every Alpaca HTTP request, including subsequent pagination pages."""
     global _LAST_REQUEST_STARTED
-    configured = os.environ.get("FININTEL_ALPACA_REQUESTS_PER_MINUTE", "180")
+    configured = os.environ.get("FININTEL_ALPACA_REQUESTS_PER_MINUTE", str(DEFAULT_REQUESTS_PER_MINUTE))
     try:
         per_minute = int(configured)
     except ValueError as exc:
@@ -52,8 +52,6 @@ def _pace_request() -> None:
         if delay:
             time.sleep(delay)
         _LAST_REQUEST_STARTED = time.monotonic()
-
-
 
 
 def alpaca_configured() -> bool:
