@@ -29,6 +29,7 @@ from finintel.storage.db import (
     read_daily,
     replace_symbol_catalog,
     search_symbols,
+    search_import_history,
 )
 
 router = APIRouter(prefix="/api/v1/market-data", tags=["historical-market-data"])
@@ -110,6 +111,28 @@ def get_instruments() -> list[dict[str, object]]:
 def get_imports(limit: int = Query(default=25, ge=1, le=100)) -> list[dict[str, object]]:
     try:
         return list_imports(limit=limit)
+    except StorageError as exc:
+        raise _unavailable(exc) from exc
+
+
+class ImportHistoryPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[IngestionHistoryRecord]
+    total: int
+    limit: int
+    offset: int
+
+
+@router.get("/imports/search", response_model=ImportHistoryPage)
+def get_import_history_page(
+    q: str = Query(default="", max_length=80),
+    provider: str = Query(default="", max_length=40),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    try:
+        return search_import_history(query=q, provider=provider, limit=limit, offset=offset)
     except StorageError as exc:
         raise _unavailable(exc) from exc
 
