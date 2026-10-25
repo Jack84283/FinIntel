@@ -28,6 +28,47 @@
   --radius: 0.625rem;
 }
 
+/* Semantic colors for the optional light appearance; no content-level overrides. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: #f2f3f7;
+  --foreground: #151e2b;
+  --card: #ffffff;
+  --card-foreground: #151e2b;
+  --popover: #ffffff;
+  --popover-foreground: #151e2b;
+  --primary: #244d79;
+  --primary-foreground: #ffffff;
+  --secondary: #e3ebf6;
+  --secondary-foreground: #19426a;
+  --muted: #ebeff5;
+  --muted-foreground: #516278;
+  --accent: #e3ebf6;
+  --accent-foreground: #151e2b;
+  --destructive: #b42318;
+  --border: #d5dee9;
+  --input: #a8bacd;
+  --ring: #225da2;
+  --positive: #147d58;
+  --warning: #966107;
+}
+
+:root[data-reduce-motion="true"] *,
+:root[data-reduce-motion="true"] *::before,
+:root[data-reduce-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

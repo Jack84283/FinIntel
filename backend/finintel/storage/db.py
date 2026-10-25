@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import HistoricalBatch
 from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -116,6 +116,18 @@ CREATE TABLE action_events (
 CREATE INDEX action_events_by_time ON action_events(occurred_at DESC, id DESC);
 """
 
+# Membership must be sourced and dated independently of the security asset type.
+SCHEMA_V5 = """
+CREATE TABLE index_memberships (
+    index_code TEXT NOT NULL CHECK(index_code IN ('SP500', 'DJIA')),
+    symbol TEXT NOT NULL,
+    as_of TEXT NOT NULL,
+    source TEXT NOT NULL,
+    PRIMARY KEY (index_code, symbol, as_of)
+);
+CREATE INDEX index_membership_symbol ON index_memberships(symbol, index_code);
+"""
+
 
 class StorageError(Exception):
     """Safe failure message for local CLI or API consumers."""
@@ -130,7 +142,7 @@ def _ensure_version(conn: sqlite3.Connection, *, allow_missing: bool) -> bool:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == 0 and allow_missing:
         return False
-    if version not in (1, 2, 3, SCHEMA_VERSION):
+    if version not in (1, 2, 3, 4, SCHEMA_VERSION):
         raise StorageError(
             "SQLite schema version is unsupported; expected version "
             + str(SCHEMA_VERSION)
@@ -209,6 +221,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if conn.in_transaction:
                 conn.rollback()
             raise StorageError("Unable to migrate action-event schema to v4") from exc
+        version = 4
+    if version == 4:
+        try:
+            conn.executescript(
+                "BEGIN IMMEDIATE;\n" + SCHEMA_V5 + "\nPRAGMA user_version = 5;\nCOMMIT;"
+            )
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate index membership schema to v5") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:
@@ -283,6 +305,34 @@ def _safe_source(batch: HistoricalBatch) -> None:
         terms = urlsplit(batch.provider_terms_url)
         if terms.scheme != "https" or terms.hostname != "alpaca.markets":
             raise StorageError("Alpaca provider terms metadata is unapproved")
+        return
+    if batch.provider == "tiingo":
+        if (
+            url.scheme != "https"
+            or url.hostname != "api.tiingo.com"
+            or url.port is not None
+            or url.username
+            or url.password
+            or url.path != "/tiingo/daily/" + batch.symbol + "/prices"
+            or set(params) != {"startDate", "endDate"}
+            or len(params["startDate"]) != 1
+            or len(params["endDate"]) != 1
+        ):
+            raise StorageError("Tiingo snapshot URL contains invalid metadata")
+        try:
+            first = date.fromisoformat(params["startDate"][0])
+            last = date.fromisoformat(params["endDate"][0])
+        except ValueError as exc:
+            raise StorageError("Invalid Tiingo date range") from exc
+        if first > last or first > batch.first_session or last < batch.last_session:
+            raise StorageError("Tiingo source date range conflicts with observations")
+        terms = urlsplit(batch.provider_terms_url)
+        if (
+            terms.scheme != "https"
+            or terms.hostname != "www.tiingo.com"
+            or terms.path != "/about/terms"
+        ):
+            raise StorageError("Tiingo license metadata is unapproved")
         return
     if batch.provider != "alpha_vantage":
         raise StorageError("Unknown market-data provider")
@@ -434,6 +484,27 @@ def import_snapshot(snapshot: Path, *, db: Path | None = None) -> dict[str, obje
         conn.close()
 
 
+def list_instrument_directory(db: Path | None = None) -> list[dict[str, object]]:
+    """Fast navigation list: never scan the historical daily_prices table."""
+    path = db if db is not None else database_path()
+    conn = _read_connection(path)
+    if conn is None:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT symbol, provider, frequency, adjustment, data_kind "
+            "FROM series ORDER BY symbol, provider"
+        ).fetchall()
+        return [
+            {**dict(row), "sessions": 0, "first_session": None, "last_session": None}
+            for row in rows
+        ]
+    except sqlite3.Error as exc:
+        raise StorageError("Could not read local instrument directory") from exc
+    finally:
+        conn.close()
+
+
 def list_instruments(db: Path | None = None) -> list[dict[str, object]]:
     path = db if db is not None else database_path()
     conn = _read_connection(path)
@@ -442,10 +513,10 @@ def list_instruments(db: Path | None = None) -> list[dict[str, object]]:
     try:
         rows = conn.execute(
             "SELECT s.symbol, s.provider, s.frequency, s.adjustment, s.data_kind, "
-            "COUNT(p.session_date) AS sessions, MIN(p.session_date) AS first_session, "
-            "MAX(p.session_date) AS last_session "
-            "FROM series s LEFT JOIN daily_prices p ON s.id=p.series_id "
-            "GROUP BY s.id ORDER BY s.symbol, s.provider"
+            "(SELECT COUNT(*) FROM daily_prices p WHERE p.series_id=s.id) AS sessions, "
+            "(SELECT MIN(p.session_date) FROM daily_prices p WHERE p.series_id=s.id) AS first_session, "
+            "(SELECT MAX(p.session_date) FROM daily_prices p WHERE p.series_id=s.id) AS last_session "
+            "FROM series s ORDER BY s.symbol, s.provider"
         ).fetchall()
         return [dict(row) for row in rows]
     except sqlite3.Error as exc:
@@ -467,7 +538,7 @@ def read_daily(
     """Bounded, chronological read of stored daily prices; no live provider calls."""
     if limit < 1 or limit > 4000:
         raise ValueError("Daily price limit must be 1–4000")
-    if provider not in ("alpha_vantage", "alpaca_sip"):
+    if provider not in ("alpha_vantage", "alpaca_sip", "tiingo"):
         raise ValueError("Invalid historical data provider")
     path = db if db is not None else database_path()
     conn = _read_connection(path)
@@ -548,6 +619,75 @@ def list_imports(*, db: Path | None = None, limit: int = 25) -> list[dict[str, o
         return [dict(row) for row in rows]
     except sqlite3.Error as exc:
         raise StorageError("Could not read local import history") from exc
+    finally:
+        conn.close()
+
+
+def search_import_history(
+    *,
+    db: Path | None = None,
+    query: str = "",
+    provider: str = "",
+    limit: int = 20,
+    offset: int = 0,
+) -> dict[str, object]:
+    """Filter all persisted ingestion runs before applying SQLite pagination."""
+    if not 1 <= limit <= 100 or offset < 0 or len(query) > 80 or len(provider) > 40:
+        raise ValueError("Invalid import-history search parameters")
+    path = db if db is not None else database_path()
+    conn = _read_connection(path)
+    if conn is None:
+        return {"items": [], "total": 0, "limit": limit, "offset": offset}
+    try:
+        catalog_available = (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='symbol_catalog'"
+            ).fetchone()
+            is not None
+        )
+        terms = ["1=1"]
+        params: list[object] = []
+        if provider:
+            terms.append("s.provider = ?")
+            params.append(provider)
+        if query.strip():
+            pattern = (
+                "%"
+                + query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                + "%"
+            )
+            matches = [
+                "s.symbol LIKE ? ESCAPE '\\'",
+                "s.provider LIKE ? ESCAPE '\\'",
+            ]
+            params.extend([pattern, pattern])
+            if catalog_available:
+                matches.append(
+                    "EXISTS (SELECT 1 FROM symbol_catalog c WHERE c.symbol=s.symbol "
+                    "AND c.name LIKE ? ESCAPE '\\')"
+                )
+                params.append(pattern)
+            terms.append("(" + " OR ".join(matches) + ")")
+        joins = "FROM ingestion_runs r JOIN series s ON r.series_id=s.id"
+        where = " WHERE " + " AND ".join(terms)
+        total = conn.execute("SELECT COUNT(*) " + joins + where, params).fetchone()[0]
+        rows = conn.execute(
+            "SELECT r.id, s.symbol, s.provider, r.retrieved_at, r.imported_at, "
+            "r.payload_sha256, r.first_session, r.last_session, r.observations, "
+            "r.inserted, r.updated, r.unchanged, r.stale, r.source_url "
+            + joins
+            + where
+            + " ORDER BY r.id DESC LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        ).fetchall()
+        return {
+            "items": [dict(row) for row in rows],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    except sqlite3.Error as exc:
+        raise StorageError("Could not search local import history") from exc
     finally:
         conn.close()
 

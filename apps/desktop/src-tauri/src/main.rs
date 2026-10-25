@@ -6,7 +6,7 @@ async fn read_backend(path: &str, params: &[(&str, String)]) -> Result<serde_jso
     // Fixed loopback host, strictly bounded routes and parameters.
     // No generic proxy, client-selected host or credentials in the webview.
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Could not initialize the local HTTP client.".to_string())?;
@@ -49,7 +49,7 @@ async fn market_acquire_daily(
     if outputsize != "compact" && outputsize != "full" {
         return Err("Output size must be compact or full.".to_string());
     }
-    if provider != "alpha_vantage" && provider != "alpaca_sip" {
+    if provider != "alpha_vantage" && provider != "alpaca_sip" && provider != "tiingo" {
         return Err("Unsupported acquisition provider.".to_string());
     }
     if !matches!(period.as_str(), "5y" | "10y" | "max") {
@@ -160,6 +160,11 @@ async fn backend_health() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
+async fn market_instrument_directory() -> Result<serde_json::Value, String> {
+    read_backend("/api/v1/market-data/instruments/directory", &[]).await
+}
+
+#[tauri::command]
 async fn market_instruments() -> Result<serde_json::Value, String> {
     read_backend("/api/v1/market-data/instruments", &[]).await
 }
@@ -176,7 +181,7 @@ async fn market_daily(
     if !valid_symbol(&symbol) {
         return Err("Invalid ticker symbol.".to_string());
     }
-    if provider != "alpha_vantage" && provider != "alpaca_sip" {
+    if provider != "alpha_vantage" && provider != "alpaca_sip" && provider != "tiingo" {
         return Err("Unsupported price-history provider.".to_string());
     }
     if limit == 0 || limit > 4000 {
@@ -222,13 +227,28 @@ async fn market_imports(limit: u8) -> Result<serde_json::Value, String> {
     .await
 }
 
+#[tauri::command]
+async fn market_imports_search(
+    q: String, provider: String, limit: u8, offset: u32,
+) -> Result<serde_json::Value, String> {
+    if q.len() > 80 || provider.len() > 40 || limit == 0 || limit > 100 {
+        return Err("Invalid import history search.".to_string());
+    }
+    read_backend(
+        "/api/v1/market-data/imports/search",
+        &[("q", q), ("provider", provider), ("limit", limit.to_string()), ("offset", offset.to_string())],
+    ).await
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             backend_health,
             market_instruments,
+            market_instrument_directory,
             market_daily,
             market_imports,
+            market_imports_search,
             market_acquisition_status,
             market_acquire_daily,
             market_symbols,

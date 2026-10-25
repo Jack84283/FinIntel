@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { AlertCircle, BarChart3, Database, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useState, useId, type FormEvent } from "react";
+import { AlertCircle, BarChart3, Database, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchMarketDaily, fetchMarketInstruments } from "./market-api";
+import { fetchMarketDaily, fetchMarketInstrumentDirectory } from "./market-api";
+import { searchAcquirableSymbols } from "./symbol-catalog-api";
 import type { MarketSelection } from "./DataAcquisitionPage";
 import { MarketCharts } from "./market-chart";
+import { MarketDatePicker } from "./components/MarketDatePicker";
 import { yearsAgo, type HistoryPeriod } from "./history-range";
 import { sortableBars, type DailySeries, type MarketInstrument } from "./market";
 
@@ -25,7 +27,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
   const [indexState, setIndexState] = useState<LoadState>("loading");
   const [indexError, setIndexError] = useState("");
   const [symbol, setSymbol] = useState(initialSelection?.symbol ?? "");
-  const [priceProvider, setPriceProvider] = useState<"alpha_vantage" | "alpaca_sip">(initialSelection?.provider ?? "alpha_vantage");
+  const [priceProvider, setPriceProvider] = useState<"alpha_vantage" | "alpaca_sip" | "tiingo">(initialSelection?.provider ?? "alpha_vantage");
   const [draftStart, setDraftStart] = useState("");
   const [draftEnd, setDraftEnd] = useState("");
   const [range, setRange] = useState({ start: "", end: "" });
@@ -38,11 +40,31 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
   const [descending, setDescending] = useState(true);
   const [page, setPage] = useState(0);
   const [reload, setReload] = useState(0);
+  const [showSearch, setShowSearch] = useState(false);
+  const [instrumentNames, setInstrumentNames] = useState<Record<string, string>>({});
+  const [instrumentQuery, setInstrumentQuery] = useState(initialSelection?.symbol ?? "");
+  const [instrumentFocused, setInstrumentFocused] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(-1);
+  const instrumentListId = useId();
 
   useEffect(() => {
     let ignore = false;
     setIndexState("loading");
-    fetchMarketInstruments()
+    const fetchWithRetry = async () => {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          return await fetchMarketInstrumentDirectory();
+        } catch (error: unknown) {
+          lastError = error;
+          if (attempt < 2) {
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 400 * (attempt + 1)));
+          }
+        }
+      }
+      throw lastError;
+    };
+    fetchWithRetry()
       .then((catalog) => {
         if (ignore) return;
         setInstruments(catalog);
@@ -50,7 +72,8 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
           ?? catalog.find((item) => item.symbol === symbol)
           ?? catalog[0];
         setSymbol(matched?.symbol ?? "");
-        setPriceProvider((matched?.provider ?? "alpha_vantage") as "alpha_vantage" | "alpaca_sip");
+        setInstrumentQuery(matched?.symbol ?? "");
+        setPriceProvider((matched?.provider ?? "alpha_vantage") as "alpha_vantage" | "alpaca_sip" | "tiingo");
         setIndexState("ready");
         setIndexError("");
       })
@@ -89,11 +112,43 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
     return () => { ignore = true; };
   }, [symbol, priceProvider, range, reload, indexState, period]);
 
+  useEffect(() => {
+    const query = instrumentQuery.trim();
+    if (!query) return;
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      searchAcquirableSymbols(query, "All", 40).then((result) => {
+        if (cancelled) return;
+        setInstrumentNames((previous) => {
+          const next = { ...previous };
+          result.results.forEach((item) => { next[item.symbol] = item.name; });
+          return next;
+        });
+      }).catch(() => { /* A missing catalog must not hide locally stored prices. */ });
+    }, 180);
+    return () => { cancelled = true; window.clearTimeout(timeout); };
+  }, [instrumentQuery]);
+
+  const matchingInstruments = useMemo(() => {
+    const q = instrumentQuery.trim().toUpperCase();
+    if (!q) return [];
+    return instruments
+      .filter((item) => item.symbol.toUpperCase().includes(q) || item.provider.toUpperCase().includes(q) || (instrumentNames[item.symbol] ?? "").toUpperCase().includes(q))
+      .sort((a, b) => Number(!a.symbol.toUpperCase().startsWith(q)) - Number(!b.symbol.toUpperCase().startsWith(q)) || a.symbol.localeCompare(b.symbol))
+      .slice(0, 8);
+  }, [instrumentQuery, instruments, instrumentNames]);
+  const chooseInstrument = (item: MarketInstrument) => {
+    setSymbol(item.symbol);
+    setPriceProvider(item.provider as "alpha_vantage" | "alpaca_sip" | "tiingo");
+    setInstrumentQuery(item.symbol);
+    setInstrumentFocused(false);
+    setActiveSuggestion(-1);
+  };
+
   const bars = series?.observations ?? [];
   const sorted = useMemo(() => sortableBars(bars, sortColumn, descending), [bars, sortColumn, descending]);
   const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
   const visibleRows = sorted.slice(page * pageSize, (page + 1) * pageSize);
-  const currentInstrument = instruments.find((item) => item.symbol === symbol && item.provider === priceProvider);
   const last = bars[bars.length - 1];
   const first = bars[0];
   const prior = bars.length > 1 ? bars[bars.length - 2] : null;
@@ -137,24 +192,29 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
 
   return (
     <section className="space-y-2" aria-labelledby="markets-title">
-      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-5">
-        <div>
-          <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Markets</p>
-          <h1 id="markets-title" className="mt-2 text-2xl font-semibold tracking-tight">Market Data Explorer</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Historical daily prices stored in local SQLite. No live quotes.</p>
+      <header className="grid min-w-0 gap-2 border-b border-border pb-2">
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Markets</p>
+            <h1 id="markets-title" className="mt-2 text-2xl font-semibold tracking-tight">Market Data Explorer</h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">Local SQLite</Badge>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setReload((v) => v + 1)}>
+              <RefreshCw aria-hidden="true" /> Reload local data
+            </Button>
+            <Button type="button" size="sm" onClick={onOpenAcquisition}>
+              <Database aria-hidden="true" /> Data Acquisition
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="outline">Local SQLite</Badge>
-          <Button type="button" variant="secondary" size="sm" onClick={() => setReload((v) => v + 1)}>
-            <RefreshCw aria-hidden="true" /> Reload local data
-          </Button>
-          <Button type="button" size="sm" onClick={onOpenAcquisition}>
-            <Database aria-hidden="true" /> Data Acquisition
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+          <p className="min-w-0 text-sm text-muted-foreground">Historical daily prices stored in local SQLite. No live quotes.</p>
+          <Button type="button" variant={showSearch ? "secondary" : "outline"} size="sm" aria-expanded={showSearch} aria-controls="market-search-panel" onClick={() => setShowSearch((current) => !current)}>
+            <SlidersHorizontal aria-hidden="true" /> {showSearch ? "Hide filters" : "Show filters"}
           </Button>
         </div>
-      </header>
-
-      {indexState === "loading" && (
+      </header>    {indexState === "loading" && (
         <Card><CardContent><Skeleton className="h-8 w-64" aria-label="Loading local instruments" /></CardContent></Card>
       )}
       {indexState === "error" && (
@@ -181,39 +241,82 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
 
       {indexState === "ready" && instruments.length > 0 && (
         <>
+          {showSearch && (
+          <div id="market-search-panel">
           <Card>
             <CardHeader>
               <CardTitle>Instrument & time range</CardTitle>
               <CardAction><Badge variant="secondary">{instruments.length} local series</Badge></CardAction>
             </CardHeader>
             <CardContent>
-              <form onSubmit={applyRange} className="flex flex-wrap items-end gap-3">
-                <label className="grid min-w-[155px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
-                  Instrument
-                  <select
-                    value={symbol + "|" + priceProvider}
-                    onChange={(event) => {
-                      const [ticker, selected] = event.target.value.split("|");
-                      setSymbol(ticker);
-                      setPriceProvider(selected as "alpha_vantage" | "alpaca_sip");
-                    }}
-                    aria-label="Stored instrument and historical data source"
-                    className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {instruments.map((item) => (
-                      <option key={item.symbol + item.provider} value={item.symbol + "|" + item.provider}>
-                        {item.symbol} · {item.provider === "alpaca_sip" ? "Alpaca SIP" : "Alpha Vantage"} · {formatInteger(item.sessions)} sessions
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="grid min-w-[150px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
+              <form onSubmit={applyRange} className="grid min-w-0 grid-cols-1 items-end gap-4 sm:grid-cols-2 2xl:grid-cols-[minmax(220px,1.7fr)_minmax(170px,1fr)_minmax(190px,1fr)_minmax(190px,1fr)]">
+                <div className="grid min-w-0 gap-2 self-start text-sm font-medium text-muted-foreground">
+                  <label htmlFor={instrumentListId + "-input"}>Instrument</label>
+                  <div className="relative min-w-0">
+                    <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-3 size-4" />
+                    <input
+                      id={instrumentListId + "-input"}
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded={instrumentFocused && instrumentQuery.trim().length > 0}
+                      aria-controls={instrumentListId + "-list"}
+                      aria-activedescendant={instrumentFocused && activeSuggestion >= 0 ? instrumentListId + "-option-" + activeSuggestion : undefined}
+                      type="search"
+                      value={instrumentFocused ? instrumentQuery : (instrumentNames[symbol] ? `${symbol} — ${instrumentNames[symbol]}` : instrumentQuery)}
+                      onChange={(event) => { setInstrumentQuery(event.target.value); setActiveSuggestion(-1); }}
+                      onFocus={() => setInstrumentFocused(true)}
+                      onBlur={() => { setInstrumentFocused(false); setActiveSuggestion(-1); }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          setInstrumentFocused(false);
+                          setActiveSuggestion(-1);
+                          event.currentTarget.blur();
+                        } else if (event.key === "ArrowDown") {
+                          event.preventDefault();
+                          setActiveSuggestion((previous) => Math.min(previous + 1, matchingInstruments.length - 1));
+                        } else if (event.key === "ArrowUp") {
+                          event.preventDefault();
+                          setActiveSuggestion((previous) => Math.max(previous - 1, 0));
+                        } else if (event.key === "Enter") {
+                          event.preventDefault();
+                          const match = matchingInstruments[activeSuggestion] ?? matchingInstruments.find((item) => item.symbol.toUpperCase() === instrumentQuery.trim().toUpperCase());
+                          if (match) chooseInstrument(match);
+                        }
+                      }}
+                      placeholder="Search ticker, company or ETF name"
+                      maxLength={80}
+                      autoComplete="off"
+                      className="h-12 w-full min-w-0 rounded-md border border-input bg-muted pl-9 pr-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    {instrumentFocused && instrumentQuery.trim() && (
+                      <div id={instrumentListId + "-list"} role="listbox" aria-label="Stored instrument matches" className="absolute inset-x-0 top-full z-30 mt-1 max-h-72 overflow-y-auto rounded-md border border-border bg-card p-1 shadow-lg">
+                        {matchingInstruments.length ? matchingInstruments.map((item, index) => (
+                          <button
+                            key={item.symbol + "|" + item.provider}
+                            id={instrumentListId + "-option-" + index}
+                            type="button"
+                            role="option"
+                            aria-selected={activeSuggestion === index}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => chooseInstrument(item)}
+                            className={`flex w-full min-w-0 items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-accent ${activeSuggestion === index ? "bg-accent" : ""}`}
+                          >
+                            <span className="font-semibold text-foreground">{item.symbol}</span>
+                            <span className="min-w-0 flex-1 truncate">{instrumentNames[item.symbol] ?? (item.provider === "tiingo" ? "Tiingo" : item.provider === "alpaca_sip" ? "Alpaca SIP" : "Alpha Vantage")}</span>
+                            <span className="shrink-0 text-[11px]">Stored locally</span>
+                          </button>
+                        )) : <p className="px-3 py-2 text-xs">No stored instruments match. Try a different ticker or use Data Acquisition.</p>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <label className="grid min-w-0 gap-2 self-start text-sm font-medium text-muted-foreground">
                   Display period
                   <select
                     aria-label="Historical time range"
                     value={period}
                     onChange={(event) => selectPeriod(event.target.value as HistoryPeriod)}
-                    className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="h-12 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <option value="recent">Latest 100 sessions</option>
                     <option value="1y">Last 1 year</option>
@@ -222,22 +325,23 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                     <option value="custom">Custom dates</option>
                   </select>
                 </label>
-                <label className="grid min-w-[155px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
-                  From (optional)
-                  <input type="date" value={draftStart} onChange={(e) => setDraftStart(e.target.value)} className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-                </label>
-                <label className="grid min-w-[155px] flex-1 gap-2 text-xs font-medium text-muted-foreground">
-                  To (optional)
-                  <input type="date" value={draftEnd} onChange={(e) => setDraftEnd(e.target.value)} className="h-10 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-                </label>
-                <Button type="submit" size="lg">Apply range</Button>
+                <MarketDatePicker label="From (optional)" value={draftStart} onChange={setDraftStart} />
+                <MarketDatePicker label="To (optional)" value={draftEnd} onChange={setDraftEnd} />
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 sm:col-span-2 2xl:col-span-4">
+                  <p className="min-w-0 flex-1 text-xs leading-5 text-muted-foreground">Type to filter stored instruments; select a result to update the chart.</p>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <Button type="submit" size="lg">Apply range</Button>
                 <Button type="button" size="lg" variant="ghost" onClick={() => {
                   setDraftStart(""); setDraftEnd(""); setRange({ start: "", end: "" }); setValidationError(""); setPeriod("recent");
                 }}>Clear</Button>
+                  </div>
+                </div>
               </form>
               {validationError && <p role="alert" className="mt-3 text-sm text-destructive">{validationError}</p>}
             </CardContent>
           </Card>
+          </div>
+          )}
 
           {seriesState === "loading" && (
             <Card><CardContent className="space-y-4"><Skeleton className="h-7 w-44" aria-label="Loading historical prices" /><Skeleton className="h-72 w-full" /></CardContent></Card>
@@ -252,7 +356,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
           {seriesState === "ready" && series && (
             <>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                <Metric label="Instrument" value={series.symbol} note={currentInstrument ? formatInteger(currentInstrument.sessions) + " stored sessions · " + priceProvider : series.provider} />
+                <Metric label="Instrument" value={series.symbol} note={priceProvider + " · " + formatInteger(bars.length) + " loaded sessions"} />
                 <Metric label="Last close" value={last ? price(last.close) : "—"} note={last?.session_date ?? "No trading sessions"} />
                 <Metric label="Daily change" value={closeChange === null ? "—" : (closeChange >= 0 ? "+" : "") + price(String(closeChange))} note="Compared with prior loaded session" />
                 <Metric label="Loaded observations" value={formatInteger(bars.length)} note={series.has_more ? "Bounded result · more stored" : "Available stored data"} />
@@ -332,7 +436,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                   <p>Data kind: <span className="text-foreground">{series.data_kind}</span></p>
                   <p>Retrieved at: <span className="text-foreground">{series.retrieved_at ?? "Unavailable"}</span></p>
                   <p>Provider last refreshed: <span className="text-foreground">{series.provider_last_refreshed ?? "Unavailable"}</span></p>
-                  <p>Stored sessions: <span className="text-foreground">{formatInteger(currentInstrument?.sessions ?? bars.length)}</span></p>
+                  <p>Stored sessions: <span className="text-foreground">{formatInteger(bars.length) + (series.has_more ? " (partial)" : "")}</span></p>
                   <p className="sm:col-span-2 break-all">Source URL: <span className="text-foreground">{series.source_url ?? "Unavailable"}</span></p>
                 </CardContent>
               </Card>

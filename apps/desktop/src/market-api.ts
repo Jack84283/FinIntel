@@ -21,9 +21,13 @@ export async function fetchMarketInstruments(): Promise<MarketInstrument[]> {
   return parseInstruments(await getLocal("/api/v1/market-data/instruments", "market_instruments"));
 }
 
+export async function fetchMarketInstrumentDirectory(): Promise<MarketInstrument[]> {
+  return parseInstruments(await getLocal("/api/v1/market-data/instruments/directory", "market_instrument_directory"));
+}
+
 export interface DailyQuery {
   symbol: string;
-  provider?: "alpha_vantage" | "alpaca_sip";
+  provider?: "alpha_vantage" | "alpaca_sip" | "tiingo";
   startDate?: string;
   endDate?: string;
   limit?: number;
@@ -41,7 +45,7 @@ export async function fetchMarketDaily(query: DailyQuery): Promise<DailySeries> 
     throw new Error("Start date must not exceed end date.");
   }
   const provider = query.provider ?? "alpha_vantage";
-  if (provider !== "alpha_vantage" && provider !== "alpaca_sip") {
+  if (provider !== "alpha_vantage" && provider !== "alpaca_sip" && provider !== "tiingo") {
     throw new Error("Unsupported historical data provider.");
   }
   const params = new URLSearchParams({ limit: String(limit), latest: "true", provider });
@@ -73,4 +77,24 @@ export async function fetchMarketImports(limit = 10): Promise<ImportRecord[]> {
     { limit },
   );
   return parseImports(payload);
+}
+
+export interface ImportHistoryPage {
+  items: ImportRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export async function searchMarketImports(query: string, provider: string, offset: number, limit = 20): Promise<ImportHistoryPage> {
+  if (query.length > 80 || provider.length > 40 || !Number.isSafeInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error("Invalid import history search parameters.");
+  }
+  const params = new URLSearchParams({ q: query, provider, offset: String(offset), limit: String(limit) });
+  const raw = await getLocal("/api/v1/market-data/imports/search?" + params, "market_imports_search", { q: query, provider, offset, limit });
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid import history result.");
+  const result = raw as Record<string, unknown>;
+  if (!Number.isSafeInteger(result.total) || (result.total as number) < 0 ||
+      result.limit !== limit || result.offset !== offset) throw new Error("Invalid history pagination metadata.");
+  return { items: parseImports(result.items), total: result.total as number, limit, offset };
 }

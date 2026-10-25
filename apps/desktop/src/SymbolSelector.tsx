@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { useEffect, useId, useState } from "react";
+import { Check, RefreshCw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { searchAcquirableSymbols, syncSymbols, type AssetFilter, type AssetType, type CatalogSymbol } from "./symbol-catalog-api";
 
@@ -10,9 +10,12 @@ interface SymbolSelectorProps {
   disabled: boolean;
 }
 
-/** Search a local catalog, not remote markets; selection never downloads prices. */
+const TICKER_PATTERN = /^[A-Z0-9][A-Z0-9.-]{0,14}$/;
+const MAX_SUGGESTIONS = 8;
+
+/** Debounced local-only typeahead; never loads the complete symbol directory. */
 export function SymbolSelector({ value, onChange, keyConfigured, disabled }: SymbolSelectorProps) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(value);
   const [kind, setKind] = useState<AssetFilter>("All");
   const [results, setResults] = useState<CatalogSymbol[]>([]);
   const [catalogSource, setCatalogSource] = useState<"starter" | "alpha_vantage">("starter");
@@ -22,26 +25,63 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
   const [syncing, setSyncing] = useState(false);
   const [notice, setNotice] = useState("");
   const [revision, setRevision] = useState(0);
-  const [customTicker, setCustomTicker] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [active, setActive] = useState(-1);
+  const [searching, setSearching] = useState(false);
+  const listId = useId();
+
+  useEffect(() => {
+    setQuery(value);
+  }, [value]);
 
   useEffect(() => {
     let ignore = false;
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
     const timer = window.setTimeout(() => {
-      searchAcquirableSymbols(query, kind as "All" | "Stock" | "ETF")
+      searchAcquirableSymbols(trimmed, kind as "All" | "Stock" | "ETF", 20)
         .then((catalog) => {
           if (ignore) return;
-          setResults(catalog.results);
+          setResults(catalog.results.slice(0, MAX_SUGGESTIONS));
           setCatalogSource(catalog.source);
           setCatalogTotal(catalog.total);
           setError("");
+          setSearching(false);
+          setActive(-1);
         })
         .catch((reason: unknown) => {
           if (ignore) return;
+          setResults([]);
+          setSearching(false);
           setError(reason instanceof Error ? reason.message : "Local symbol search unavailable");
         });
-    }, 160);
-    return () => { ignore = true; window.clearTimeout(timer); };
+    }, 180);
+    return () => {
+      ignore = true;
+      window.clearTimeout(timer);
+    };
   }, [query, kind, revision]);
+
+  const choose = (item: CatalogSymbol) => {
+    onChange(item.symbol, item.asset_type);
+    setQuery(item.symbol);
+    setFocused(false);
+    setActive(-1);
+  };
+
+  const changeQuery = (next: string) => {
+    setQuery(next);
+    setActive(-1);
+    const ticker = next.trim().toUpperCase();
+    // Manual ticker entry remains possible even when the catalog has no match.
+    // Names/partial free-text queries must never become invalid API symbols.
+    onChange(TICKER_PATTERN.test(ticker) ? ticker : "", null);
+  };
 
   const performSync = async () => {
     if (syncing || disabled || !keyConfigured) return;
@@ -59,92 +99,123 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
     }
   };
 
-  const selectedInResults = results.some((entry) => entry.symbol === value);
+  const showSuggestions = focused && query.trim().length > 0 && !disabled;
   return (
-    <div className="min-w-[225px] flex-[2] space-y-2">
+    <div className="min-w-0 w-full space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">Stock or ETF (supported by the chosen API)</span>
+        <label htmlFor={listId + "-input"} className="text-xs font-medium text-muted-foreground">
+          Instrument
+        </label>
         <span className="text-[11px] text-muted-foreground">
-          {catalogSource === "starter" ? "Starter directory" : "Provider directory"} · {catalogTotal.toLocaleString()} symbols
+          {catalogSource === "starter" ? "Starter directory" : "Local provider directory"}
+          {catalogTotal > 0 ? " · " + catalogTotal.toLocaleString() + " symbols" : ""}
         </span>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <input
-          aria-label="Search instruments by symbol or name"
-          type="search"
-          placeholder="Search stocks and ETFs"
-          className="h-9 min-w-[140px] flex-1 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          value={query}
-          maxLength={80}
-          onChange={(event) => setQuery(event.target.value)}
-          disabled={disabled || syncing}
-        />
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <div className="relative min-w-0">
+          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" />
+          <input
+            id={listId + "-input"}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-controls={listId + "-list"}
+            aria-expanded={showSuggestions}
+            aria-activedescendant={showSuggestions && active >= 0 ? listId + "-option-" + active : undefined}
+            type="search"
+            placeholder="Search ticker or company, e.g. AAPL or Apple"
+            autoComplete="off"
+            spellCheck={false}
+            className="h-10 w-full min-w-0 rounded-md border border-input bg-muted pl-9 pr-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            value={query}
+            maxLength={80}
+            onChange={(event) => changeQuery(event.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => { setFocused(false); setActive(-1); }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setFocused(false);
+                setActive(-1);
+                event.currentTarget.blur();
+              } else if (showSuggestions && event.key === "ArrowDown") {
+                event.preventDefault();
+                setActive((index) => Math.min(index + 1, results.length - 1));
+              } else if (showSuggestions && event.key === "ArrowUp") {
+                event.preventDefault();
+                setActive((index) => Math.max(index - 1, 0));
+              } else if (event.key === "Enter") {
+                // Enter selects an autocomplete option; it must not submit
+                // the outer acquisition form or unexpectedly call a provider.
+                event.preventDefault();
+                if (showSuggestions && active >= 0 && results[active]) {
+                  choose(results[active]);
+                }
+              }
+            }}
+            disabled={disabled || syncing}
+          />
+          {showSuggestions && (
+            <div
+              id={listId + "-list"}
+              role="listbox"
+              aria-label="Matching instruments"
+              className="absolute inset-x-0 top-full z-30 mt-1 max-h-72 overflow-y-auto rounded-md border border-border bg-card p-1 shadow-lg"
+            >
+              {searching ? (
+                <p className="px-3 py-2 text-xs text-muted-foreground">Searching local instruments…</p>
+              ) : results.length ? (
+                results.map((item, index) => (
+                  <button
+                    key={item.symbol}
+                    id={listId + "-option-" + index}
+                    type="button"
+                    role="option"
+                    aria-selected={active === index}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => choose(item)}
+                    className={`flex w-full min-w-0 items-center gap-3 rounded px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent ${active === index ? "bg-accent" : ""}`}
+                  >
+                    <span className="w-20 shrink-0 font-semibold">{item.symbol}</span>
+                    <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.name}</span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">{item.asset_type}</span>
+                    {value === item.symbol && <Check aria-hidden="true" className="size-4 shrink-0" />}
+                  </button>
+                ))
+              ) : (
+                <p className="px-3 py-2 text-xs text-muted-foreground">
+                  No catalog match. You can still enter a valid ticker manually.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
         <select
           aria-label="Filter by asset type"
           value={kind}
           onChange={(event) => setKind(event.target.value as AssetFilter)}
-          className="h-9 rounded-md border border-input bg-muted px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="h-10 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           disabled={disabled || syncing}
         >
-          <option value="All">All</option>
+          <option value="All">All stocks and ETFs</option>
           <option value="Stock">Stocks</option>
           <option value="ETF">ETFs</option>
         </select>
       </div>
-      {customTicker ? (
-        <input
-          aria-label="Custom ticker symbol"
-          type="text"
-          value={value}
-          onChange={(event) => onChange(event.target.value.toUpperCase(), null)}
-          placeholder="Enter ticker"
-          maxLength={15}
-          autoComplete="off"
-          spellCheck={false}
-          disabled={disabled || syncing}
-          className="h-9 w-full rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
-      ) : (
-        <select
-          aria-label="Select a stock or ETF for historical prices"
-          value={value}
-          onChange={(event) => {
-            const ticker = event.target.value;
-            const chosen = results.find((entry) => entry.symbol === ticker);
-            onChange(ticker, chosen?.asset_type ?? null);
-          }}
-          disabled={disabled || syncing}
-          className="h-9 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <option value="">Select an instrument…</option>
-          {value && !selectedInResults && <option value={value}>{value} · Selected</option>}
-          {results.map((entry) => (
-            <option key={entry.symbol} value={entry.symbol}>
-              {entry.symbol} — {entry.name} ({entry.asset_type})
-            </option>
-          ))}
-        </select>
-      )}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <button
-          type="button"
-          className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => setCustomTicker((old) => !old)}
-        >
-          {customTicker ? "Choose from catalog" : "Ticker not listed? Enter manually"}
-        </button>
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+        <p className="text-xs leading-5 text-muted-foreground">
+          Type a symbol or company name to see suggestions. Select a match, or enter an exact ticker.
+        </p>
         <Button type="button" size="sm" variant="secondary" onClick={() => void performSync()} disabled={disabled || syncing || !keyConfigured}>
           <RefreshCw aria-hidden="true" className={syncing ? "animate-spin" : ""} />
           {syncing ? "Syncing…" : "Sync symbols"}
         </Button>
       </div>
       {catalogSource === "starter" && (
-        <p className="text-[11px] text-muted-foreground">Search and select Stock/ETF prices here. Index and mutual fund records stay in the master directory but require separate historical-price adapters. Sync adds active US stocks and ETFs.</p>
+        <p className="text-[11px] text-muted-foreground">Sync adds active US stocks and ETFs. Index and mutual fund entries require separate price adapters.</p>
       )}
       {notice && <p role="status" className="text-xs text-positive">{notice}</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       {syncError && <p role="alert" className="text-xs text-destructive">Symbol sync failed: {syncError}. Existing directory retained.</p>}
-      {!keyConfigured && <p className="text-[11px] text-muted-foreground">Sync requires an Alpha Vantage backend key. Offline starter stocks and ETFs remain selectable.</p>}
+      {!keyConfigured && <p className="text-[11px] text-muted-foreground">Sync requires an Alpha Vantage backend key. Existing local symbols remain searchable.</p>}
     </div>
   );
 }

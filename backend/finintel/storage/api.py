@@ -18,15 +18,18 @@ from finintel.market_data.provider import (
     ProviderUnavailable,
 )
 from finintel.market_data.symbol_catalog import fetch_active_listings
+from finintel.market_data.tiingo import tiingo_configured
 from finintel.storage.db import (
     StorageError,
     append_action_event,
     list_action_events,
     list_imports,
+    list_instrument_directory,
     list_instruments,
     lookup_symbol_type,
     read_daily,
     replace_symbol_catalog,
+    search_import_history,
     search_symbols,
 )
 
@@ -96,6 +99,15 @@ def _unavailable(exc: StorageError) -> HTTPException:
     return HTTPException(status_code=503, detail=str(exc))
 
 
+@router.get("/instruments/directory", response_model=list[InstrumentRecord])
+def get_instrument_directory() -> list[dict[str, object]]:
+    """Fast page navigation; full historical summary is intentionally deferred."""
+    try:
+        return list_instrument_directory()
+    except StorageError as exc:
+        raise _unavailable(exc) from exc
+
+
 @router.get("/instruments", response_model=list[InstrumentRecord])
 def get_instruments() -> list[dict[str, object]]:
     """No database yet => [] (no implicit migrations or writes)."""
@@ -113,6 +125,28 @@ def get_imports(limit: int = Query(default=25, ge=1, le=100)) -> list[dict[str, 
         raise _unavailable(exc) from exc
 
 
+class ImportHistoryPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[IngestionHistoryRecord]
+    total: int
+    limit: int
+    offset: int
+
+
+@router.get("/imports/search", response_model=ImportHistoryPage)
+def get_import_history_page(
+    q: str = Query(default="", max_length=80),
+    provider: str = Query(default="", max_length=40),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    try:
+        return search_import_history(query=q, provider=provider, limit=limit, offset=offset)
+    except StorageError as exc:
+        raise _unavailable(exc) from exc
+
+
 @router.get("/{symbol}/daily", response_model=DailySeriesResponse)
 def get_daily(
     symbol: str = Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,14}$"),
@@ -120,7 +154,7 @@ def get_daily(
     end_date: date | None = None,
     limit: int = Query(default=250, ge=1, le=4000),
     latest: bool = False,
-    provider: Literal["alpha_vantage", "alpaca_sip"] = "alpha_vantage",
+    provider: Literal["alpha_vantage", "alpaca_sip", "tiingo"] = "alpha_vantage",
 ) -> dict[str, object]:
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(status_code=422, detail="start_date must not exceed end_date")
@@ -192,7 +226,7 @@ class AcquisitionRequest(BaseModel):
 
     symbol: str = Field(min_length=1, max_length=15)
     outputsize: Literal["compact", "full"] = "compact"
-    provider: Literal["alpha_vantage", "alpaca_sip"] = "alpha_vantage"
+    provider: Literal["alpha_vantage", "alpaca_sip", "tiingo"] = "alpha_vantage"
     period: Literal["5y", "10y", "max"] = "10y"
 
     @field_validator("symbol")
@@ -212,6 +246,8 @@ class AcquisitionStatus(BaseModel):
     requires_explicit_action: bool = True
     api_key_environment_variable: str = "FININTEL_ALPHA_VANTAGE_API_KEY"
     full_requires_premium: bool = True
+    tiingo_configured: bool = False
+    tiingo_key_environment_variable: str = "FININTEL_TIINGO_API_KEY"
     alpaca_configured: bool = False
     alpaca_key_environment_variable: str = "FININTEL_ALPACA_API_KEY_ID"
     alpaca_secret_environment_variable: str = "FININTEL_ALPACA_API_SECRET_KEY"
@@ -239,7 +275,11 @@ class AcquisitionResult(BaseModel):
 
 @router.get("/acquisition/status", response_model=AcquisitionStatus)
 def acquisition_status() -> AcquisitionStatus:
-    return AcquisitionStatus(key_configured=key_configured(), alpaca_configured=alpaca_configured())
+    return AcquisitionStatus(
+        key_configured=key_configured(),
+        alpaca_configured=alpaca_configured(),
+        tiingo_configured=tiingo_configured(),
+    )
 
 
 def _acquire_market_data_impl(payload: AcquisitionRequest, request: Request) -> dict[str, object]:
@@ -260,6 +300,10 @@ def _acquire_market_data_impl(payload: AcquisitionRequest, request: Request) -> 
         raise HTTPException(
             status_code=503,
             detail="Configure FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY",
+        )
+    if payload.provider == "tiingo" and not tiingo_configured():
+        raise HTTPException(
+            status_code=503, detail="Configure FININTEL_TIINGO_API_KEY in the Python backend"
         )
     if not _ACQUIRE_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="An acquisition is already in progress")

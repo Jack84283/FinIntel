@@ -16,6 +16,7 @@ from finintel.market_data.provider import (
     AlphaVantageDailyProvider,
     ProviderError,
 )
+from finintel.market_data.tiingo import TiingoDailyProvider, tiingo_configured
 from finintel.storage.db import import_snapshot
 
 
@@ -49,6 +50,10 @@ def acquire_and_store(
                 "Configure FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY"
             )
         batch = AlpacaDailyProvider().fetch_daily(ticker, period=period)
+    elif provider == "tiingo":
+        if not tiingo_configured():
+            raise ProviderError("Configure FININTEL_TIINGO_API_KEY in the Python backend")
+        batch = TiingoDailyProvider().fetch_daily(ticker, period=period)
     else:
         raise ProviderError("Unsupported price history source")
     # The provider returns a fully validated HistoricalBatch or raises an error.

@@ -37,6 +37,14 @@ class ProviderRateLimited(ProviderError):
     """Provider quota hit: do not retry automatically."""
 
 
+class ProviderAccessDenied(ProviderError):
+    """Provider rejected credentials or entitlement: stop requests immediately."""
+
+
+class ProviderSymbolUnavailable(ProviderError):
+    """Provider has no eligible price history for this instrument."""
+
+
 class ProviderPayloadInvalid(ProviderError):
     """Response failed parsing or validation and must not be stored."""
 
