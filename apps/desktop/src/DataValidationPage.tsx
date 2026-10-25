@@ -117,7 +117,7 @@ export function DataValidationPage() {
                 ["Series", metric("coverage", "series_count")],
                 ["Price records", metric("integrity", "price_rows")],
                 ["Integrity issues", String(Object.values((results.integrity?.issues ?? {}) as Record<string, number>).reduce((a, b) => a + (typeof b === "number" ? b : 0), 0))],
-                ["Potential missing SPY sessions", metric("coverage", "reference_session_gap_candidates")],
+                ["XNYS session gap candidates", metric("coverage", "xnys_internal_gap_candidates")],
               ].map(([label, value]) => <div className="rounded-md border border-border p-3" key={label}>
                 <p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-xl font-semibold tabular-nums">{value}</p>
               </div>)}
@@ -125,7 +125,7 @@ export function DataValidationPage() {
             {results.coverage && <div className="space-y-2">
               <h3 className="font-semibold">P0 · Coverage</h3>
               <p className="text-sm text-muted-foreground">Less than nine years observed: {metric("coverage", "series_with_less_than_9_years_observed")}. Weekday gaps are candidates, not confirmed missing sessions.</p>
-              {detailTable("coverage", "reference_gap_examples", ["symbol", "provider", "previous", "next", "reference_sessions_missing"], "SPY reference gap candidates")}
+              {detailTable("coverage", "xnys_gap_examples", ["symbol", "provider", "previous", "next", "expected_xnys_sessions"], "XNYS session gap candidates")}
               {detailTable("coverage", "coverage_examples", ["symbol", "provider", "rows", "first", "last"], "Observed coverage")}
             </div>}
             {results.integrity && <div className="space-y-2"><h3 className="font-semibold">P0 · Integrity</h3>
