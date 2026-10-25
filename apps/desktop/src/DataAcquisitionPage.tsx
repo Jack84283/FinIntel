@@ -20,8 +20,8 @@ export function DataAcquisitionPage({
   const [latest, setLatest] = useState<MarketSelection | null>(null);
 
   return (
-    <section className="min-w-0 space-y-4 pb-6" aria-labelledby="acquisition-page-title">
-      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-4">
+    <section className="min-w-0 space-y-2" aria-labelledby="acquisition-page-title">
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-5">
         <div>
           <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Data Acquisition</p>
           <h1 id="acquisition-page-title" className="mt-2 text-2xl font-semibold tracking-tight">Data Acquisition</h1>
@@ -35,8 +35,8 @@ export function DataAcquisitionPage({
         </div>
       </header>
 
-      <div className="grid min-w-0 items-start gap-4 2xl:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="min-w-0 space-y-3">
+      <div className="grid min-w-0 items-start gap-2 2xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0 space-y-2">
           <AcquisitionCard
             selectedSymbol=""
             onAcquired={(symbol, provider) => {
@@ -52,8 +52,8 @@ export function DataAcquisitionPage({
             </div>
           )}
         </div>
-        <aside className="grid min-w-0 gap-3 sm:grid-cols-2 2xl:grid-cols-1" aria-label="Acquisition guidance">
-          <Card className="min-w-0 gap-3 py-4">
+        <aside className="grid min-w-0 gap-2 sm:grid-cols-2 2xl:grid-cols-1" aria-label="Acquisition guidance">
+          <Card className="min-w-0">
             <CardHeader className="gap-y-2">
               <CardTitle className="flex items-center gap-2"><Database aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" /> Local data workflow</CardTitle>
             </CardHeader>
