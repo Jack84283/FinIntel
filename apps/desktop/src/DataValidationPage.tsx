@@ -1,3 +1,4 @@
+import { PageHeader } from "./PageHeader";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -70,11 +71,7 @@ export function DataValidationPage() {
   };
   return (
     <section className="space-y-2" aria-labelledby="validation-title">
-      <header className="grid min-w-0 gap-2 border-b border-border pb-2">
-        <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Data & Operations</p>
-        <h1 id="validation-title" className="mt-2 text-2xl font-semibold tracking-tight">Data Validation</h1>
-        <p className="min-w-0 text-sm text-muted-foreground">Run read-only quality checks on locally stored historical market data.</p>
-      </header>
+      <PageHeader id="validation-title" breadcrumb="FinIntel / Data & Operations" title="Data Validation" subtitle="Run read-only quality checks on locally stored historical market data." />
       <Card>
         <CardHeader>
           <CardTitle>Validation checks</CardTitle>
