@@ -12,9 +12,7 @@ def test_validation_start_and_result(monkeypatch, tmp_path):
     db = tmp_path / "local.sqlite3"
     db.touch()
     monkeypatch.setattr(validation_api, "database_path", lambda: db)
-    monkeypatch.setattr(
-        validation_api, "validate", lambda path: {"price_rows": 2, "issues": {}}
-    )
+    monkeypatch.setattr(validation_api, "validate", lambda path: {"price_rows": 2, "issues": {}})
     with validation_api._lock:
         validation_api._job = None
     client = TestClient(app)
@@ -33,7 +31,5 @@ def test_validation_start_and_result(monkeypatch, tmp_path):
 
 def test_validation_requires_local_db(monkeypatch, tmp_path):
     monkeypatch.setattr(validation_api, "database_path", lambda: tmp_path / "missing.sqlite3")
-    response = TestClient(app).post(
-        "/api/v1/validation/run", json={"checks": ["coverage"]}
-    )
+    response = TestClient(app).post("/api/v1/validation/run", json={"checks": ["coverage"]})
     assert response.status_code == 503
