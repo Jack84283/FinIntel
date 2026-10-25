@@ -42,9 +42,13 @@ def _run(job_id: str, checks: list[str]) -> None:
             for check in checks:
                 if check == "coverage":
                     results["coverage"] = {
-                        key: diagnostic[key] for key in (
-                            "series_count", "series_without_prices", "coverage_examples",
-                            "weekday_gap_candidates", "series_with_weekday_gap_candidates",
+                        key: diagnostic[key]
+                        for key in (
+                            "series_count",
+                            "series_without_prices",
+                            "coverage_examples",
+                            "weekday_gap_candidates",
+                            "series_with_weekday_gap_candidates",
                             "gap_examples",
                         )
                     }
@@ -59,9 +63,7 @@ def _run(job_id: str, checks: list[str]) -> None:
                         "cross_provider_pairs_compared": diagnostic[
                             "cross_provider_pairs_compared"
                         ],
-                        "cross_provider_comparisons": diagnostic[
-                            "cross_provider_comparisons"
-                        ],
+                        "cross_provider_comparisons": diagnostic["cross_provider_comparisons"],
                     }
                 elif check == "performance":
                     results["performance"] = {
@@ -73,13 +75,21 @@ def _run(job_id: str, checks: list[str]) -> None:
             results["limitations"] = diagnostic["limitations"]
         with _lock:
             if _job and _job["id"] == job_id:
-                _job.update(status="completed", stage="Complete", results=results,
-                            finished_at=datetime.now(UTC).isoformat())
+                _job.update(
+                    status="completed",
+                    stage="Complete",
+                    results=results,
+                    finished_at=datetime.now(UTC).isoformat(),
+                )
     except Exception as exc:  # noqa: BLE001 - background worker must surface failures
         with _lock:
             if _job and _job["id"] == job_id:
-                _job.update(status="failed", stage="Failed", error=str(exc),
-                            finished_at=datetime.now(UTC).isoformat())
+                _job.update(
+                    status="failed",
+                    stage="Failed",
+                    error=str(exc),
+                    finished_at=datetime.now(UTC).isoformat(),
+                )
 
 
 @router.post("/run")
@@ -96,9 +106,14 @@ def start_validation(request: StartRequest) -> dict:
             raise HTTPException(status_code=409, detail="A validation job is already running.")
         job_id = uuid4().hex
         _job = {
-            "id": job_id, "checks": request.checks, "status": "running",
-            "stage": "Starting", "started_at": datetime.now(UTC).isoformat(),
-            "finished_at": None, "results": None, "error": None,
+            "id": job_id,
+            "checks": request.checks,
+            "status": "running",
+            "stage": "Starting",
+            "started_at": datetime.now(UTC).isoformat(),
+            "finished_at": None,
+            "results": None,
+            "error": None,
         }
         snapshot = _snapshot()
     threading.Thread(target=_run, args=(job_id, request.checks), daemon=True).start()
