@@ -33,7 +33,8 @@ def test_optional_tiingo_failure_preserves_completed_report(monkeypatch, tmp_pat
 
     monkeypatch.setattr(module, "request", mock_request)
     monkeypatch.setattr(
-        sys, "argv",
+        sys,
+        "argv",
         ["validate_local.py", "--output", str(output), "--corporate-symbol", "AAPL"],
     )
     assert module.main() == 2
