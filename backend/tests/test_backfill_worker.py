@@ -76,7 +76,11 @@ def test_unlimited_backfill_ignores_daily_safety_cap(tmp_path, monkeypatch):
 
 def test_rate_limit_backs_off_and_retries_without_waiting_for_midnight(tmp_path, monkeypatch):
     monkeypatch.setattr(backfill_worker, "alpaca_configured", lambda: True)
-    monkeypatch.setattr(backfill_worker, "pending_symbols", lambda **kwargs: ["AAPL"])
+    complete = []
+    monkeypatch.setattr(
+        backfill_worker, "pending_symbols",
+        lambda **kwargs: [] if complete else ["AAPL"],
+    )
     waits = []
     calls = []
 
@@ -84,6 +88,7 @@ def test_rate_limit_backs_off_and_retries_without_waiting_for_midnight(tmp_path,
         calls.append(symbol)
         if len(calls) == 1:
             raise ProviderRateLimited("Simulated quota")
+        complete.append(symbol)
         return {"import_id": 42}
 
     monkeypatch.setattr(backfill_worker, "acquire_and_store", acquire)
