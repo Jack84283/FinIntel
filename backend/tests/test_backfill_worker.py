@@ -150,10 +150,14 @@ def test_unavailable_symbols_are_quarantined_and_dont_trip_circuit_breaker(
 
     monkeypatch.setattr(backfill_worker, "acquire_and_store", acquire)
     checkpoint = tmp_path / "history.json"
-    args = dict(
-        provider="alpaca_sip", asset_type="all", max_per_day=0,
-        delay=0, state_path=checkpoint, once=True,
-    )
+    args = {
+        "provider": "alpaca_sip",
+        "asset_type": "all",
+        "max_per_day": 0,
+        "delay": 0,
+        "state_path": checkpoint,
+        "once": True,
+    }
     assert backfill_worker.run(**args) == 0
     assert calls == ["AAC-U", "AAC-WS", "AACB"]
     state = json.loads(checkpoint.read_text())
