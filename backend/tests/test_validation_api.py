@@ -57,9 +57,7 @@ def test_all_five_checks_run_and_return_expected_sections(monkeypatch, tmp_path)
     db = tmp_path / "prices.sqlite3"
     db.touch()
     monkeypatch.setattr(validation_api, "database_path", lambda: db)
-    monkeypatch.setattr(
-        validation_api, "validate", lambda path: {"price_rows": 2, "issues": {}}
-    )
+    monkeypatch.setattr(validation_api, "validate", lambda path: {"price_rows": 2, "issues": {}})
     diagnostic = {
         "series_count": 1,
         "series_without_prices": 0,
@@ -93,9 +91,7 @@ def test_all_five_checks_run_and_return_expected_sections(monkeypatch, tmp_path)
     with validation_api._lock:
         validation_api._job = None
     client = TestClient(app)
-    started = client.post(
-        "/api/v1/validation/run", json={"checks": list(validation_api.CHECKS)}
-    )
+    started = client.post("/api/v1/validation/run", json={"checks": list(validation_api.CHECKS)})
     assert started.status_code == 200
     for _ in range(100):
         status = client.get("/api/v1/validation/status").json()
@@ -104,7 +100,12 @@ def test_all_five_checks_run_and_return_expected_sections(monkeypatch, tmp_path)
         time.sleep(0.01)
     assert status["status"] == "completed", status.get("error")
     assert set(status["results"]) == {
-        "integrity", "coverage", "corporate", "provider", "performance", "limitations"
+        "integrity",
+        "coverage",
+        "corporate",
+        "provider",
+        "performance",
+        "limitations",
     }
     assert status["results"]["coverage"]["xnys_internal_gap_candidates"] == 0
     assert status["results"]["performance"]["all_acceptance_targets_met"]
