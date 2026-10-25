@@ -366,3 +366,14 @@ FinIntel desktop navigation now has three primary sections:
 
 This is a frontend-only navigation and composition change: existing
 local FastAPI/Tauri commands, validation and SQLite tables remain unchanged.
+
+
+### Read-only historical data validation
+
+After the local download completes, run the streaming price audit from the repository root:
+
+```bash
+python -m finintel.market_data.validation --db data/finintel.sqlite3 --json data/market-validation-report.json
+```
+
+Use the path configured by `FININTEL_DB_PATH` if different from the default. The audit checks OHLC price consistency, positive finite prices, negative volume, duplicate/out-of-order trading sessions, and empty price series, and summarizes provider series counts. It reads each stored price row once without loading the full price database into memory. This can still take time for large databases. The JSON file is an optional local report; the SQLite database remains read-only. A nonzero process exit status indicates invalid price rows. Exchange-calendar gap analysis, price-adjustment verification, and cross-provider reconciliation are separate follow-up checks.
