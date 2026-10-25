@@ -43,7 +43,11 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
             by_symbol.setdefault(item["symbol"], []).append(dict(item))
         # A local liquid benchmark filters shared non-trading days without network access.
         reference = next(
-            (item for item in series if item["symbol"] == "SPY" and item["provider"] == "alpaca_sip"),
+            (
+                item
+                for item in series
+                if item["symbol"] == "SPY" and item["provider"] == "alpaca_sip"
+            ),
             None,
         )
         reference_days = []
@@ -51,8 +55,7 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
             reference_days = [
                 row[0]
                 for row in conn.execute(
-                    "SELECT session_date FROM daily_prices WHERE series_id=? "
-                    "ORDER BY session_date",
+                    "SELECT session_date FROM daily_prices WHERE series_id=? ORDER BY session_date",
                     (reference["id"],),
                 )
             ]
@@ -106,13 +109,15 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                             reference_gaps["sessions"] += confirmed_by_reference
                             reference_gaps["series_" + str(sid)] += 1
                             if len(reference_gap_examples) < examples_limit:
-                                reference_gap_examples.append({
-                                    "symbol": item["symbol"],
-                                    "provider": item["provider"],
-                                    "previous": prev_day.isoformat(),
-                                    "next": day.isoformat(),
-                                    "reference_sessions_missing": confirmed_by_reference,
-                                })
+                                reference_gap_examples.append(
+                                    {
+                                        "symbol": item["symbol"],
+                                        "provider": item["provider"],
+                                        "previous": prev_day.isoformat(),
+                                        "next": day.isoformat(),
+                                        "reference_sessions_missing": confirmed_by_reference,
+                                    }
+                                )
                     if missing:
                         gaps["weekday_gap_candidates"] += missing
                         gaps["series_with_gaps_" + str(sid)] += 1
