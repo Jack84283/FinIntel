@@ -64,10 +64,10 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
   return (
     <section aria-labelledby="preferences-title" className="min-w-0 space-y-2">
       <header className="flex min-w-0 flex-wrap items-start justify-between gap-4 border-b border-border pb-5">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8aa5c3]">FinIntel / Preferences</p>
           <h1 id="preferences-title" className="mt-2 text-2xl font-semibold tracking-tight">Preferences</h1>
-          <p className="mt-2 max-w-[64ch] text-sm leading-6 text-muted-foreground">
+          <p className="mt-2 max-w-none text-sm leading-6 text-muted-foreground">
             Personalize the workspace and review local data settings. Changes to appearance stay on this device.
           </p>
         </div>
@@ -119,7 +119,7 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
           </Card>
         </div>
 
-        <aside className="flex min-w-0 flex-col gap-6" aria-label="Workspace information">
+        <aside className="flex min-w-0 flex-col gap-2" aria-label="Workspace information">
           <Card className="min-w-0">
             <CardHeader className="flex min-w-0 flex-col items-start gap-2">
               <div className="flex min-w-0 items-center gap-2"><Activity aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">Local backend</CardTitle></div>
