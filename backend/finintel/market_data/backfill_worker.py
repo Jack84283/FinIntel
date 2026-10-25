@@ -97,6 +97,7 @@ def run(
             return 2
         consecutive_provider_errors = 0
         consecutive_rate_limits = 0
+        transient_retries: dict[str, int] = {}
         if retry_failed:
             checkpoint = _load(state_path, provider=provider, asset_type=asset_type)
             failed = set(checkpoint["failed_symbols"])
@@ -185,26 +186,37 @@ def run(
                 )
                 return 2
             except ProviderUnavailable:
-                consecutive_provider_errors += 1
-                state["attempted"] = sorted(attempted)
+                # Three tries per symbol, not three failures across the catalog.
+                # Preserve the symbol for retry until its retry budget is exhausted.
+                count = transient_retries.get(symbol, 0) + 1
+                transient_retries[symbol] = count
                 state["last_error_type"] = "ProviderUnavailable"
-                state["last_status"] = "provider_unavailable"
+                if count < 3:
+                    state["attempted"] = sorted(attempted)
+                    state["last_status"] = "provider_unavailable_retry"
+                    print(
+                        json.dumps(
+                            {"symbol": symbol, "status": "retrying", "attempt": count}
+                        ),
+                        flush=True,
+                    )
+                    if not once:
+                        time.sleep(5 * count)
+                    continue
+                # After three transient failures of this symbol, quarantine
+                # it and continue the universe instead of exiting the process.
+                state["failed_symbols"][symbol] = {
+                    "reason": "provider_unavailable",
+                    "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                }
+                state["failed_count"] = len(state["failed_symbols"])
+                state["last_status"] = "provider_unavailable_skipped"
                 print(
                     json.dumps(
-                        {
-                            "symbol": symbol,
-                            "status": "provider_unavailable",
-                            "consecutive": consecutive_provider_errors,
-                        }
+                        {"symbol": symbol, "status": "skipped", "attempts": count}
                     ),
                     flush=True,
                 )
-                if consecutive_provider_errors >= 3:
-                    state["last_status"] = "paused_provider_unavailable"
-                    return 2
-                if not once:
-                    time.sleep(5 * consecutive_provider_errors)
-                continue
             except ProviderPayloadInvalid:
                 state["failed_symbols"][symbol] = {
                     "reason": "invalid_payload",
