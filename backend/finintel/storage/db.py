@@ -602,7 +602,6 @@ def list_imports(*, db: Path | None = None, limit: int = 25) -> list[dict[str, o
         conn.close()
 
 
-
 def search_import_history(
     *,
     db: Path | None = None,
