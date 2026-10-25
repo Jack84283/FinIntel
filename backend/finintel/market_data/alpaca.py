@@ -18,11 +18,11 @@ from pydantic import ValidationError
 from finintel.market_data.models import DailyOHLCV, HistoricalBatch
 from finintel.market_data.provider import (
     SYMBOL_PATTERN,
-    ProviderError,
     ProviderAccessDenied,
-    ProviderSymbolUnavailable,
+    ProviderError,
     ProviderPayloadInvalid,
     ProviderRateLimited,
+    ProviderSymbolUnavailable,
     ProviderUnavailable,
 )
 
