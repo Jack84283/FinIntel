@@ -484,6 +484,27 @@ def import_snapshot(snapshot: Path, *, db: Path | None = None) -> dict[str, obje
         conn.close()
 
 
+def list_instrument_directory(db: Path | None = None) -> list[dict[str, object]]:
+    """Fast navigation list: never scan the historical daily_prices table."""
+    path = db if db is not None else database_path()
+    conn = _read_connection(path)
+    if conn is None:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT symbol, provider, frequency, adjustment, data_kind "
+            "FROM series ORDER BY symbol, provider"
+        ).fetchall()
+        return [
+            {**dict(row), "sessions": 0, "first_session": None, "last_session": None}
+            for row in rows
+        ]
+    except sqlite3.Error as exc:
+        raise StorageError("Could not read local instrument directory") from exc
+    finally:
+        conn.close()
+
+
 def list_instruments(db: Path | None = None) -> list[dict[str, object]]:
     path = db if db is not None else database_path()
     conn = _read_connection(path)
