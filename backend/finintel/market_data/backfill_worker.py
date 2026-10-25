@@ -221,9 +221,8 @@ def run(
                     ),
                     flush=True,
                 )
-                if consecutive_provider_errors >= 3:
-                    state["last_status"] = "paused_provider_errors"
-                    return 2
+                # A malformed response for one symbol is quarantined, not a
+                # reason to halt the rest of the market-wide catalog.
             except ProviderRateLimited:
                 # A rate limit is temporary, not a daily quota or a permanent
                 # symbol failure. Retry the same instrument after backoff.
@@ -248,7 +247,14 @@ def run(
                 time.sleep(retry_seconds)
                 continue
             except ProviderError as exc:
+                # Unknown provider errors are tracked per instrument. Explicit
+                # access-denied and network failures were handled above.
                 consecutive_provider_errors += 1
+                state["failed_symbols"][symbol] = {
+                    "reason": "provider_error",
+                    "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                }
+                state["failed_count"] = len(state["failed_symbols"])
                 state["last_status"] = "provider_error"
                 state["last_error_type"] = type(exc).__name__
                 print(
@@ -261,13 +267,6 @@ def run(
                     ),
                     flush=True,
                 )
-                if consecutive_provider_errors >= 3:
-                    state["last_status"] = "paused_provider_errors"
-                    print(
-                        "Stopped after three consecutive provider errors. Check credentials and feed entitlement.",
-                        file=sys.stderr,
-                    )
-                    return 2
             except (StorageError, OSError, ValueError) as exc:
                 state["last_status"] = "paused_storage"
                 state["last_error_type"] = type(exc).__name__
