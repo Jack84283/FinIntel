@@ -160,6 +160,11 @@ async fn backend_health() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
+async fn market_instrument_directory() -> Result<serde_json::Value, String> {
+    read_backend("/api/v1/market-data/instruments/directory", &[]).await
+}
+
+#[tauri::command]
 async fn market_instruments() -> Result<serde_json::Value, String> {
     read_backend("/api/v1/market-data/instruments", &[]).await
 }
@@ -240,6 +245,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             backend_health,
             market_instruments,
+            market_instrument_directory,
             market_daily,
             market_imports,
             market_imports_search,
