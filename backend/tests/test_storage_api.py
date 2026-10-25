@@ -37,9 +37,13 @@ def test_api_catalog_prices_and_ingestion_history(tmp_path, monkeypatch):
     _seed(tmp_path, monkeypatch)
     with TestClient(app) as client:
         catalog = client.get("/api/v1/market-data/instruments")
+        directory = client.get("/api/v1/market-data/instruments/directory")
         daily = client.get("/api/v1/market-data/ibm/daily?limit=2")
         history = client.get("/api/v1/market-data/imports")
 
+    assert directory.status_code == 200
+    assert directory.json()[0]["symbol"] == "IBM"
+    assert directory.json()[0]["sessions"] == 0
     assert catalog.status_code == 200
     assert catalog.json()[0]["symbol"] == "IBM"
     assert catalog.json()[0]["sessions"] == 3
