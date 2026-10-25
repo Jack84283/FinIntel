@@ -96,7 +96,7 @@ function rows(value: unknown, max: number): unknown[] {
 }
 
 export function parseInstruments(value: unknown): MarketInstrument[] {
-  return rows(value, 10000).map((entry) => {
+  return rows(value, 100000).map((entry) => {
     const item = record(entry);
     return {
       symbol: text(item.symbol),
