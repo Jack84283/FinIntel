@@ -94,7 +94,7 @@ export function AcquisitionCard({
   };
 
   return (
-    <Card aria-labelledby="acquisition-title" className="min-w-0">
+    <Card aria-labelledby="acquisition-title" className="min-w-0 gap-3 py-4">
       <CardHeader className="min-w-0 gap-y-3 sm:px-6">
         <div className="col-span-2 flex min-w-0 flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
@@ -106,10 +106,10 @@ export function AcquisitionCard({
           </Badge>
         </div>
       </CardHeader>
-      <CardContent className="min-w-0 space-y-5">
-        <form onSubmit={(event) => void acquire(event)} className="min-w-0 space-y-6">
-          <div className="min-w-0 rounded-lg border border-border bg-background/40 p-4 sm:p-5">
-            <div className="mb-4 space-y-1">
+      <CardContent className="min-w-0 space-y-3">
+        <form onSubmit={(event) => void acquire(event)} className="min-w-0 space-y-4">
+          <div className="min-w-0 rounded-lg border border-border bg-background/40 p-3 sm:p-4">
+            <div className="mb-3 space-y-1">
               <p className="text-sm font-semibold">1. Select instrument</p>
               <p className="text-xs leading-5 text-muted-foreground">Search your local catalog, filter by type, or enter a ticker manually.</p>
             </div>
@@ -130,7 +130,7 @@ export function AcquisitionCard({
               <p className="text-sm font-semibold">2. Configure download</p>
               <p className="text-xs leading-5 text-muted-foreground">Select your provider and how much history to retrieve.</p>
             </div>
-            <div className="grid min-w-0 gap-4 md:grid-cols-2">
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="grid min-w-0 gap-2 text-xs text-muted-foreground">
             Data source
             <select
@@ -158,7 +158,7 @@ export function AcquisitionCard({
                 value={alpacaPeriod}
                 onChange={(event) => setAlpacaPeriod(event.target.value as AlpacaPeriod)}
                 disabled={pending}
-                className="h-9 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-10 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="5y">Last 5 years</option>
                 <option value="10y">Last 10 years</option>
@@ -179,7 +179,7 @@ export function AcquisitionCard({
           </label>
             </div>
           </div>
-          <div className="flex min-w-0 flex-wrap items-center justify-end gap-3 border-t border-border pt-5">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
           <Button type="submit" disabled={pending} size="sm">
             {pending ? <RefreshCw aria-hidden="true" className="animate-spin" /> : <ArrowDownToLine aria-hidden="true" />}
             {pending ? "Fetching…" : "Fetch & store"}
