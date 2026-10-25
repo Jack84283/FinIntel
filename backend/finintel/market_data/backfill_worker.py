@@ -195,9 +195,7 @@ def run(
                     state["attempted"] = sorted(attempted)
                     state["last_status"] = "provider_unavailable_retry"
                     print(
-                        json.dumps(
-                            {"symbol": symbol, "status": "retrying", "attempt": count}
-                        ),
+                        json.dumps({"symbol": symbol, "status": "retrying", "attempt": count}),
                         flush=True,
                     )
                     if not once:
@@ -212,9 +210,7 @@ def run(
                 state["failed_count"] = len(state["failed_symbols"])
                 state["last_status"] = "provider_unavailable_skipped"
                 print(
-                    json.dumps(
-                        {"symbol": symbol, "status": "skipped", "attempts": count}
-                    ),
+                    json.dumps({"symbol": symbol, "status": "skipped", "attempts": count}),
                     flush=True,
                 )
             except ProviderPayloadInvalid:
