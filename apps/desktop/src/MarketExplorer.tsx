@@ -307,7 +307,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
             </CardContent>
           </Card>
           </div>
-          )
+          )}
 
           {seriesState === "loading" && (
             <Card><CardContent className="space-y-4"><Skeleton className="h-7 w-44" aria-label="Loading historical prices" /><Skeleton className="h-72 w-full" /></CardContent></Card>
