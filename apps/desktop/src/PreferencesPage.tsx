@@ -22,7 +22,7 @@ function SettingRow({ title, detail, children }: {
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-3 py-5 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
+    <div className="flex min-w-0 flex-col gap-3 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium leading-6">{title}</p>
         <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{detail}</p>
@@ -62,8 +62,8 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
   };
 
   return (
-    <section aria-labelledby="preferences-title" className="min-w-0 space-y-6 pb-8">
-      <header className="flex min-w-0 flex-wrap items-start justify-between gap-4 border-b border-border pb-5">
+    <section aria-labelledby="preferences-title" className="min-w-0 space-y-4 pb-6">
+      <header className="flex min-w-0 flex-wrap items-start justify-between gap-4 border-b border-border pb-4">
         <div className="min-w-0">
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8aa5c3]">FinIntel / Preferences</p>
           <h1 id="preferences-title" className="mt-2 text-2xl font-semibold tracking-tight">Preferences</h1>
@@ -74,9 +74,9 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
         <Badge variant="outline" className="shrink-0">Device-local</Badge>
       </header>
 
-      <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
-        <div className="flex min-w-0 flex-col gap-6">
-          <Card className="min-w-0">
+      <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
+        <div className="flex min-w-0 flex-col gap-4">
+          <Card className="min-w-0 gap-3 py-4">
             <CardHeader className="min-w-0 gap-y-2">
               <CardTitle>Appearance</CardTitle>
               <CardDescription>Keep the interface readable and comfortable at any window size.</CardDescription>
@@ -125,7 +125,7 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
               <div className="flex min-w-0 items-center gap-2"><Activity aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">Local backend</CardTitle></div>
               <CardDescription>Connection to FinIntel's local Python service.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-3">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${backend.kind === "connected" ? "bg-positive" : backend.kind === "loading" ? "bg-warning" : "bg-destructive"}`} />
                 <span role="status" aria-live="polite" className="min-w-0 break-words text-sm font-medium">
@@ -142,7 +142,7 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
               <div className="flex min-w-0 items-center gap-2"><LockKeyhole aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">Privacy & storage</CardTitle></div>
               <CardDescription>Built for a private, local-first financial workspace.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4 text-sm">
+            <CardContent className="space-y-3 text-sm>
               <div className="flex min-w-0 gap-3"><HardDrive aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Historical prices and research data are stored locally.</p></div>
               <div className="flex min-w-0 gap-3"><ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Provider credentials remain in your backend environment, not in these preferences.</p></div>
               <div className="flex min-w-0 gap-3"><Monitor aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Appearance preferences are saved only on this device.</p></div>
