@@ -72,6 +72,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
               <option value="all">All providers</option>
               <option value="alpha_vantage">Alpha Vantage</option>
               <option value="alpaca_sip">Alpaca SIP</option>
+              <option value="tiingo">Tiingo</option>
             </select>
           </div>
           {state === "loading" && <Skeleton aria-label="Loading action history" className="h-28 w-full" />}
@@ -99,7 +100,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
                     <td className="px-3 py-2"><Badge variant="success">Success</Badge></td>
                     <td className="px-3 py-2 text-right">{item.inserted.toLocaleString()} / {item.updated.toLocaleString()} / {item.unchanged.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right">
-                      {item.provider === "alpaca_sip" || item.provider === "alpha_vantage"
+                      {item.provider === "alpaca_sip" || item.provider === "alpha_vantage" || item.provider === "tiingo"
                         ? <Button type="button" size="sm" variant="ghost" onClick={() => onViewMarket({ symbol: item.symbol, provider: item.provider as AcquisitionProvider })}><BarChart3 aria-hidden="true" /> View</Button>
                         : "—"}
                     </td>
