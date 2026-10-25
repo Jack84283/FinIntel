@@ -128,8 +128,8 @@ def test_full_import_history_search_and_pagination(tmp_path, monkeypatch):
         # pages beyond the previous 100-record UI cap.
         conn.execute(
             "INSERT INTO ingestion_runs (series_id, retrieved_at, imported_at, payload_sha256, "
-            "first_session, last_session, observations, inserted, updated, unchanged, stale, source_url) "
-            "SELECT series_id, retrieved_at, imported_at, payload_sha256, first_session, "
+            "provider_terms_url, first_session, last_session, observations, inserted, updated, unchanged, stale, source_url) "
+            "SELECT series_id, retrieved_at, imported_at, payload_sha256, provider_terms_url, first_session, "
             "last_session, observations, inserted, updated, unchanged, stale, source_url "
             "FROM ingestion_runs LIMIT 1"
         )
