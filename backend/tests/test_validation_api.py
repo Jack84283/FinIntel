@@ -47,4 +47,7 @@ def test_reference_action_explicit(monkeypatch, tmp_path):
         client.post("/api/v1/validation/corporate-reference", json={"symbol": "SPY"}).status_code
         == 200
     )
-    assert client.post("/api/v1/validation/corporate-reference", json={"symbol": ""}).status_code == 422
+    assert (
+        client.post("/api/v1/validation/corporate-reference", json={"symbol": ""}).status_code
+        == 422
+    )
