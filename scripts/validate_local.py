@@ -57,10 +57,17 @@ def main() -> int:
         print("Validation failed:", status.get("error", "Unknown failure"), file=sys.stderr)
         return 1
     result = status.get("results", {})
+    reference_error = None
     if args.corporate_symbol:
-        result["corporate_reference"] = request(
-            "/corporate-reference", {"symbol": args.corporate_symbol}
-        )
+        try:
+            result["corporate_reference"] = request(
+                "/corporate-reference", {"symbol": args.corporate_symbol}
+            )
+        except RuntimeError as exc:
+            # Preserve completed offline findings even if optional network
+            # verification is unavailable (missing key, provider outage, etc.).
+            reference_error = str(exc)
+            result["corporate_reference_error"] = reference_error
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(f"Report: {args.output}")
@@ -70,6 +77,10 @@ def main() -> int:
     performance = result.get("performance", {})
     print("Performance targets met:", performance.get("all_acceptance_targets_met"))
     print("Provider pairs compared:", result.get("provider", {}).get("cross_provider_pairs_compared"))
+    if reference_error:
+        print("Optional corporate lookup failed:", reference_error, file=sys.stderr)
+        print("Core scan report was saved; corporate reference needs review.", file=sys.stderr)
+        return 2
     return 0
 
 
