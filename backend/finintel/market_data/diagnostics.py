@@ -111,7 +111,15 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
             totals[sid] = {"rows": count, "first": first, "last": last}
             if first and last:
                 span = (date.fromisoformat(last) - date.fromisoformat(first)).days
-                coverage_years["under_1_year" if span < 365 else "under_5_years" if span < 1826 else "under_9_years" if span < 3287 else "9_plus_years"] += 1
+                coverage_years[
+                    "under_1_year"
+                    if span < 365
+                    else "under_5_years"
+                    if span < 1826
+                    else "under_9_years"
+                    if span < 3287
+                    else "9_plus_years"
+                ] += 1
             timings[item["symbol"] + "/" + item["provider"]] = round(time.monotonic() - begin, 4)
 
         # Compare only exact overlapping sessions of two providers for the same symbol.
@@ -179,9 +187,11 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
             "cross_provider_close_divergences_over_1pct": provider_pair_divergences,
             "cross_provider_comparisons": comparisons,
             "performance_query_plan": [
-                row["detail"] for row in conn.execute(
+                row["detail"]
+                for row in conn.execute(
                     "EXPLAIN QUERY PLAN SELECT session_date, close FROM daily_prices "
-                    "WHERE series_id=? ORDER BY session_date", (0,)
+                    "WHERE series_id=? ORDER BY session_date",
+                    (0,),
                 ).fetchall()
             ],
             "slowest_series_queries_seconds": [
