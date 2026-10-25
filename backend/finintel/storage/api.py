@@ -24,6 +24,7 @@ from finintel.storage.db import (
     append_action_event,
     list_action_events,
     list_imports,
+    list_instrument_directory,
     list_instruments,
     lookup_symbol_type,
     read_daily,
@@ -96,6 +97,15 @@ class IngestionHistoryRecord(BaseModel):
 
 def _unavailable(exc: StorageError) -> HTTPException:
     return HTTPException(status_code=503, detail=str(exc))
+
+
+@router.get("/instruments/directory", response_model=list[InstrumentRecord])
+def get_instrument_directory() -> list[dict[str, object]]:
+    """Fast page navigation; full historical summary is intentionally deferred."""
+    try:
+        return list_instrument_directory()
+    except StorageError as exc:
+        raise _unavailable(exc) from exc
 
 
 @router.get("/instruments", response_model=list[InstrumentRecord])
