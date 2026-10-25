@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchMarketImports } from "./market-api";
+import { searchSymbols } from "./symbol-catalog-api";
 import type { ImportRecord } from "./market";
 import type { MarketSelection } from "./DataAcquisitionPage";
 import type { AcquisitionProvider } from "./market-acquisition-api";
@@ -17,6 +18,8 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
   const [revision, setRevision] = useState(0);
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState("all");
+  const [nameMatches, setNameMatches] = useState<string[]>([]);
+  const [nameSearchPending, setNameSearchPending] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,11 +36,35 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
     return () => { cancelled = true; };
   }, [revision]);
 
+  useEffect(() => {
+    const text = query.trim();
+    if (!text) {
+      setNameMatches([]);
+      setNameSearchPending(false);
+      return;
+    }
+    let cancelled = false;
+    setNameSearchPending(true);
+    const timeout = window.setTimeout(() => {
+      searchSymbols(text, "All", 100)
+        .then((result) => {
+          if (!cancelled) setNameMatches(result.results.map((item) => item.symbol));
+        })
+        .catch(() => {
+          // Keep ticker and provider filtering usable without a symbol catalog.
+          if (!cancelled) setNameMatches([]);
+        })
+        .finally(() => { if (!cancelled) setNameSearchPending(false); });
+    }, 180);
+    return () => { cancelled = true; window.clearTimeout(timeout); };
+  }, [query]);
+
   const filtered = useMemo(() => items.filter((record) =>
     (provider === "all" || record.provider === provider) &&
     (record.symbol.toLowerCase().includes(query.trim().toLowerCase()) ||
-     record.provider.toLowerCase().includes(query.trim().toLowerCase()))
-  ), [items, provider, query]);
+     record.provider.toLowerCase().includes(query.trim().toLowerCase()) ||
+     nameMatches.includes(record.symbol))
+  ), [items, provider, query, nameMatches]);
 
   return (
     <section className="space-y-2" aria-labelledby="action-history-title">
@@ -58,7 +85,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-3">
-            <input aria-label="Search history" placeholder="Search symbol or provider" value={query} onChange={(event) => setQuery(event.target.value)} className="h-9 min-w-48 flex-1 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+            <input aria-label="Search history" placeholder="Search symbol, company, ETF or provider" value={query} onChange={(event) => setQuery(event.target.value)} className="h-9 min-w-48 flex-1 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
             <select aria-label="Filter provider" value={provider} onChange={(event) => setProvider(event.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
               <option value="all">All providers</option>
               <option value="alpha_vantage">Alpha Vantage</option>
@@ -68,7 +95,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
           {state === "loading" && <Skeleton aria-label="Loading action history" className="h-28 w-full" />}
           {state === "error" && <div role="alert" className="space-y-2 text-sm"><p className="text-destructive">Could not load history: {error}</p><Button size="sm" type="button" variant="secondary" onClick={() => { setState("loading"); setRevision((value) => value + 1); }}>Retry</Button></div>}
           {state === "ready" && items.length === 0 && <p className="py-6 text-sm text-muted-foreground">No completed imports yet. Use Data Acquisition to fetch and store historical market data.</p>}
-          {state === "ready" && items.length > 0 && filtered.length === 0 && <p className="py-6 text-sm text-muted-foreground">No history records match these filters.</p>}
+          {state === "ready" && items.length > 0 && filtered.length === 0 && !nameSearchPending && <p className="py-6 text-sm text-muted-foreground">No history records match these filters.</p>}
           {state === "ready" && filtered.length > 0 && (
             <div className="overflow-x-auto rounded-md border border-border">
               <table className="w-full min-w-[840px] text-left text-xs tabular-nums">
