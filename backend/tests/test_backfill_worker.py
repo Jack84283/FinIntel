@@ -66,10 +66,17 @@ def test_unlimited_backfill_ignores_daily_safety_cap(tmp_path, monkeypatch):
 
     monkeypatch.setattr(backfill_worker, "acquire_and_store", acquire)
     checkpoint = tmp_path / "unlimited.json"
-    assert backfill_worker.run(
-        provider="alpaca_sip", asset_type="all", max_per_day=0,
-        delay=0, state_path=checkpoint, once=True,
-    ) == 0
+    assert (
+        backfill_worker.run(
+            provider="alpaca_sip",
+            asset_type="all",
+            max_per_day=0,
+            delay=0,
+            state_path=checkpoint,
+            once=True,
+        )
+        == 0
+    )
     assert calls == ["A", "AA"]
     assert json.loads(checkpoint.read_text())["requests"] == 2
 
@@ -78,7 +85,8 @@ def test_rate_limit_backs_off_and_retries_without_waiting_for_midnight(tmp_path,
     monkeypatch.setattr(backfill_worker, "alpaca_configured", lambda: True)
     complete = []
     monkeypatch.setattr(
-        backfill_worker, "pending_symbols",
+        backfill_worker,
+        "pending_symbols",
         lambda **kwargs: [] if complete else ["AAPL"],
     )
     waits = []
@@ -94,14 +102,22 @@ def test_rate_limit_backs_off_and_retries_without_waiting_for_midnight(tmp_path,
     monkeypatch.setattr(backfill_worker, "acquire_and_store", acquire)
     monkeypatch.setattr(backfill_worker.time, "sleep", waits.append)
     monkeypatch.setattr(
-        backfill_worker, "_sleep_until_next_utc_day",
+        backfill_worker,
+        "_sleep_until_next_utc_day",
         lambda: (_ for _ in ()).throw(AssertionError("Must not wait until tomorrow")),
     )
     checkpoint = tmp_path / "rate-limit.json"
-    assert backfill_worker.run(
-        provider="alpaca_sip", asset_type="all", max_per_day=0,
-        delay=0, state_path=checkpoint, once=False,
-    ) == 0
+    assert (
+        backfill_worker.run(
+            provider="alpaca_sip",
+            asset_type="all",
+            max_per_day=0,
+            delay=0,
+            state_path=checkpoint,
+            once=False,
+        )
+        == 0
+    )
     assert calls == ["AAPL", "AAPL"]
     assert waits == [60]
     saved = json.loads(checkpoint.read_text())
