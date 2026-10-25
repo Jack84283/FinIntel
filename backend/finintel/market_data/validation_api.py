@@ -50,6 +50,11 @@ def _run(job_id: str, checks: list[str]) -> None:
                             "weekday_gap_candidates",
                             "series_with_weekday_gap_candidates",
                             "gap_examples",
+                            "reference_symbol",
+                            "reference_provider",
+                            "reference_session_gap_candidates",
+                            "series_with_reference_session_gaps",
+                            "reference_gap_examples",
                             "observed_span_groups",
                             "series_with_less_than_9_years_observed",
                         )
