@@ -8,6 +8,7 @@ import argparse
 import json
 import sqlite3
 import time
+from bisect import bisect_left
 from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -40,7 +41,24 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
         by_symbol = {}
         for item in series:
             by_symbol.setdefault(item["symbol"], []).append(dict(item))
+        # A local liquid benchmark filters shared non-trading days without network access.
+        reference = next(
+            (item for item in series if item["symbol"] == "SPY" and item["provider"] == "alpaca_sip"),
+            None,
+        )
+        reference_days = []
+        if reference is not None:
+            reference_days = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT session_date FROM daily_prices WHERE series_id=? "
+                    "ORDER BY session_date",
+                    (reference["id"],),
+                )
+            ]
         gaps = Counter()
+        reference_gaps = Counter()
+        reference_gap_examples = []
         gap_examples = []
         corporate_candidates = []
         totals = {}
@@ -78,6 +96,21 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                 last = day.isoformat()
                 if prev_day is not None:
                     missing = _weekdays_between(prev_day, day)
+                    if reference_days and prev_day < day:
+                        confirmed_by_reference = bisect_left(reference_days, day.isoformat()) - (
+                            bisect_left(reference_days, prev_day.isoformat()) + 1
+                        )
+                        if confirmed_by_reference > 0:
+                            reference_gaps["sessions"] += confirmed_by_reference
+                            reference_gaps["series_" + str(sid)] += 1
+                            if len(reference_gap_examples) < examples_limit:
+                                reference_gap_examples.append({
+                                    "symbol": item["symbol"],
+                                    "provider": item["provider"],
+                                    "previous": prev_day.isoformat(),
+                                    "next": day.isoformat(),
+                                    "reference_sessions_missing": confirmed_by_reference,
+                                })
                     if missing:
                         gaps["weekday_gap_candidates"] += missing
                         gaps["series_with_gaps_" + str(sid)] += 1
@@ -177,6 +210,13 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
                 key.startswith("series_with_gaps_") for key in gaps
             ),
             "gap_examples": gap_examples,
+            "reference_symbol": reference["symbol"] if reference else None,
+            "reference_provider": reference["provider"] if reference else None,
+            "reference_session_gap_candidates": reference_gaps["sessions"],
+            "series_with_reference_session_gaps": sum(
+                key.startswith("series_") for key in reference_gaps
+            ),
+            "reference_gap_examples": reference_gap_examples,
             "observed_span_groups": dict(coverage_years),
             "series_with_less_than_9_years_observed": sum(
                 value for key, value in coverage_years.items() if key != "9_plus_years"
@@ -201,6 +241,8 @@ def diagnostics(db: Path, *, examples_limit: int = 30) -> dict:
             "limitations": [
                 "Weekday gaps include exchange holidays and must not be treated as confirmed missing data.",
                 "Coverage groups use observed span; newer listings and delisted stocks may be shorter.",
+                "Reference gaps use observed SPY sessions, not an authoritative exchange calendar.",
+                "SPY and other assets can have different listing calendars, trading halts or provider outages.",
                 "Gap candidates are not certified against an official exchange calendar.",
                 "Large price jumps may be splits or actual market moves; dividends are not verified.",
                 "Cross-provider comparisons require matching adjustment labels and overlapping dates.",
