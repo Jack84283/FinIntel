@@ -37,7 +37,7 @@ def test_validation_handles_empty_database(tmp_path):
     db = tmp_path / "empty.sqlite3"
     conn = sqlite3.connect(db)
     conn.execute("CREATE TABLE series (id INTEGER, symbol TEXT, provider TEXT)")
-    conn.execute("CREATE TABLE daily_prices (series_id INTEGER, session_date TEXT)")
+    conn.execute("CREATE TABLE daily_prices (series_id INTEGER, session_date TEXT, open TEXT, high TEXT, low TEXT, close TEXT, volume INTEGER)")
     conn.close()
     result = validate(db)
     assert result["price_rows"] == 0
