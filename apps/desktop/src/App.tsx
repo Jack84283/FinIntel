@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchBackendHealth } from "./api";
 import { MarketExplorer } from "./MarketExplorer";
+import { PreferencesPage } from "./PreferencesPage";
 import { ActionHistoryPage } from "./ActionHistoryPage";
 import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
 import type { BackendHealth } from "./health";
@@ -23,14 +24,13 @@ const groups = [
   ] },
   { heading: "Workspace & Preferences", items: [
     { id: "portfolio", label: "Portfolio", icon: BriefcaseBusiness },
-    { id: "settings", label: "Settings", icon: Settings },
+    { id: "settings", label: "Preferences", icon: Settings },
   ] },
 ] as const;
 const allSections = [...groups[0].items, ...groups[1].items, ...groups[2].items];
 const placeholders: Partial<Record<Screen, { title: string; description: string }>> = {
   intelligence: { title: "Intelligence", description: "Proprietary models, local AI, and market trend analysis will appear here." },
   portfolio: { title: "Portfolio", description: "Holdings, performance, allocation, and risk exposure will appear here." },
-  settings: { title: "Settings", description: "Providers, local models, storage, and preferences will appear here." },
 };
 type Connection =
   | { kind: "loading" }
@@ -98,6 +98,12 @@ export default function App() {
           <DataAcquisitionPage onViewMarket={openMarkets} />
         ) : screen === "action-history" ? (
           <ActionHistoryPage onViewMarket={openMarkets} />
+        ) : screen === "settings" ? (
+          <PreferencesPage
+            backend={connection.kind === "connected" ? { kind: "connected", version: connection.health.version } : { kind: connection.kind }}
+            onRecheckBackend={() => { void checkHealth(); }}
+            onOpenAcquisition={() => setScreen("data-acquisition")}
+          />
         ) : screen !== "overview" ? (
           <section aria-labelledby="placeholder-title">
             <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
