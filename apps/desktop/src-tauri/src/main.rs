@@ -222,6 +222,19 @@ async fn market_imports(limit: u8) -> Result<serde_json::Value, String> {
     .await
 }
 
+#[tauri::command]
+async fn market_imports_search(
+    q: String, provider: String, limit: u8, offset: u32,
+) -> Result<serde_json::Value, String> {
+    if q.len() > 80 || provider.len() > 40 || limit == 0 || limit > 100 {
+        return Err("Invalid import history search.".to_string());
+    }
+    read_backend(
+        "/api/v1/market-data/imports/search",
+        &[("q", q), ("provider", provider), ("limit", limit.to_string()), ("offset", offset.to_string())],
+    ).await
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -229,6 +242,7 @@ fn main() {
             market_instruments,
             market_daily,
             market_imports,
+            market_imports_search,
             market_acquisition_status,
             market_acquire_daily,
             market_symbols,
