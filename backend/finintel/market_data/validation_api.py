@@ -61,7 +61,7 @@ def _run(job_id: str, checks: list[str]) -> None:
                         ],
                         "corporate_action_jump_candidates": diagnostic[
                             "corporate_action_jump_candidates"
-                        ]
+                        ],
                     }
                 elif check == "provider":
                     results["provider"] = {
