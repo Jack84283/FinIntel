@@ -46,7 +46,7 @@ export function DataValidationPage() {
   const running = job.status === "running" || job.status === "queued";
   const report = job.results ? JSON.stringify(job.results, null, 2) : null;
   return (
-    <section className="space-y-4" aria-labelledby="validation-title">
+    <section className="space-y-2" aria-labelledby="validation-title">
       <header className="border-b border-border pb-3">
         <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">FinIntel / Data & Operations</p>
         <h1 id="validation-title" className="mt-2 text-2xl font-semibold">Data Validation</h1>
