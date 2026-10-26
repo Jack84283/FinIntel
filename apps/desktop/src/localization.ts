@@ -108,6 +108,19 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Data provider API keys": "数据源 API 密钥",
+  "Credentials are stored in your OS credential vault, never in SQLite.": "凭据仅保存在操作系统安全凭据库中，不会写入 SQLite。",
+  "Use the packaged FinIntel desktop to manage API keys.": "请使用打包后的 FinIntel 桌面应用管理 API 密钥。",
+  "API key": "API 密钥",
+  "Key ID": "密钥 ID",
+  "Secret key": "密钥串",
+  "Enter replacement key": "输入新密钥以替换",
+  "Enter API credential": "输入 API 凭据",
+  "Configured": "已配置",
+  "Not configured": "尚未配置",
+  "Credential saved securely.": "凭据已安全保存。",
+  "Credential deleted.": "凭据已删除。",
+  "Delete": "删除",
   "Stored": "已保存",
   "observations": "条记录",
   "new": "新增",
