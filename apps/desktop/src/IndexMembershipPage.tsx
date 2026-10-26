@@ -158,15 +158,14 @@ export function IndexMembershipPage() {
         title={t("Index Constituents")}
         subtitle={t("Discover which securities belonged to which indexes, using sourced local snapshots.")}
         actions={<Button type="button" variant="secondary" size="sm" onClick={() => setRevision(value => value + 1)}>
-          <RefreshCw aria-hidden="true" /> Refresh
+          <RefreshCw aria-hidden="true" /> {t("Refresh")}
         </Button>}
       />
       <Card>
         <CardHeader className="grid-cols-1">
           <CardTitle>{t("Index membership snapshots")}</CardTitle>
           <CardDescription>
-            Membership reflects each index’s latest stored snapshot on or before the selected date.
-            No membership is inferred from stock prices or ETF holdings.
+            {t("Membership reflects each index’s latest stored snapshot on or before the selected date. No membership is inferred from stock prices or ETF holdings.")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -176,7 +175,7 @@ export function IndexMembershipPage() {
             </div>
             <div className="flex min-h-12 flex-wrap items-center gap-3">
               <Button type="button" size="sm" variant="outline" onClick={() => setAsOf("")}>
-                Latest available
+                {t("Latest available")}
               </Button>
               <span className="text-xs text-muted-foreground">{t("Blank date uses the latest local snapshot.")}</span>
             </div>
