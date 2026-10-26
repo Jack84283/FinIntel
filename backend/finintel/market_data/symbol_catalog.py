@@ -3,11 +3,12 @@
 Only explicit user actions contact the listing-status provider. The starter
 catalog is deliberately small and is not a complete or real-time listing.
 """
+from finintel.settings.credentials import get_secret
+
 
 import csv
 import io
 import json
-import os
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
@@ -191,7 +192,7 @@ def parse_listing_csv(payload: bytes) -> list[dict[str, str]]:
 
 def fetch_active_listings(*, client: httpx.Client | None = None) -> list[dict[str, str]]:
     """One user-authorized provider request. Never auto-refresh or log the key."""
-    key = os.environ.get("FININTEL_ALPHA_VANTAGE_API_KEY", "").strip()
+    key = get_secret("alpha_vantage", "api_key").strip()
     if not key:
         raise ProviderError("Configure FININTEL_ALPHA_VANTAGE_API_KEY in the Python backend")
     params = {"function": "LISTING_STATUS", "state": "active", "apikey": key}
