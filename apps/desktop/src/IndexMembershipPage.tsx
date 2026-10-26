@@ -95,7 +95,7 @@ export function IndexMembershipPage() {
         </Button>}
       />
       <Card>
-        <CardHeader>
+        <CardHeader className="grid-cols-1">
           <CardTitle>Index membership snapshots</CardTitle>
           <CardDescription>
             Membership reflects each index’s latest stored snapshot on or before the selected date.
@@ -144,7 +144,7 @@ export function IndexMembershipPage() {
       </Card>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="grid-cols-1">
           <CardTitle>Stock index lookup</CardTitle>
           <CardDescription>Enter a ticker to check all four indexes as of the chosen date.</CardDescription>
         </CardHeader>
@@ -177,7 +177,7 @@ export function IndexMembershipPage() {
       </Card>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="grid-cols-1">
           <CardTitle>{selectedMeta?.name ?? selected} — Constituents</CardTitle>
           <CardDescription>
             {snapshot?.snapshot_as_of
