@@ -108,6 +108,19 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "No observations in this date range.": "所选日期范围内没有数据。",
+  "Historical": "历史",
+  "candlestick chart showing": "K 线图，包含",
+  "intervals": "个时间段",
+  "daily": "日线",
+  "weekly": "周线",
+  "monthly": "月线",
+  "Stored": "已保存",
+  "from": "来自",
+  "No sessions in selected range": "所选范围内没有交易日",
+  "historical end-of-day data": "历史日终行情数据",
+  "Local symbol search unavailable": "本地证券搜索不可用",
+
   "Historical download completed.": "历史数据下载完成。",
   "Historical download failed. See details below.": "历史数据下载失败，请查看下方详情。",
   "Notifications": "通知",
