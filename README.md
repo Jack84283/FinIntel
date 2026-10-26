@@ -481,3 +481,5 @@ reports. Exit codes are 0, 2 and 1 respectively. A REVIEW result is not a
 failed system scan, and reported gaps must not be erased or suppressed to get
 a green status. A PASS is not proof of provider accuracy or exchange listing
 eligibility; manual examination of source-specific findings remains important.
+
+**Single-instance development:** Running `npm run dev:desktop` again from the same checkout shuts down the earlier launcher (and its owned backend/Tauri processes), waits for ports `8765` and `1420` to become free, then starts the new session. If these ports are occupied by an unrelated process, startup fails safely rather than terminating that process. Standalone `uvicorn` or `tauri dev` processes are not automatically terminated because the launcher cannot prove ownership.
