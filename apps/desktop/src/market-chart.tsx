@@ -61,7 +61,7 @@ export function MarketCharts({ bars, period }: { bars: DailyBar[]; period: Histo
       </div>
       <div className="overflow-x-auto rounded-md border border-border bg-muted/40 p-2">
         <p className="px-2 pt-1 text-xs font-medium text-muted-foreground">Trading volume · {interval.toLowerCase()} aggregation</p>
-        <svg viewBox="0 0 840 105" role="img" aria-label={"Trading volume by " + interval.toLowerCase() + " interval for " + visible.length + " intervals"} className="h-auto min-w-[560px] w-full">
+        <svg viewBox="0 0 840 105" role="img" aria-label={`${t("Trading volume by")} ${t(interval.toLowerCase())} ${t("interval for")} ${visible.length} ${t("intervals")}`} className="h-auto min-w-[560px] w-full">
           <text x={left - 7} y={12} textAnchor="end" fontSize="11" fill="#a5b4c7">
             {new Intl.NumberFormat("en", { notation: "compact" }).format(maxVolume)}
           </text>
