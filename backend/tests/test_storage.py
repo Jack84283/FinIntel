@@ -165,7 +165,7 @@ def test_import_does_not_write_float_prices(tmp_path):
     with sqlite3.connect(db) as conn:
         rows = conn.execute("SELECT typeof(open), typeof(close) FROM daily_prices").fetchall()
         assert rows == [("text", "text")] * 3
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
 
 
 def test_revalidated_snapshot_has_consistent_contract(tmp_path):

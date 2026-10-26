@@ -29,7 +29,7 @@ def test_action_event_log_is_append_only_and_bounded(tmp_path):
     assert first < second
     assert list_action_events(db=db)[1]["error_code"] == "http_429"
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
 
 
 def test_action_event_rejects_unbounded_or_sensitive_error_details(tmp_path):
