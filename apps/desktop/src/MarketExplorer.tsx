@@ -197,10 +197,10 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
     <section className="space-y-2" aria-labelledby="markets-title">
       <PageHeader id="markets-title" breadcrumb={t("FinIntel / Markets")} title={t("Market Data Explorer")} subtitle={t("Historical daily prices stored in local SQLite. No live quotes.")} actions={<><Badge variant="outline">{t("Local SQLite")}</Badge>
             <Button type="button" variant="secondary" size="sm" onClick={() => setReload((v) => v + 1)}>
-              <RefreshCw aria-hidden="true" /> Reload local data
+              <RefreshCw aria-hidden="true" /> {t("Reload local data")}
             </Button>
             <Button type="button" size="sm" onClick={onOpenAcquisition}>
-              <Database aria-hidden="true" /> Data Acquisition
+              <Database aria-hidden="true" /> {t("Data Acquisition")}
             </Button>
             <Button type="button" variant={showSearch ? "secondary" : "outline"} size="sm" aria-expanded={showSearch} aria-controls="market-search-panel" onClick={() => setShowSearch((current) => !current)}>
               <SlidersHorizontal aria-hidden="true" /> {showSearch ? t("Hide filters") : t("Show filters")}
@@ -301,7 +301,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                   </div>
                 </div>
                 <label className="grid min-w-0 gap-2 self-start text-sm font-medium text-muted-foreground">
-                  Display period
+                  {t("Display period")}
                   <select
                     aria-label={t("Historical time range")}
                     value={period}
@@ -359,7 +359,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
               )}
               {series.has_more && (
                 <p role="status" className="text-xs text-muted-foreground">
-                  Display is limited to 4,000 latest records. Use date filters to examine older stored sessions.
+                  {t("Display is limited to 4,000 latest records. Use date filters to examine older stored sessions.")}
                 </p>
               )}
 
