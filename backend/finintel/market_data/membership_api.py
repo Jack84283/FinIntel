@@ -102,8 +102,7 @@ def get_index_constituents(
 ) -> dict:
     try:
         return index_constituents(
-            code, as_of=as_of.isoformat() if as_of else None,
-            query=q, limit=limit, offset=offset
+            code, as_of=as_of.isoformat() if as_of else None, query=q, limit=limit, offset=offset
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
