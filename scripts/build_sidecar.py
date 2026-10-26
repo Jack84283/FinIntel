@@ -35,6 +35,8 @@ def main() -> None:
             "finintel",
             "--collect-all",
             "exchange_calendars",
+            "--collect-all",
+            "keyring",
             str(ROOT / "backend" / "finintel" / "desktop_entry.py"),
         ],
         cwd=ROOT,
