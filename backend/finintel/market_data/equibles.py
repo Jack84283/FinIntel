@@ -11,7 +11,7 @@ from finintel.market_data.membership import INDEX_NAMES, load_membership
 
 INDEX_SLUGS = {
     "SP500": "sp-500",
-    "DJIA": "dow-jones-industrial-average",
+    "DJIA": "dow-jones",
     "NDX": "nasdaq-100",
     "RUT": "russell-2000",
 }
