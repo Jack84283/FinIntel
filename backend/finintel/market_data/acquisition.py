@@ -8,7 +8,6 @@ store, and the CLI remains available for users who want permanent JSON exports.
 import tempfile
 from pathlib import Path
 
-from finintel.settings.credentials import get_secret
 from finintel.market_data.__main__ import write_snapshot
 from finintel.market_data.alpaca import AlpacaDailyProvider, alpaca_configured
 from finintel.market_data.provider import (
@@ -17,6 +16,7 @@ from finintel.market_data.provider import (
     ProviderError,
 )
 from finintel.market_data.tiingo import TiingoDailyProvider, tiingo_configured
+from finintel.settings.credentials import get_secret
 from finintel.storage.db import import_snapshot
 
 
