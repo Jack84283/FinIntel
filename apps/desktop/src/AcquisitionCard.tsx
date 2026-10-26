@@ -1,4 +1,5 @@
 import { useLocale } from "./localization";
+import { useNotify } from "./notifications";
 import { useEffect, useState, type FormEvent } from "react";
 import { ArrowDownToLine, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,7 @@ export function AcquisitionCard({
   onAcquired: (symbol: string, provider: AcquisitionProvider) => void;
 }) {
   const { t } = useLocale();
+  const notify = useNotify();
   const [symbol, setSymbol] = useState(selectedSymbol);
   const [selectedType, setSelectedType] = useState<AssetType | null>(null);
   const [outputsize, setOutputsize] = useState<OutputSize>("compact");
@@ -88,8 +90,10 @@ export function AcquisitionCard({
       const imported = await acquireMarketDaily(symbol, outputsize, provider, alpacaPeriod);
       setResult(imported);
       onAcquired(imported.symbol, provider);
+      notify(t("Historical download completed."), "success");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
+      notify(t("Historical download failed. See details below."), "error");
     } finally {
       setPending(false);
     }
