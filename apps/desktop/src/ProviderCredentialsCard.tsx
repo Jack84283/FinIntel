@@ -29,11 +29,13 @@ export function ProviderCredentialsCard() {
       setStatus(await credentialStatuses());
       setError("");
     } catch (reason) {
+      setStatus(null);
       setError(String(reason));
+      throw reason;
     }
   }, [native]);
 
-  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => { void reload().catch(() => {}); }, [reload]);
 
   const modify = async (provider: ProviderId, field: CredentialField, remove: boolean) => {
     const key = provider + ":" + field;
@@ -45,8 +47,8 @@ export function ProviderCredentialsCard() {
     try {
       if (remove) await credentialRemove(provider, field);
       else await credentialSave(provider, field, secret);
-      setMessage(t(remove ? "Credential deleted." : "Credential saved securely."));
       await reload();
+      setMessage(t(remove ? "Credential deleted." : "Credential saved securely."));
     } catch (reason) {
       setError(String(reason));
     } finally {
@@ -69,7 +71,7 @@ export function ProviderCredentialsCard() {
               <h3 className="text-sm font-semibold">{provider.title}</h3>
               {provider.fields.map(field => {
                 const key = provider.id + ":" + field.id;
-                const configured = !!status?.[provider.id]?.[field.id];
+                const configured = status?.[provider.id]?.[field.id] === true;
                 return (
                   <div key={key} className="grid gap-2 sm:grid-cols-[100px_minmax(120px,1fr)_auto_auto] sm:items-center">
                     <label htmlFor={"credential-" + key} className="text-xs">{t(field.label)}</label>
@@ -83,14 +85,14 @@ export function ProviderCredentialsCard() {
                     <Button type="button" size="sm" variant="outline" disabled={busy || !configured}
                       onClick={() => { void modify(provider.id, field.id, true); }}>{t("Delete")}</Button>
                     <p className="text-xs text-muted-foreground sm:col-span-4">
-                      {configured ? t("Configured") : t("Not configured")}
+                      {status === null ? t("Status unavailable") : configured ? t("Configured") : t("Not configured")}
                     </p>
                   </div>
                 );
               })}
             </div>
           ))}
-          <Button size="sm" type="button" variant="outline" disabled={busy} onClick={() => { void reload(); }}>{t("Refresh")}</Button>
+          <Button size="sm" type="button" variant="outline" disabled={busy} onClick={() => { void reload().catch(() => {}); }}>{t("Refresh")}</Button>
         </>}
         {message && <p role="status" className="text-xs text-positive">{message}</p>}
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
