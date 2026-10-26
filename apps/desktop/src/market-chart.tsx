@@ -1,11 +1,13 @@
+import { useLocale } from "./localization";
 import type { DailyBar } from "./market";
 import { chartBars, chartInterval, type HistoryPeriod } from "./history-range";
 
 /** Deliberately lightweight SVG: no new chart dependency or third-party data feed. */
 export function MarketCharts({ bars, period }: { bars: DailyBar[]; period: HistoryPeriod }) {
+  const { t } = useLocale();
   const interval = chartInterval(period, bars.length);
   const visible = chartBars(bars, interval);
-  if (visible.length === 0) return <p className="py-10 text-center text-sm text-muted-foreground">No observations in this date range.</p>;
+  if (visible.length === 0) return <p className="py-10 text-center text-sm text-muted-foreground">{t("No observations in this date range.")}</p>;
 
   const width = 840;
   const left = 56;
@@ -28,7 +30,7 @@ export function MarketCharts({ bars, period }: { bars: DailyBar[]; period: Histo
   return (
     <div className="space-y-2">
       <div className="overflow-x-auto rounded-md border border-border bg-muted/40 p-2">
-        <svg viewBox="0 0 840 280" role="img" aria-label={"Historical " + interval.toLowerCase() + " candlestick chart showing " + visible.length + " intervals"} className="h-auto min-w-[560px] w-full">
+        <svg viewBox="0 0 840 280" role="img" aria-label={`${t("Historical")} ${t(interval.toLowerCase())} ${t("candlestick chart showing")} ${visible.length} ${t("intervals")}`} className="h-auto min-w-[560px] w-full">
           {ticks.map((tick) => (
             <g key={tick}>
               <line x1={left} x2={width - right} y1={yPrice(tick)} y2={yPrice(tick)} stroke="#2b394b" strokeDasharray="3 4" />
