@@ -84,7 +84,10 @@ def acquire_index(code: str) -> dict:
             expected = page.get("constituentCount")
             if not isinstance(expected, int) or not 1 <= expected <= 5000:
                 raise EquiblesError("Invalid source constituent count.")
-            if not isinstance(page.get("unlinkedCount"), int) or not 0 <= page["unlinkedCount"] <= expected:
+            if (
+                not isinstance(page.get("unlinkedCount"), int)
+                or not 0 <= page["unlinkedCount"] <= expected
+            ):
                 raise EquiblesError("Invalid source unlinked count.")
         if (
             page.get("asOfDate") != first["asOfDate"]
