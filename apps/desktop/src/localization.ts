@@ -108,6 +108,8 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+"Provider credentials are managed in the secure settings card on this page.": "数据源凭据在本页的安全设置卡片中管理。",
+"Configure this provider in Preferences → Data provider API keys. Browser-only development still supports environment credentials.": "请在「偏好设置 → 数据源 API 密钥」中配置此数据源。仅浏览器开发模式仍可使用环境变量凭据。",
   "Data provider API keys": "数据源 API 密钥",
   "Credentials are stored in your OS credential vault, never in SQLite.": "凭据仅保存在操作系统安全凭据库中，不会写入 SQLite。",
   "Use the packaged FinIntel desktop to manage API keys.": "请使用打包后的 FinIntel 桌面应用管理 API 密钥。",
