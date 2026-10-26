@@ -38,7 +38,9 @@ def load_listing_evidence(path: Path | None, *, through: date) -> dict[str, dict
             symbol = (row.get("symbol") or "").strip().upper()
             source = (row.get("source") or "").strip()
             if not symbol or not source or symbol in evidence:
-                raise ValueError(f"Invalid, unsourced, or duplicate listing evidence at line {line}")
+                raise ValueError(
+                    f"Invalid, unsourced, or duplicate listing evidence at line {line}"
+                )
             try:
                 listed = date.fromisoformat((row.get("listed_on") or "").strip())
                 delisted_raw = (row.get("delisted_on") or "").strip()
@@ -230,7 +232,9 @@ def audit_coverage(
                         entry["status"] = "outside_verified_listing_window"
                     elif listing["verified_on"] < through and listing["delisted_on"] is None:
                         entry["status"] = "stale_listing_evidence"
-                        entry["reasons"].append("Active listing evidence predates report through date")
+                        entry["reasons"].append(
+                            "Active listing evidence predates report through date"
+                        )
                     elif missing:
                         entry["status"] = "needs_review"
                         entry["reasons"].append("Calendar gaps require halt/provider verification")
