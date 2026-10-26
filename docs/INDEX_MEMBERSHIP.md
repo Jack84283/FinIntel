@@ -34,7 +34,7 @@ declared count, linked tickers and pagination before committing the snapshot.
 The source is recorded as an **ETF holdings-derived proxy**, not an official
 index constituent certification. Other imported dates and other indexes are
 retained. API terms and local data storage permission remain subject to the
-user's Equibles plan. The initial integration imports symbols and provenance;
+user's Equibles plan. The initial integration imports symbols, company names, and provenance;
 weights/ranks/fund holdings fields are not yet preserved in the SQLite schema.
 
 ## Import a full point-in-time snapshot
