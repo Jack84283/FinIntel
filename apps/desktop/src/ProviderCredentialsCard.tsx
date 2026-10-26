@@ -87,11 +87,11 @@ export function ProviderCredentialsCard() {
           {providers.map(provider => (
             <div key={provider.id} className="space-y-3 border-b border-border pb-3 last:border-0">
               <h3 className="text-sm font-semibold">{provider.title}</h3>
-              {provider.fields.map(field => {
+              {provider.fields.map((field, fieldIndex) => {
                 const key = provider.id + ":" + field.id;
                 const configured = status?.[provider.id]?.[field.id] === true;
                 return (
-                  <div key={key} className="grid gap-2 sm:grid-cols-[100px_minmax(120px,1fr)_auto_auto] sm:items-center">
+                  <div key={key} className="grid gap-2 sm:grid-cols-[100px_minmax(120px,1fr)_auto_auto_auto] sm:items-center">
                     <label htmlFor={"credential-" + key} className="text-xs">{t(field.label)}</label>
                     <input id={"credential-" + key} type="password" autoComplete="off" spellCheck={false}
                       maxLength={4096} value={draft[key] || ""}
@@ -102,18 +102,18 @@ export function ProviderCredentialsCard() {
                       onClick={() => { void modify(provider.id, field.id, false); }}>{t("Save")}</Button>
                     <Button type="button" size="sm" variant="outline" disabled={busy || !configured}
                       onClick={() => { void modify(provider.id, field.id, true); }}>{t("Delete")}</Button>
-                    <p className="text-xs text-muted-foreground sm:col-span-4">
+                    {fieldIndex === provider.fields.length - 1 && <Button type="button" size="sm" variant="outline"
+                      disabled={busy || testing !== null || !provider.fields.every(item => status?.[provider.id]?.[item.id] === true)}
+                      onClick={() => { void test(provider.id); }}>
+                      {testing === provider.id ? t("Testing…") : t("Test Connection")}
+                    </Button>}
+                    <p className="text-xs text-muted-foreground sm:col-span-5">
                       {status === null ? t("Status unavailable") : configured ? t("Configured") : t("Not configured")}
                     </p>
                   </div>
                 );
               })}
               <div className="flex flex-wrap items-center gap-3">
-                <Button type="button" size="sm" variant="outline"
-                  disabled={busy || testing !== null || !provider.fields.every(field => status?.[provider.id]?.[field.id] === true)}
-                  onClick={() => { void test(provider.id); }}>
-                  {testing === provider.id ? t("Testing…") : t("Test Connection")}
-                </Button>
                 {testResults[provider.id] && <p role="status" aria-live="polite" className="text-xs text-muted-foreground">
                   {t(testResults[provider.id]!.status)} · {t(testResults[provider.id]!.message)}
                   {testResults[provider.id]!.http_status != null ? ` · HTTP ${testResults[provider.id]!.http_status}` : ""}
