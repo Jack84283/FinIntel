@@ -7,6 +7,7 @@ import {
   type CredentialField, type CredentialStatus, type ProviderId,
 } from "./credentials-api";
 import { useLocale } from "./localization";
+import { useNotify } from "./notifications";
 
 const providers: { id: ProviderId; title: string; fields: { id: CredentialField; label: string }[] }[] = [
   { id: "alpha_vantage", title: "Alpha Vantage", fields: [{ id: "api_key", label: "API key" }] },
@@ -17,12 +18,12 @@ const providers: { id: ProviderId; title: string; fields: { id: CredentialField;
 
 export function ProviderCredentialsCard() {
   const { t } = useLocale();
+  const notify = useNotify();
   const [status, setStatus] = useState<CredentialStatus | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState<ProviderId | null>(null);
   const [testResults, setTestResults] = useState<Partial<Record<ProviderId, ConnectionTestResult>>>({});
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const native = credentialsNativeAvailable();
 
@@ -46,15 +47,15 @@ export function ProviderCredentialsCard() {
     if (!remove && !secret.trim()) return;
     setBusy(true);
     setError("");
-    setMessage("");
     try {
       if (remove) await credentialRemove(provider, field);
       else await credentialSave(provider, field, secret);
       setTestResults(previous => ({ ...previous, [provider]: undefined }));
       await reload();
-      setMessage(t(remove ? "Credential deleted." : "Credential saved securely."));
+      notify(t(remove ? "Credential deleted." : "Credential saved securely."), "success");
     } catch (reason) {
       setError(String(reason));
+      notify(t("Credential operation failed. See details below."), "error");
     } finally {
       setDraft(previous => ({ ...previous, [key]: "" }));
       setBusy(false);
@@ -68,8 +69,10 @@ export function ProviderCredentialsCard() {
     try {
       const result = await credentialTest(provider);
       setTestResults(previous => ({ ...previous, [provider]: result }));
+      notify(`${provider}: ${t(result.status)}`, result.status === "connected" ? "success" : result.status === "rate_limited" || result.status === "limited" ? "warning" : "error");
     } catch (reason) {
       setError(String(reason));
+      notify(t("Connection test failed. See details below."), "error");
     } finally {
       setTesting(null);
     }
@@ -124,7 +127,6 @@ export function ProviderCredentialsCard() {
           ))}
           <Button size="sm" type="button" variant="outline" disabled={busy} onClick={() => { void reload().catch(() => {}); }}>{t("Refresh")}</Button>
         </>}
-        {message && <p role="status" className="text-xs text-positive">{message}</p>}
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       </CardContent>
     </Card>
