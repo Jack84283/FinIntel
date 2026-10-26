@@ -82,3 +82,27 @@ def test_unlinked_holding_is_reported_without_fake_ticker(monkeypatch):
     assert result["complete"] is False
     assert result["unlinked_count"] == 1
     assert "incomplete" in result["source"]
+
+
+def test_dow_uses_canonical_equibles_slug(monkeypatch):
+    assert equibles.INDEX_SLUGS["DJIA"] == "dow-jones"
+    saved = []
+
+    def fake_fetch(code, offset):
+        assert code == "DJIA"
+        assert offset == 0
+        return {
+            "slug": "dow-jones",
+            "asOfDate": "2026-07-31",
+            "constituentCount": 1,
+            "unlinkedCount": 0,
+            "data": [{"ticker": "MSFT", "name": "Microsoft Corp", "isLinked": True}],
+            "meta": {"offset": 0, "count": 1, "hasMore": False, "total": 1},
+        }
+
+    monkeypatch.setattr(equibles, "_fetch", fake_fetch)
+    monkeypatch.setattr(equibles, "load_membership", lambda *a, **k: saved.append((a, k)) or 1)
+    result = equibles.acquire_index("DJIA")
+    assert result["members"] == 1
+    assert result["complete"] is True
+    assert saved[0][0][0] == "DJIA"
