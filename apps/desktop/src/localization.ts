@@ -108,6 +108,23 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "local series": "条本地行情序列",
+  "Could not load stored prices for": "无法加载已存储的行情：",
+  "loaded sessions": "个已加载交易日",
+  "Compared with prior loaded session": "与前一个已加载交易日比较",
+  "Bounded result · more stored": "结果数量受限 · 本地还有更多数据",
+  "Available stored data": "可用的本地存储数据",
+  "Only": "仅有",
+  "sessions are stored for this selection. More history may require a premium full-history import, or the instrument may have a shorter trading history. This selector never downloads data automatically.": "个交易日的数据已存储。更多历史数据可能需要付费完整历史数据导入，或该证券交易历史较短。更改筛选不会自动下载数据。",
+  "raw unadjusted": "原始未复权",
+  "raw": "原始",
+  "loaded rows": "行已加载",
+  "Trading volume": "成交量",
+  "aggregation": "汇总",
+  "Chart represents": "图表展示",
+  "actual daily sessions across": "个实际交易日，汇总为",
+  "intervals. Green means close ≥ open; red means close < open. Prices are raw, not corporate-action adjusted.": "个时间段。绿色表示收盘价不低于开盘价，红色表示收盘价低于开盘价。价格为原始数据，未根据公司行动复权。",
+
   "Trading volume by": "成交量（按",
   "interval for": "周期，共",
 
