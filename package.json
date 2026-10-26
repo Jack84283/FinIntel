@@ -2,14 +2,17 @@
   "name": "finintel",
   "private": true,
   "version": "0.1.0",
-  "workspaces": ["apps/desktop"],
+  "workspaces": [
+    "apps/desktop"
+  ],
   "scripts": {
     "dev": "npm run dev --workspace @finintel/desktop",
     "tauri:dev": "npm run tauri:dev --workspace @finintel/desktop",
     "typecheck": "npm run typecheck --workspace @finintel/desktop",
     "lint": "npm run lint --workspace @finintel/desktop",
     "test": "npm run test --workspace @finintel/desktop",
-    "build": "npm run build --workspace @finintel/desktop"
+    "build": "npm run build --workspace @finintel/desktop",
+    "dev:desktop": "node scripts/dev-desktop.mjs"
   },
   "engines": {
     "node": ">=22.12.0"
