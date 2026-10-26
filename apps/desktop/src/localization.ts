@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import { readWorkspacePreferences, type AppLanguage } from "./workspace-preferences";
 
 const translations = {
@@ -107,8 +108,24 @@ const translations = {
 } as const;
 
 export type TranslationKey = keyof typeof translations.en;
-export function translate(language: AppLanguage, key: TranslationKey): string {
-  return translations[language][key];
+export function translate(language: AppLanguage, key: string): string {
+  const catalog: Readonly<Record<string, string>> = translations[language];
+  return catalog[key] ?? key;
+}
+
+function subscribeLanguage(onChange: () => void): () => void {
+  window.addEventListener("finintel:language-changed", onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener("finintel:language-changed", onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+/** All route components react to a language switch without restarting the app. */
+export function useLocale() {
+  const language = useSyncExternalStore(subscribeLanguage, currentLanguage, () => "en" as AppLanguage);
+  return { language, t: (key: string) => translate(language, key) };
 }
 export function currentLanguage(): AppLanguage {
   return readWorkspacePreferences().language;
