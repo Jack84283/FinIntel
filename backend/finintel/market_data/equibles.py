@@ -1,7 +1,8 @@
 """Equibles index constituents acquisition. Explicit user-triggered network access only."""
+from finintel.settings.credentials import get_secret
+
 
 import json
-import os
 from datetime import date
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -23,11 +24,11 @@ class EquiblesError(ValueError):
 
 
 def configured() -> bool:
-    return bool(os.environ.get("FININTEL_EQUIBLES_API_KEY", "").strip())
+    return bool(get_secret("equibles", "api_key").strip())
 
 
 def _fetch(code: str, offset: int) -> dict:
-    key = os.environ.get("FININTEL_EQUIBLES_API_KEY", "").strip()
+    key = get_secret("equibles", "api_key").strip()
     if not key:
         raise EquiblesError("Configure FININTEL_EQUIBLES_API_KEY in the backend environment.")
     url = (
