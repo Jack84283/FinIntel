@@ -18,9 +18,10 @@ const children = new Set();
 let stopping = false;
 
 function child(command, args) {
-  const proc = spawn(command, args, { cwd: root, stdio: "inherit", shell: isWin && command === npm, env: process.env });
+  const proc = spawn(command, args, { cwd: root, stdio: "inherit", shell: isWin && command === npm, detached: !isWin, env: process.env });
   children.add(proc);
   proc.on("exit", () => children.delete(proc));
+  proc.on("error", error => { console.error(`Could not start ${command}: ${error.message}`); stop(1); });
   return proc;
 }
 
@@ -33,7 +34,7 @@ function stop(code = 0) {
       if (isWin) {
         spawn("taskkill", ["/pid", String(proc.pid), "/t", "/f"], { stdio: "ignore" });
       } else {
-        proc.kill("SIGTERM");
+        try { process.kill(-proc.pid, "SIGTERM"); } catch { proc.kill("SIGTERM"); }
       }
     }
   }
