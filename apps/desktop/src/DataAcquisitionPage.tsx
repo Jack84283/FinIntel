@@ -39,7 +39,7 @@ export function DataAcquisitionPage({
           />
           {latest && (
             <div role="status" aria-live="polite" className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-positive/30 bg-positive/5 p-4 text-sm">
-              <span className="flex min-w-0 items-center gap-2"><CheckCircle2 aria-hidden="true" className="size-4 shrink-0 text-positive" /> Stored {latest.symbol} from {latest.provider === "alpaca_sip" ? "Alpaca SIP" : latest.provider === "tiingo" ? "Tiingo" : "Alpha Vantage"}.</span>
+              <span className="flex min-w-0 items-center gap-2"><CheckCircle2 aria-hidden="true" className="size-4 shrink-0 text-positive" /> {t("Stored")} {latest.symbol} {t("from")} {latest.provider === "alpaca_sip" ? "Alpaca SIP" : latest.provider === "tiingo" ? "Tiingo" : "Alpha Vantage"}.</span>
               <Button type="button" size="sm" variant="secondary" onClick={() => onViewMarket(latest)}>
                 <BarChart3 aria-hidden="true" /> View in Markets
               </Button>
