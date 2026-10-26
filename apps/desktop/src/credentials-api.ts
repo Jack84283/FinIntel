@@ -20,3 +20,15 @@ export async function credentialRemove(provider: ProviderId, field: CredentialFi
   if (!isTauri()) throw new Error("Provider credentials require the native desktop app.");
   await invoke("credential_delete", { provider, field });
 }
+
+export type ConnectionTestResult = {
+  status: "connected" | "limited" | "authentication_failed" | "rate_limited" | "unreachable" | "invalid_response" | "not_configured";
+  message: string;
+  http_status: number | null;
+  elapsed_ms: number;
+};
+
+export async function credentialTest(provider: ProviderId): Promise<ConnectionTestResult> {
+  if (!isTauri()) throw new Error("Provider tests require the native desktop app.");
+  return invoke<ConnectionTestResult>("credential_test", { provider });
+}
