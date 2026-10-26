@@ -61,6 +61,7 @@ def acquire_index(code: str) -> dict:
     if code not in INDEX_NAMES:
         raise EquiblesError("Unknown index.")
     symbols = []
+    names = {}
     first = None
     offset = 0
     while True:
@@ -100,6 +101,7 @@ def acquire_index(code: str) -> dict:
             if not isinstance(ticker, str):
                 raise EquiblesError("Holding is missing a ticker.")
             symbols.append(ticker)
+            names[ticker.strip().upper()] = row.get("name")
         offset += len(data)
         if offset > first["constituentCount"]:
             raise EquiblesError("Equibles returned more rows than declared.")
@@ -109,7 +111,8 @@ def acquire_index(code: str) -> dict:
         raise EquiblesError("Equibles index download is incomplete.")
     source = "Equibles / ETF holdings proxy; " + INDEX_SLUGS[code] + "; " + first["asOfDate"]
     count = load_membership(
-        code, first["asOfDate"], source, symbols, expected_count=first["constituentCount"]
+        code, first["asOfDate"], source, symbols,
+        expected_count=first["constituentCount"], names=names,
     )
     return {
         "code": code,
