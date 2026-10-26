@@ -179,6 +179,9 @@ def audit_coverage(
                     entry["internal_gap_candidates"] = len(internal)
                     summary["internal_gap_candidates"] += len(internal)
                 if not listing:
+                    if off_calendar:
+                        entry["status"] = "needs_review"
+                        entry["reasons"].append("Off-calendar prices require independent review")
                     entry["reasons"].append(
                         "Listing/delisting dates are unverified; leading/trailing coverage unknown"
                     )
