@@ -204,7 +204,7 @@ export function AcquisitionCard({
         </form>
         {(selectedType === "Index" || selectedType === "Mutual Fund") && (
           <p role="status" className="text-xs text-muted-foreground">
-            {selectedType} instruments are reference entries only. Select a Stock or ETF to fetch daily prices from {provider === "tiingo" ? "Tiingo" : provider === "alpaca_sip" ? "Alpaca" : "Alpha Vantage"}.
+            {t(selectedType)} {t("instruments are reference entries only. Select a Stock or ETF to fetch daily prices from")} {provider === "tiingo" ? "Tiingo" : provider === "alpaca_sip" ? "Alpaca" : "Alpha Vantage"}.
           </p>
         )}
         {!symbol.trim() && (
