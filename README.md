@@ -18,6 +18,28 @@ Private, local-first financial intelligence workstation.
 - Node.js 22.12+ (or the latest supported LTS) and npm.
 - Rust stable with Cargo and [Tauri desktop prerequisites](https://v2.tauri.app/start/prerequisites/).
 
+## One-command development desktop launch (macOS, Windows, Linux)
+
+From the repository root, install the backend and JavaScript dependencies once:
+
+```sh
+python3 -m venv .venv
+# On macOS/Linux: source .venv/bin/activate
+# On Windows PowerShell: .venv\\Scripts\\Activate.ps1
+python -m pip install -e "./backend[dev]"
+npm ci
+```
+
+Then start both the Python FastAPI service and native Tauri desktop with **one command**:
+
+```sh
+npm run dev:desktop
+```
+
+The launcher starts the backend at `127.0.0.1:8765`, waits for its health endpoint, opens the Tauri desktop and terminates its owned processes when the desktop exits. It refuses to run when another process already owns the development port. Press Ctrl+C to stop the combined session.
+
+For Windows, use `py -m venv .venv` if `python3` is unavailable. This is a development command and requires local Python, Node and Rust/Tauri toolchains. Release packages use the separately bundled Python sidecar instead and need no developer terminal.
+
 ## Development: two terminals
 
 From the repository root:
