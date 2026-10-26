@@ -135,7 +135,10 @@ export function IndexMembershipPage() {
     try {
       const result = await acquireIndex(selected);
       setAcquireMessage("Imported " + result.members.toLocaleString() +
-        " fund-derived constituent candidates as of " + result.snapshot_as_of + ".");
+        " of " + result.source_total.toLocaleString() + " fund-derived holdings as of " +
+        result.snapshot_as_of + (result.complete ? "." :
+        ". INCOMPLETE: " + result.unlinked_count.toLocaleString() +
+        " holdings have no linked ticker and are excluded. Do not treat this as a full index."));
       setRevision(value => value + 1);
     } catch (reason) {
       setAcquireError(reason instanceof Error ? reason.message : String(reason));
