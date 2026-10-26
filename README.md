@@ -36,7 +36,7 @@ Then start both the Python FastAPI service and native Tauri desktop with **one c
 npm run dev:desktop
 ```
 
-The launcher starts the backend at `127.0.0.1:8765`, waits for its health endpoint, opens the Tauri desktop and terminates its owned processes when the desktop exits. It refuses to run when another process already owns the development port. Press Ctrl+C to stop the combined session.
+Development Tauri uses `apps/desktop/src-tauri/tauri.dev.conf.json` to disable the production `externalBin` requirement; the backend is run directly from `.venv` and no PyInstaller sidecar is needed in development. Production packaging still requires `python scripts/build_sidecar.py`.\n\nThe launcher starts the backend at `127.0.0.1:8765`, waits for its health endpoint, opens the Tauri desktop and terminates its owned processes when the desktop exits. It refuses to run when another process already owns the development port. Press Ctrl+C to stop the combined session.
 
 For Windows, use `py -m venv .venv` if `python3` is unavailable. This is a development command and requires local Python, Node and Rust/Tauri toolchains. Release packages use the separately bundled Python sidecar instead and need no developer terminal.
 
