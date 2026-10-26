@@ -4,12 +4,11 @@ The temporary private staging snapshot allows reuse of PR #4's fully validated,
 transactional importer. The JSON is removed after import: SQLite is the durable
 store, and the CLI remains available for users who want permanent JSON exports.
 """
-from finintel.settings.credentials import get_secret
-
 
 import tempfile
 from pathlib import Path
 
+from finintel.settings.credentials import get_secret
 from finintel.market_data.__main__ import write_snapshot
 from finintel.market_data.alpaca import AlpacaDailyProvider, alpaca_configured
 from finintel.market_data.provider import (
