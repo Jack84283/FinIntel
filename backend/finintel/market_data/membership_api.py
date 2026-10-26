@@ -4,10 +4,9 @@ from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from finintel.market_data.membership import (
-    INDEX_NAMES,
     index_constituents,
     list_indexes,
     symbol_index_memberships,
