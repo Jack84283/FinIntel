@@ -31,3 +31,19 @@ Status: in progress. This branch contains the initial English / Simplified Chine
 3. All four providers configurable through Settings, no secret value returned to UI, credentials survive app restart and deletion works.
 4. Existing SQLite and provider acquisition/backfill/validation regressions all pass.
 5. Do not merge until the remaining requirements above are implemented and verified.
+
+## Project-wide operating-system portability rule
+
+Any implementation that touches operating-system APIs, filesystem locations, process management, installation, key storage, native notifications, network services, startup/shutdown, packaging, or background execution MUST assess macOS, Windows, and Linux before the design is approved.
+
+- Maintain one shared React/TypeScript interface, Python services, SQLite domain/storage contracts and analysis logic.
+- Put native behavior behind narrow platform adapters. Do not scatter `sys.platform`, hardcoded executable names, slash-dependent filesystem paths, or platform-specific commands across shared business logic.
+- Support the OS-specific secure credential mechanism: macOS Keychain, Windows Credential Manager, and Linux Secret Service when available. On Linux without a secure secret store, fail safely with actionable setup guidance; never silently write plaintext secrets.
+- Use each platform's user data/config/log directories, file permissions, process lifecycle, and shutdown model. Do not assume macOS paths or POSIX shells.
+- Produce the proper per-OS Python sidecar and Tauri bundle with architecture-specific build artifacts; do not assume the macOS build runs elsewhere.
+- Treat platform-dependent background tasks, system tray/menu, update mechanisms, signing, firewall behavior and process spawning as explicitly portable design areas.
+- Add unit coverage for OS adapters, and Windows/macOS/Linux CI build checks. Track native smoke-test evidence by platform; a successful CI build does not prove an installer works.
+- Accessibility, English/Chinese translations, data and credential schema behavior must be consistent across supported systems.
+- macOS is the first acceptance target; Windows and Linux may follow as tracked acceptance stages, but an OS-specific implementation must not be presented as cross-platform complete without those stages passing.
+
+This is a standing engineering requirement for future FinIntel PRs, not limited to the current desktop integration work.
