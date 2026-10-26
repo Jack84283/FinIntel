@@ -74,8 +74,7 @@ def load_membership(
                 (index_code, effective_date),
             )
             conn.executemany(
-                "INSERT INTO index_memberships(index_code,symbol,as_of,source) "
-                "VALUES (?,?,?,?)",
+                "INSERT INTO index_memberships(index_code,symbol,as_of,source) VALUES (?,?,?,?)",
                 ((index_code, symbol, effective_date, source) for symbol in sorted(tickers)),
             )
         return len(tickers)
@@ -111,11 +110,7 @@ def list_indexes(*, as_of: str | None = None, db: Path | None = None) -> list[di
                 "status": "available" if record else "not_imported",
             }
             for code, name in INDEX_NAMES.items()
-            for record in [
-                _latest(conn, code, when)
-                if conn is not None and version >= 5
-                else None
-            ]
+            for record in [_latest(conn, code, when) if conn is not None and version >= 5 else None]
         ]
     finally:
         if conn is not None:
@@ -174,7 +169,8 @@ def index_constituents(
             dict(row)
             for row in conn.execute(
                 "SELECT m.symbol, COALESCE(c.name, m.symbol) AS name, "
-                "COALESCE(c.asset_type, 'Unknown') AS asset_type " + base
+                "COALESCE(c.asset_type, 'Unknown') AS asset_type "
+                + base
                 + " ORDER BY m.symbol LIMIT ? OFFSET ?",
                 (*args, limit, offset),
             )
@@ -195,8 +191,7 @@ def index_constituents(
                 if latest.get(row["index_code"]) == row["as_of"]:
                     other.setdefault(row["symbol"], set()).add(row["index_code"])
         result["items"] = [
-            {**item, "member_indexes": sorted(other.get(item["symbol"], {code}))}
-            for item in items
+            {**item, "member_indexes": sorted(other.get(item["symbol"], {code}))} for item in items
         ]
         return result
     finally:
