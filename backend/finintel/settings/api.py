@@ -1,6 +1,7 @@
 """Native desktop provider credential API. No read response contains secrets."""
 
 import os
+from hmac import compare_digest
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -23,16 +24,19 @@ class SecretInput(BaseModel):
 
 def _require_managed(request: Request) -> None:
     token = os.getenv("FININTEL_PROCESS_TOKEN", "")
-    if not token or request.headers.get("x-finintel-process-token") != token:
+    if not token or not compare_digest(request.headers.get("x-finintel-process-token", ""), token):
         raise HTTPException(status_code=403, detail="Managed desktop required")
 
 
 @router.get("/providers")
 def provider_status() -> dict[str, dict[str, bool]]:
-    return {
-        provider: {field: stored(provider, field) for field in fields}
-        for provider, fields in FIELDS.items()
-    }
+    try:
+        return {
+            provider: {field: stored(provider, field) for field in fields}
+            for provider, fields in FIELDS.items()
+        }
+    except CredentialStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.put("/providers/{provider}/{field}")
