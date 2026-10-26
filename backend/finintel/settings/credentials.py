@@ -3,7 +3,7 @@
 import os
 
 import keyring
-from keyring.errors import PasswordDeleteError
+from keyring.errors import KeyringError, PasswordDeleteError
 
 SERVICE = "app.finintel.desktop.providers"
 FIELDS = {
@@ -34,7 +34,7 @@ def _name(provider: str, field: str) -> str:
 def stored(provider: str, field: str) -> bool:
     try:
         return bool(keyring.get_password(SERVICE, _name(provider, field)))
-    except Exception:
+    except KeyringError:
         return False
 
 
@@ -45,8 +45,8 @@ def get_secret(provider: str, field: str) -> str:
         value = keyring.get_password(SERVICE, name)
         if value:
             return value.strip()
-    except Exception:
-        pass
+    except KeyringError:
+        value = None
     if os.getenv("FININTEL_PROCESS_TOKEN"):
         return ""
     return os.environ.get(ENV_FALLBACK[(provider, field)], "").strip()
@@ -59,7 +59,7 @@ def set_secret(provider: str, field: str, secret: str) -> None:
         raise ValueError("Invalid secret characters or length")
     try:
         keyring.set_password(SERVICE, name, value)
-    except Exception as exc:
+    except KeyringError as exc:
         raise CredentialStoreError("OS secure credential storage unavailable") from exc
 
 
