@@ -40,6 +40,7 @@ app.include_router(validation_router)
 app.include_router(membership_router)
 app.include_router(settings_router)
 
+
 @app.middleware("http")
 async def require_desktop_process_token(request: Request, call_next):
     """An app-owned sidecar rejects requests from unrelated loopback clients."""
