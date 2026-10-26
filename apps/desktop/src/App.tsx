@@ -47,7 +47,7 @@ type Connection =
 export default function App() {
   const [screen, setScreen] = useState<Screen>("overview");
   const [language, setLanguage] = useState<AppLanguage>(currentLanguage);
-  const t = (key: TranslationKey) => translate(language, key);
+  const t = (key: string) => translate(language, key);
   const [marketSelection, setMarketSelection] = useState<MarketSelection | null>(null);
   const [connection, setConnection] = useState<Connection>({ kind: "loading" });
 
