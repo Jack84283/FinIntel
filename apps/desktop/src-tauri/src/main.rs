@@ -401,6 +401,75 @@ async fn index_stock_memberships(
     ).await
 }
 
+fn valid_credential_path(provider: &str, field: &str) -> bool {
+    matches!(
+        (provider, field),
+        ("alpha_vantage", "api_key")
+            | ("alpaca_sip", "key_id")
+            | ("alpaca_sip", "secret_key")
+            | ("tiingo", "api_key")
+            | ("equibles", "api_key")
+    )
+}
+
+#[tauri::command]
+async fn credential_status() -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() {
+        return Err("Provider credential Settings require the managed desktop build.".to_string());
+    }
+    read_backend("/api/v1/settings/providers", &[]).await
+}
+
+#[tauri::command]
+async fn credential_set(
+    provider: String, field: String, secret: String
+) -> Result<serde_json::Value, String> {
+    if !valid_credential_path(&provider, &field) || secret.is_empty()
+        || secret.len() > 4096 || secret.chars().any(char::is_control)
+        || backend_token().is_empty()
+    {
+        return Err("Invalid secure provider credential request.".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize secure credential client.".to_string())?;
+    let response = client
+        .put(format!("{}/api/v1/settings/providers/{provider}/{field}", backend_base()))
+        .header("x-finintel-process-token", backend_token())
+        .json(&serde_json::json!({ "value": secret }))
+        .send().await
+        .map_err(|_| "Secure provider settings service unavailable.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Credential save unsuccessful (HTTP {}).", response.status()));
+    }
+    Ok(serde_json::json!({"configured": true}))
+}
+
+#[tauri::command]
+async fn credential_delete(
+    provider: String, field: String
+) -> Result<serde_json::Value, String> {
+    if !valid_credential_path(&provider, &field) || backend_token().is_empty() {
+        return Err("Invalid native credential request.".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize secure credential client.".to_string())?;
+    let response = client
+        .delete(format!("{}/api/v1/settings/providers/{provider}/{field}", backend_base()))
+        .header("x-finintel-process-token", backend_token())
+        .send().await
+        .map_err(|_| "Secure provider settings service unavailable.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Credential deletion unsuccessful (HTTP {}).", response.status()));
+    }
+    Ok(serde_json::json!({"configured": false}))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -433,6 +502,9 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             backend_health,
+            credential_status,
+            credential_set,
+            credential_delete,
             validation_status,
             validation_start,
             validation_corporate_reference,
