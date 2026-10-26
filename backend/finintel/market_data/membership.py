@@ -244,9 +244,11 @@ def symbol_index_memberships(
                 {
                     **entry,
                     "is_member": (
-                        True if (entry["code"], entry["snapshot_as_of"]) in recorded
-                        else None if entry["snapshot_as_of"] is None or
-                            (entry["source"] or "").find("; incomplete:") >= 0
+                        True
+                        if (entry["code"], entry["snapshot_as_of"]) in recorded
+                        else None
+                        if entry["snapshot_as_of"] is None
+                        or (entry["source"] or "").find("; incomplete:") >= 0
                         else False
                     ),
                 }
