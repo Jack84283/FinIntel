@@ -52,3 +52,19 @@ describe("Chinese translations on commonly overlooked routes", () => {
     }
   });
 });
+
+describe("Chinese UI checklist for sidebar and Market", () => {
+  it("translates the ten reported groups of terms", () => {
+    const keys = [
+      "Workspace", "Data & Operations", "Workspace & Preferences",
+      "Recheck connection", "Reload local data", "Data Acquisition",
+      "loaded sessions", "Compared with prior loaded session",
+      "Bounded result · more stored", "Available stored data",
+      "Display is limited to 4,000 latest records. Use date filters to examine older stored sessions.",
+      "historical end-of-day data", "raw unadjusted",
+      "Trading volume", "aggregation", "Chart represents",
+      "actual daily sessions across", "loaded rows",
+    ];
+    for (const key of keys) expect(translate("zh-CN", key), key).not.toBe(key);
+  });
+});
