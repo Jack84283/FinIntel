@@ -108,6 +108,10 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Notifications": "通知",
+  "Dismiss notification": "关闭通知",
+  "Credential operation failed. See details below.": "凭据操作失败，请查看下方详情。",
+  "Connection test failed. See details below.": "连接测试失败，请查看下方详情。",
   "Test Connection": "测试连接",
   "Testing…": "正在测试…",
   "connected": "连接成功",
