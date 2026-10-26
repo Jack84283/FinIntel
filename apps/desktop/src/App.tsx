@@ -81,7 +81,7 @@ export default function App() {
         <nav aria-label={t("Sections")} className="flex flex-col gap-1 text-sm">
           {groups.map((group) => (
             <div key={t(group.heading)} className="mb-5 flex flex-col gap-1">
-              <span className="mb-2 px-3 text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">{group.heading}</span>
+              <span className="mb-2 px-3 text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">{t(group.heading)}</span>
               {group.items.map(({ id, label, icon: Icon }) => (
                 <button key={id} type="button" aria-current={screen === id ? "page" : undefined} onClick={() => id === "market" ? openMarkets() : setScreen(id)} className={(screen === id ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
                   <Icon aria-hidden="true" className="size-4" /> {t(label)}
@@ -97,7 +97,7 @@ export default function App() {
         <nav aria-label={t("Mobile sections")} className="mb-5 flex gap-2 overflow-x-auto pb-2 lg:hidden">
           {allSections.map(({ id, label, icon: Icon }) => (
             <Button key={id} type="button" className="shrink-0" variant={screen === id ? "secondary" : "ghost"} onClick={() => id === "market" ? openMarkets() : setScreen(id)} aria-current={screen === id ? "page" : undefined}>
-              <Icon aria-hidden="true" /> {label}
+              <Icon aria-hidden="true" /> {t(label)}
             </Button>
           ))}
         </nav>
