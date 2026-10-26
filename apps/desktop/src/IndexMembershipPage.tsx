@@ -1,12 +1,12 @@
 import { PageHeader } from "./PageHeader";
 import { useEffect, useState, type FormEvent } from "react";
-import { RefreshCw, Search } from "lucide-react";
+import { Download, RefreshCw, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  fetchConstituents, fetchIndexes, fetchStockIndexes, INDEX_CODES,
+  acquireIndex, fetchConstituents, fetchIndexes, fetchStockIndexes, INDEX_CODES,
   type ConstituentPage, type IndexCode, type IndexRecord, type SymbolIndexes,
 } from "./index-api";
 
@@ -28,6 +28,9 @@ export function IndexMembershipPage() {
   const [stockResult, setStockResult] = useState<SymbolIndexes | null>(null);
   const [stockError, setStockError] = useState("");
   const [stockBusy, setStockBusy] = useState(false);
+  const [acquiring, setAcquiring] = useState(false);
+  const [acquireMessage, setAcquireMessage] = useState("");
+  const [acquireError, setAcquireError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -81,6 +84,22 @@ export function IndexMembershipPage() {
     }
   };
 
+  const download = async () => {
+    setAcquiring(true);
+    setAcquireError("");
+    setAcquireMessage("");
+    try {
+      const result = await acquireIndex(selected);
+      setAcquireMessage("Imported " + result.members.toLocaleString() +
+        " fund-derived constituent candidates as of " + result.snapshot_as_of + ".");
+      setRevision(value => value + 1);
+    } catch (reason) {
+      setAcquireError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setAcquiring(false);
+    }
+  };
+
   const pageCount = Math.max(1, Math.ceil((snapshot?.total ?? 0) / PAGE_SIZE));
   const selectedMeta = catalog.find(item => item.code === selected);
   return (
@@ -117,6 +136,16 @@ export function IndexMembershipPage() {
             </Button>
             <span className="text-xs text-muted-foreground">Blank date uses the latest local snapshot.</span>
           </div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">Equibles snapshots are ETF-holdings proxies, not official index constituents.</p>
+            <Button type="button" size="sm" disabled={acquiring}
+              onClick={() => { void download(); }}>
+              <Download aria-hidden="true" />
+              {acquiring ? "Fetching constituents…" : "Fetch constituents"}
+            </Button>
+          </div>
+          {acquireError && <p role="alert" className="text-sm text-destructive">{acquireError}</p>}
+          {acquireMessage && <p role="status" className="text-sm text-positive">{acquireMessage}</p>}
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4" role="group" aria-label="Select an index">
             {INDEX_CODES.map(code => {
               const item = catalog.find(entry => entry.code === code);
