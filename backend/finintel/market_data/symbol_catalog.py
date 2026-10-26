@@ -12,7 +12,6 @@ from datetime import UTC, datetime
 
 import httpx
 
-from finintel.settings.credentials import get_secret
 from finintel.market_data.provider import (
     API_ENDPOINT,
     SYMBOL_PATTERN,
@@ -21,6 +20,7 @@ from finintel.market_data.provider import (
     ProviderRateLimited,
     ProviderUnavailable,
 )
+from finintel.settings.credentials import get_secret
 
 # Fixed built-in offline examples; source metadata must not imply live status.
 # Names describe the underlying asset; no price observations are included.
