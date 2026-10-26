@@ -6,7 +6,10 @@ from finintel.market_data import equibles
 
 
 def test_acquisition_paginates_and_commits_once(monkeypatch):
-    data = [{"ticker": "AAPL", "name": "Apple Inc.", "isLinked": True}, {"ticker": "MSFT", "name": "Microsoft Corp", "isLinked": True}]
+    data = [
+        {"ticker": "AAPL", "name": "Apple Inc.", "isLinked": True},
+        {"ticker": "MSFT", "name": "Microsoft Corp", "isLinked": True},
+    ]
     seen = []
     saved = []
 
