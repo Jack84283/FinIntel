@@ -15,7 +15,7 @@ describe("localization catalog coverage", () => {
     const missing: string[] = [];
     for (const screen of screens) {
       const source = readFileSync(join(import.meta.dirname, screen), "utf8");
-      for (const match of source.matchAll(/\\bt\\(\\s*["'`]([^"'`]+)["'`]\\s*\\)/g)) {
+      for (const match of source.matchAll(/\bt\(\s*["'`]([^"'`]+)["'`]\s*\)/g)) {
         const key = match[1];
         if (!catalog.includes(JSON.stringify(key)) && !catalog.includes(`"${key}"`)) {
           missing.push(`${screen}: ${key}`);
