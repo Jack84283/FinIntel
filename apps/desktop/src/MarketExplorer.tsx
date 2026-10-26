@@ -236,7 +236,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
           <Card>
             <CardHeader>
               <CardTitle>{t("Instrument & time range")}</CardTitle>
-              <CardAction><Badge variant="secondary">{instruments.length} local series</Badge></CardAction>
+              <CardAction><Badge variant="secondary">{instruments.length} {t("local series")}</Badge></CardAction>
             </CardHeader>
             <CardContent>
               <form onSubmit={applyRange} className="grid min-w-0 grid-cols-1 items-end gap-4 sm:grid-cols-2 2xl:grid-cols-[minmax(220px,1.7fr)_minmax(170px,1fr)_minmax(190px,1fr)_minmax(190px,1fr)]">
@@ -338,7 +338,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
           )}
           {seriesState === "error" && (
             <Card role="alert"><CardContent className="space-y-3">
-              <p className="flex items-center gap-2 text-sm text-destructive"><AlertCircle aria-hidden="true" className="size-4" />Could not load stored prices for {symbol}.</p>
+              <p className="flex items-center gap-2 text-sm text-destructive"><AlertCircle aria-hidden="true" className="size-4" />{t("Could not load stored prices for")} {symbol}.</p>
               <p className="text-xs text-muted-foreground">{seriesError}</p>
               <Button variant="secondary" onClick={() => setReload((v) => v + 1)}>{t("Retry local query")}</Button>
             </CardContent></Card>
@@ -346,15 +346,15 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
           {seriesState === "ready" && series && (
             <>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                <Metric label={t("Instrument")} value={series.symbol} note={priceProvider + " · " + formatInteger(bars.length) + " loaded sessions"} />
+                <Metric label={t("Instrument")} value={series.symbol} note={priceProvider + " · " + formatInteger(bars.length) + " " + t("loaded sessions")} />
                 <Metric label={t("Last close")} value={last ? price(last.close) : "—"} note={last?.session_date ?? t("No trading sessions")} />
-                <Metric label={t("Daily change")} value={closeChange === null ? "—" : (closeChange >= 0 ? "+" : "") + price(String(closeChange))} note="Compared with prior loaded session" />
-                <Metric label={t("Loaded observations")} value={formatInteger(bars.length)} note={series.has_more ? "Bounded result · more stored" : "Available stored data"} />
+                <Metric label={t("Daily change")} value={closeChange === null ? "—" : (closeChange >= 0 ? "+" : "") + price(String(closeChange))} note={t("Compared with prior loaded session")} />
+                <Metric label={t("Loaded observations")} value={formatInteger(bars.length)} note={t(series.has_more ? "Bounded result · more stored" : "Available stored data")} />
               </div>
 
               {period !== "recent" && bars.length > 0 && bars.length < (period === "10y" ? 1200 : period === "5y" ? 600 : 120) && !series.has_more && (
                 <p role="status" className="text-xs text-muted-foreground">
-                  Only {formatInteger(bars.length)} sessions are stored for this selection. More history may require a premium full-history import, or the instrument may have a shorter trading history. This selector never downloads data automatically.
+                  {t("Only")} {formatInteger(bars.length)} {t("sessions are stored for this selection. More history may require a premium full-history import, or the instrument may have a shorter trading history. This selector never downloads data automatically.")}
                 </p>
               )}
               {series.has_more && (
@@ -366,7 +366,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
               <Card>
                 <CardHeader>
                   <CardTitle><span className="flex items-center gap-2"><BarChart3 aria-hidden="true" className="size-5" /> {t("OHLCV history")}</span></CardTitle>
-                  <CardAction><Badge variant="outline">{series.price_adjustment.replaceAll("_", " ")}</Badge></CardAction>
+                  <CardAction><Badge variant="outline">{t(series.price_adjustment.replaceAll("_", " "))}</Badge></CardAction>
                   <CardDescription className="col-span-2 mt-2">{first && last ? first.session_date + " – " + last.session_date : t("No sessions in selected range")} · {t("historical end-of-day data")}</CardDescription>
                 </CardHeader>
                 <CardContent><MarketCharts bars={bars} period={period} /></CardContent>
@@ -375,7 +375,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
               <Card>
                 <CardHeader>
                   <CardTitle>{t("Historical price table")}</CardTitle>
-                  <CardAction><Badge variant="secondary">{formatInteger(sorted.length)} loaded rows</Badge></CardAction>
+                  <CardAction><Badge variant="secondary">{formatInteger(sorted.length)} {t("loaded rows")}</Badge></CardAction>
                   <CardDescription className="col-span-2 mt-2">{t("Sortable local data. Prices are displayed without assuming a currency.")}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
