@@ -93,7 +93,7 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition, 
                   <Button type="button" size="sm" variant={preferences.language === "zh-CN" ? "secondary" : "outline"} aria-pressed={preferences.language === "zh-CN"} onClick={() => updatePreferences({ language: "zh-CN" })}>简体中文</Button>
                 </div>
               </SettingRow>
-              <SettingRow title={t("Reduce motion")} detail="Minimize interface animations and transitions. Your operating system's reduced-motion preference is also respected.">
+              <SettingRow title={t("Reduce motion")} detail={t("Minimize interface animations and transitions. Your operating system's reduced-motion preference is also respected.")}>
                 <Button type="button" size="sm" variant={preferences.reduceMotion ? "secondary" : "outline"} aria-pressed={preferences.reduceMotion} onClick={() => updatePreferences({ reduceMotion: !preferences.reduceMotion })}>
                   {preferences.reduceMotion ? t("Enabled") : t("Disabled")}
                 </Button>
@@ -126,7 +126,7 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition, 
           <Card className="min-w-0">
             <CardHeader className="flex min-w-0 flex-col items-start gap-2">
               <div className="flex min-w-0 items-center gap-2"><Activity aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">{t("Local backend")}</CardTitle></div>
-              <CardDescription>Connection to FinIntel's local Python service.</CardDescription>
+              <CardDescription>{t("Connection to FinIntel's local Python service.")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
