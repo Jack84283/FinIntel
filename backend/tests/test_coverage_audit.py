@@ -224,3 +224,16 @@ def test_sqlite_bytes_unchanged(tmp_path):
     before = db.read_bytes()
     audit_coverage(db, through=date(2026, 10, 23), years=1)
     assert db.read_bytes() == before
+
+
+def test_off_calendar_bar_flagged_without_listing_evidence(tmp_path):
+    db = db_with_rows(
+        tmp_path,
+        [(1, "ABC", "tiingo", "raw_unadjusted", "1d")],
+        [(1, "2026-10-24")],
+        [("ABC", "Stock", "NYSE")],
+    )
+    entry = audit_coverage(db, through=date(2026, 10, 24), years=1)["series"][0]
+    assert entry["off_calendar_observations"] == 1
+    assert entry["status"] == "needs_review"
+    assert entry["eligible_sessions_present_pct"] is None
