@@ -222,7 +222,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center gap-2 text-muted-foreground"><Database aria-hidden="true" className="size-5" /><span className="text-sm">{t("No price series have been imported.")}</span></div>
-            <Button type="button" onClick={onOpenAcquisition}><Database aria-hidden="true" /> Open Data Acquisition</Button>
+            <Button type="button" onClick={onOpenAcquisition}><Database aria-hidden="true" /> {t("Open Data Acquisition")}</Button>
             <code className="block overflow-x-auto rounded-md bg-muted px-3 py-3 text-xs">python -m finintel.storage import data/raw/AAPL.json</code>
             <p className="text-xs text-muted-foreground">{t("Alternatively, import a previously downloaded snapshot using the command above. All new data acquisition and completed import history are managed in Data Acquisition.")}</p>
           </CardContent>
