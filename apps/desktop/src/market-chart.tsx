@@ -60,7 +60,7 @@ export function MarketCharts({ bars, period }: { bars: DailyBar[]; period: Histo
         </svg>
       </div>
       <div className="overflow-x-auto rounded-md border border-border bg-muted/40 p-2">
-        <p className="px-2 pt-1 text-xs font-medium text-muted-foreground">Trading volume · {interval.toLowerCase()} aggregation</p>
+        <p className="px-2 pt-1 text-xs font-medium text-muted-foreground">{t("Trading volume")} · {t(interval.toLowerCase())} {t("aggregation")}</p>
         <svg viewBox="0 0 840 105" role="img" aria-label={`${t("Trading volume by")} ${t(interval.toLowerCase())} ${t("interval for")} ${visible.length} ${t("intervals")}`} className="h-auto min-w-[560px] w-full">
           <text x={left - 7} y={12} textAnchor="end" fontSize="11" fill="#a5b4c7">
             {new Intl.NumberFormat("en", { notation: "compact" }).format(maxVolume)}
@@ -85,7 +85,7 @@ export function MarketCharts({ bars, period }: { bars: DailyBar[]; period: Histo
           })}
         </svg>
       </div>
-      <p className="text-xs text-muted-foreground">Chart represents {bars.length.toLocaleString()} actual daily sessions across {visible.length} {interval.toLowerCase()} intervals. Green means close ≥ open; red means close &lt; open. Prices are raw, not corporate-action adjusted.</p>
+      <p className="text-xs text-muted-foreground">{t("Chart represents")} {bars.length.toLocaleString()} {t("actual daily sessions across")} {visible.length} {t(interval.toLowerCase())} {t("intervals. Green means close ≥ open; red means close < open. Prices are raw, not corporate-action adjusted.")}</p>
     </div>
   );
 }
