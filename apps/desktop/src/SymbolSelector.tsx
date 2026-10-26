@@ -106,7 +106,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
     <div className="min-w-0 w-full space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <label htmlFor={listId + "-input"} className="text-xs font-medium text-muted-foreground">
-          Instrument
+          {t("Instrument")}
         </label>
         <span className="text-[11px] text-muted-foreground">
           {catalogSource === "starter" ? t("Starter directory") : t("Local provider directory")}
