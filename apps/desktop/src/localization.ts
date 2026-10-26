@@ -108,6 +108,7 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Searching…": "正在搜索…",
 "Provider credentials are managed in the secure settings card on this page.": "数据源凭据在本页的安全设置卡片中管理。",
 "Configure this provider in Preferences → Data provider API keys. Browser-only development still supports environment credentials.": "请在「偏好设置 → 数据源 API 密钥」中配置此数据源。仅浏览器开发模式仍可使用环境变量凭据。",
   "Data provider API keys": "数据源 API 密钥",
