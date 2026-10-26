@@ -18,7 +18,7 @@ const children = new Set();
 let stopping = false;
 
 function child(command, args) {
-  const proc = spawn(command, args, { cwd: root, stdio: "inherit", shell: false, env: process.env });
+  const proc = spawn(command, args, { cwd: root, stdio: "inherit", shell: isWin && command === npm, env: process.env });
   children.add(proc);
   proc.on("exit", () => children.delete(proc));
   return proc;
