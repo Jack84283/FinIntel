@@ -12,8 +12,8 @@ from urllib.parse import quote
 
 import httpx
 
-from finintel.settings.credentials import get_secret
 from finintel.market_data.provider import SYMBOL_PATTERN, ProviderError
+from finintel.settings.credentials import get_secret
 
 
 def verify_events(
