@@ -15,7 +15,6 @@ from urllib.parse import urlencode
 import httpx
 from pydantic import ValidationError
 
-from finintel.settings.credentials import get_secret
 from finintel.market_data.models import DailyOHLCV, HistoricalBatch
 from finintel.market_data.provider import (
     SYMBOL_PATTERN,
@@ -26,6 +25,7 @@ from finintel.market_data.provider import (
     ProviderSymbolUnavailable,
     ProviderUnavailable,
 )
+from finintel.settings.credentials import get_secret
 
 ALPACA_ENDPOINT = "https://data.alpaca.markets/v2/stocks/bars"
 ALPACA_TERMS = "https://alpaca.markets/disclosures"
