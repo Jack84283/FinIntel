@@ -1,4 +1,6 @@
 import { PageHeader } from "./PageHeader";
+import { currentLanguage, translate, type TranslationKey } from "./localization";
+import type { AppLanguage } from "./workspace-preferences";
 import { useCallback, useEffect, useState } from "react";
 import { Activity, BarChart3, BrainCircuit, BriefcaseBusiness, CircleCheck, CircleOff, Clock3, Database, Download, History, ShieldCheck, RefreshCw, Settings, ListFilter } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +46,8 @@ type Connection =
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("overview");
+  const [language, setLanguage] = useState<AppLanguage>(currentLanguage);
+  const t = (key: TranslationKey) => translate(language, key);
   const [marketSelection, setMarketSelection] = useState<MarketSelection | null>(null);
   const [connection, setConnection] = useState<Connection>({ kind: "loading" });
 
@@ -76,17 +80,17 @@ export default function App() {
         <div className="mx-3 mb-12 grid h-11 w-12 place-items-center rounded-lg border border-[#568ad1] text-xl font-extrabold tracking-tight" aria-hidden="true">FI</div>
         <nav aria-label="Sections" className="flex flex-col gap-1 text-sm">
           {groups.map((group) => (
-            <div key={group.heading} className="mb-5 flex flex-col gap-1">
+            <div key={t(group.heading)} className="mb-5 flex flex-col gap-1">
               <span className="mb-2 px-3 text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">{group.heading}</span>
               {group.items.map(({ id, label, icon: Icon }) => (
                 <button key={id} type="button" aria-current={screen === id ? "page" : undefined} onClick={() => id === "market" ? openMarkets() : setScreen(id)} className={(screen === id ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
-                  <Icon aria-hidden="true" className="size-4" /> {label}
+                  <Icon aria-hidden="true" className="size-4" /> {t(label)}
                 </button>
               ))}
             </div>
           ))}
         </nav>
-        <p className="mt-auto px-2 pt-8 text-[10px] font-medium tracking-widest text-[#62758d]">PRIVATE · LOCAL FIRST</p>
+        <p className="mt-auto px-2 pt-8 text-[10px] font-medium tracking-widest text-[#62758d]">{t("PRIVATE · LOCAL FIRST")}</p>
       </aside>
 
       <main className="w-full min-w-0 px-3 py-4 sm:px-4 lg:py-5">
@@ -112,39 +116,39 @@ export default function App() {
             backend={connection.kind === "connected" ? { kind: "connected", version: connection.health.version } : { kind: connection.kind }}
             onRecheckBackend={() => { void checkHealth(); }}
             onOpenAcquisition={() => setScreen("data-acquisition")}
+            onLanguageChange={setLanguage}
           />
         ) : screen !== "overview" ? (
           <section aria-labelledby="placeholder-title">
-            <PageHeader id="placeholder-title" breadcrumb={`FinIntel / ${placeholders[screen]?.title}`} title={placeholders[screen]?.title} subtitle={placeholders[screen]?.description} actions={<Badge variant="outline">Not implemented</Badge>} />
+            <PageHeader id="placeholder-title" breadcrumb={`FinIntel / ${t(placeholders[screen]!.title as TranslationKey)}`} title={t(placeholders[screen]!.title as TranslationKey)} subtitle={t(placeholders[screen]!.description as TranslationKey)} actions={<Badge variant="outline">{t("Not implemented")}</Badge>} />
             <Card className="mt-2 max-w-[820px]">
-              <CardHeader><CardTitle>Coming in a future milestone</CardTitle><CardDescription>{placeholders[screen]?.description}</CardDescription></CardHeader>
-              <CardContent><p className="text-sm text-muted-foreground">This is a navigation placeholder. No live data or actions are available on this page yet.</p></CardContent>
+              <CardHeader><CardTitle>{t("Coming in a future milestone")}</CardTitle><CardDescription>{t(placeholders[screen]!.description as TranslationKey)}</CardDescription></CardHeader>
+              <CardContent><p className="text-sm text-muted-foreground">{t("This is a navigation placeholder. No live data or actions are available on this page yet.")}</p></CardContent>
             </Card>
           </section>
         ) : (
           <section aria-labelledby="overview-title">
-            <PageHeader id="overview-title" breadcrumb="FinIntel / Overview" title="Private Financial Intelligence" subtitle="Explore locally stored market data and build your private research workspace." actions={<Badge variant="outline">M1 · Local workstation</Badge>} />
+            <PageHeader id="overview-title" breadcrumb="FinIntel / Overview" title={t("Private Financial Intelligence")} subtitle={t("Explore locally stored market data and build your private research workspace.")} actions={<Badge variant="outline">M1 · Local workstation</Badge>} />
             <section className="max-w-[820px] py-6 lg:py-8">
-              <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">Historical research</p>
-              <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Your local market workspace.</h2>
+              <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">{t("Historical research")}</p>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">{t("Your local market workspace.")}</h2>
               <p className="mt-4 max-w-[68ch] text-sm leading-7 text-muted-foreground">
-                Use Data Acquisition to fetch prices and review completed import actions. Open Markets to explore
-                stored OHLCV charts, historical tables, and instrument-level source provenance.
+                {t("Use Data Acquisition to fetch prices and review completed import actions. Open Markets to explore stored OHLCV charts, historical tables, and instrument-level source provenance.")}
               </p>
-              <Button type="button" className="mt-5" onClick={() => openMarkets()}><BarChart3 aria-hidden="true" /> Open Market Data Explorer</Button>
-              <Button type="button" variant="secondary" className="mt-5 ml-2" onClick={() => setScreen("data-acquisition")}><Download aria-hidden="true" /> Open Data Acquisition</Button>
+              <Button type="button" className="mt-5" onClick={() => openMarkets()}><BarChart3 aria-hidden="true" /> {t("Open Market Data Explorer")}</Button>
+              <Button type="button" variant="secondary" className="mt-5 ml-2" onClick={() => setScreen("data-acquisition")}><Download aria-hidden="true" /> {t("Open Data Acquisition")}</Button>
             </section>
             <div className="grid gap-2 xl:grid-cols-2">
               <Card aria-labelledby="backend-title">
                 <CardHeader>
-                  <h3 id="backend-title"><CardTitle>Python backend</CardTitle></h3>
+                  <h3 id="backend-title"><CardTitle>{t("Python backend")}</CardTitle></h3>
                   <CardDescription>Connection through native Tauri IPC or local Vite proxy.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div role="status" aria-live="polite" className="flex items-center gap-2">
-                    {connection.kind === "loading" ? <><Clock3 aria-hidden="true" className="size-4 text-warning" />Checking…</>
-                      : connection.kind === "connected" ? <><CircleCheck aria-hidden="true" className="size-4 text-positive" />Connected</>
-                      : <><CircleOff aria-hidden="true" className="size-4 text-destructive" />Unavailable</>}
+                    {connection.kind === "loading" ? <><Clock3 aria-hidden="true" className="size-4 text-warning" />{t("Checking…")}</>
+                      : connection.kind === "connected" ? <><CircleCheck aria-hidden="true" className="size-4 text-positive" />{t("Connected")}</>
+                      : <><CircleOff aria-hidden="true" className="size-4 text-destructive" />{t("Unavailable")}</>}
                   </div>
                   {connection.kind === "loading"
                     ? <Skeleton aria-label="Loading backend connection" className="h-4 w-48" />
@@ -153,13 +157,13 @@ export default function App() {
                 </CardContent>
               </Card>
               <Card aria-labelledby="progress-title">
-                <CardHeader><h3 id="progress-title"><CardTitle>Research foundations</CardTitle></h3>
-                  <CardDescription>Local data first, quant intelligence later.</CardDescription>
+                <CardHeader><h3 id="progress-title"><CardTitle>{t("Research foundations")}</CardTitle></h3>
+                  <CardDescription>{t("Local data first, quant intelligence later.")}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3 text-sm">
-                  <p className="flex justify-between gap-2">Historical data acquisition <Badge variant="success">Implemented</Badge></p>
-                  <p className="flex justify-between gap-2">SQLite persistence <Badge variant="success">Implemented</Badge></p>
-                  <p className="flex justify-between gap-2">Market Data Explorer <Badge variant="outline">In review</Badge></p>
+                  <p className="flex justify-between gap-2">{t("Historical data acquisition")} <Badge variant="success">{t("Implemented")}</Badge></p>
+                  <p className="flex justify-between gap-2">{t("SQLite persistence")} <Badge variant="success">{t("Implemented")}</Badge></p>
+                  <p className="flex justify-between gap-2">{t("Market Data Explorer")} <Badge variant="outline">{t("In review")}</Badge></p>
                 </CardContent>
               </Card>
             </div>
