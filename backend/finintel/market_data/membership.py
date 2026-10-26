@@ -39,6 +39,7 @@ def load_membership(
     *,
     db: Path | None = None,
     expected_count: int | None = None,
+    names: dict[str, str] | None = None,
 ) -> int:
     """Atomically replace exactly one index/date snapshot; retain all other dates."""
     if index_code not in INDEX_NAMES:
@@ -56,6 +57,17 @@ def load_membership(
         raise ValueError("Membership must contain unique valid stock tickers")
     if expected_count is not None and (expected_count < 1 or expected_count != len(tickers)):
         raise ValueError("Snapshot does not match the source's expected constituent count")
+    if names is not None and (
+        set(names) != set(tickers)
+        or any(
+            not isinstance(name, str)
+            or not name.strip()
+            or len(name) > 200
+            or any(ord(ch) < 32 for ch in name)
+            for name in names.values()
+        )
+    ):
+        raise ValueError("Equibles company names are incomplete or invalid")
     conn = _write_connection(db if db is not None else database_path())
     try:
         # A recognized ETF/mutual fund/index is not an equity constituent.
@@ -69,6 +81,16 @@ def load_membership(
             if any(row["asset_type"] != "Stock" for row in rows):
                 raise ValueError("Index constituent list includes a known non-stock instrument")
         with conn:
+            if names is not None:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO symbol_catalog "
+                    "(symbol, name, asset_type, exchange, source, updated_at) "
+                    "VALUES (?, ?, 'Stock', '', 'equibles_proxy', ?)",
+                    (
+                        (symbol, names[symbol], datetime.now(UTC).isoformat())
+                        for symbol in tickers
+                    ),
+                )
             conn.execute(
                 "DELETE FROM index_memberships WHERE index_code=? AND as_of=?",
                 (index_code, effective_date),
