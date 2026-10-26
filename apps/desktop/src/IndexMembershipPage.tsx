@@ -88,7 +88,9 @@ export function IndexMembershipPage() {
   const lookup = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const ticker = stock.trim().toUpperCase();
-    const chosen = stockOptions.find(item => item.symbol === ticker || item.name.toLowerCase() === stock.trim().toLowerCase());
+    const chosen = stockOptions.find(item => item.symbol === ticker) ??
+      stockOptions.find(item => item.name.toLowerCase() === stock.trim().toLowerCase()) ??
+      stockOptions.find(item => item.name.toLowerCase().startsWith(stock.trim().toLowerCase()));
     const symbol = chosen?.symbol ?? ticker;
     if (!/^[A-Z0-9][A-Z0-9.-]{0,14}$/.test(symbol)) {
       setStockError("Select a company from the suggestions or enter a valid ticker.");
@@ -188,7 +190,7 @@ export function IndexMembershipPage() {
                 onKeyDown={event => {
                   if (event.key === "Escape") setStockFocused(false);
                   if (event.key === "Enter" && stockOptions.length > 0 &&
-                    !/^[A-Z0-9][A-Z0-9.-]{0,14}$/.test(stock.trim().toUpperCase())) {
+                    !stockOptions.some(item => item.symbol === stock.trim().toUpperCase())) {
                     event.preventDefault();
                     setStock(stockOptions[0].symbol);
                     setStockFocused(false);
