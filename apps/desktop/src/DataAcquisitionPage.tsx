@@ -26,7 +26,7 @@ export function DataAcquisitionPage({
     <section className="min-w-0 space-y-2" aria-labelledby="acquisition-page-title">
       <PageHeader id="acquisition-page-title" breadcrumb={t("FinIntel / Data Acquisition")} title={t("Data Acquisition")} subtitle={t("Fetch, validate, and store provider data. Review completed import actions separately from market analysis.")} actions={<><Badge variant="outline">{t("Local SQLite")}</Badge>
             <Button type="button" variant="secondary" size="sm" onClick={() => onViewMarket(latest ?? undefined)}>
-              <BarChart3 aria-hidden="true" /> Open Markets
+              <BarChart3 aria-hidden="true" /> {t("Open Markets")}
             </Button></>} />
 
       <div className="grid min-w-0 items-start gap-2 2xl:grid-cols-[minmax(0,1fr)_300px]">
@@ -41,7 +41,7 @@ export function DataAcquisitionPage({
             <div role="status" aria-live="polite" className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-positive/30 bg-positive/5 p-4 text-sm">
               <span className="flex min-w-0 items-center gap-2"><CheckCircle2 aria-hidden="true" className="size-4 shrink-0 text-positive" /> {t("Stored")} {latest.symbol} {t("from")} {latest.provider === "alpaca_sip" ? "Alpaca SIP" : latest.provider === "tiingo" ? "Tiingo" : "Alpha Vantage"}.</span>
               <Button type="button" size="sm" variant="secondary" onClick={() => onViewMarket(latest)}>
-                <BarChart3 aria-hidden="true" /> View in Markets
+                <BarChart3 aria-hidden="true" /> {t("View in Markets")}
               </Button>
             </div>
           )}
