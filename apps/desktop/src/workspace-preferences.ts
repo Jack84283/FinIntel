@@ -40,10 +40,14 @@ export function applyWorkspacePreferences(settings: WorkspacePreferences): void 
 }
 
 export function saveWorkspacePreferences(settings: WorkspacePreferences): void {
+  const previousLanguage = readWorkspacePreferences().language;
   applyWorkspacePreferences(settings);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   } catch {
     // The current session stays usable even when local storage is unavailable.
+  }
+  if (settings.language !== previousLanguage) {
+    window.dispatchEvent(new Event("finintel:language-changed"));
   }
 }
