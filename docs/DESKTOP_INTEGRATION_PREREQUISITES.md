@@ -1,6 +1,6 @@
 # FinIntel — Desktop Integration Prerequisites
 
-Status: in progress. This branch contains the initial English / Simplified Chinese interface infrastructure. Native backend packaging and provider credential management are NOT implemented yet.
+Status: implementation in review. English/Simplified Chinese screen catalog, a packaged native Python sidecar implementation, and OS credential-vault Settings UI have been committed. CI and clean-machine acceptance are NOT complete.
 
 ## A. Localization
 - Persist `en` and `zh-CN` in device-only workspace preferences; default to English.
@@ -47,3 +47,13 @@ Any implementation that touches operating-system APIs, filesystem locations, pro
 - macOS is the first acceptance target; Windows and Linux may follow as tracked acceptance stages, but an OS-specific implementation must not be presented as cross-platform complete without those stages passing.
 
 This is a standing engineering requirement for future FinIntel PRs, not limited to the current desktop integration work.
+
+## October 26 implementation evidence and limits
+
+- Locale switching uses reactive subscriptions and covers navigation, Overview, Preferences, core acquisition/validation/history/index/market pages, and a localized date-picker. Remaining interpolated/provider-originated error copy and real-screen bilingual QA must still be audited.
+- Release builds now specify an OS/architecture-specific PyInstaller Python sidecar. Tauri owns startup/shutdown, selects a loopback port, passes a per-process token, and chooses a platform app-data SQLite location. Browser-only development retains separate Python startup. Backend crash recovery and legacy SQLite database import are not yet complete.
+- The sidecar requires a process token on all local API routes. This is a defense against casual cross-process requests, not a substitute for OS account security or protection from malicious same-user processes.
+- The Settings provider card offers save, replace, delete, and configured/not-configured status for Alpha Vantage, Alpaca, Tiingo, and Equibles. Python keyring uses macOS Keychain, Windows' protected vault, and Linux Secret Service/KWallet when installed. No saved secret is returned through the UI read endpoint. A full live provider-authentication Test Connection workflow is not implemented.
+- For packaged builds, provider adapters obtain credentials from the OS vault rather than environment variables; environment fallback remains for separate developer CLI/backend workflows. Missing or locked Linux secret services must fail safely.
+- Cross-platform native build script generates the PyInstaller sidecar for each host target; CI attempts macOS, Windows and Ubuntu Rust checks. Actual .app/.dmg, Windows installer and Linux package launch, keyring integration, process exit/restart, and migration must be verified on real installations before marking complete.
+- CI may be queued/cancelled across rapid branch commits. Never interpret committed code as passing tests until the latest GitHub workflow has a successful conclusion.
