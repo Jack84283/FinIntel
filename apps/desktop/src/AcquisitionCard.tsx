@@ -48,7 +48,7 @@ export function AcquisitionCard({
       .catch((err: unknown) => {
         if (cancelled) return;
         setStatus(null);
-        setStatusError(err instanceof Error ? err.message : "Local backend unavailable");
+        setStatusError(err instanceof Error ? err.message : t("Local backend unavailable"));
       });
     return () => { cancelled = true; };
   }, [statusTick]);
@@ -104,7 +104,7 @@ export function AcquisitionCard({
             <CardDescription>{t("Choose an instrument, set the data source and history window, then fetch validated daily prices.")}</CardDescription>
           </div>
           <Badge variant={configured ? "success" : "outline"}>
-            {statusError ? "Backend unavailable" : status === null ? "Checking provider" : configured ? "Provider configured" : "API key needed"}
+            {statusError ? t("Backend unavailable") : status === null ? t("Checking provider") : configured ? t("Provider configured") : t("API key needed")}
           </Badge>
         </div>
       </CardHeader>
@@ -184,7 +184,7 @@ export function AcquisitionCard({
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
           <Button type="submit" disabled={pending} size="sm">
             {pending ? <RefreshCw aria-hidden="true" className="animate-spin" /> : <ArrowDownToLine aria-hidden="true" />}
-            {pending ? "Fetching…" : "Fetch & store"}
+            {pending ? t("Fetching…") : "Fetch & store"}
           </Button>
           <Button
             type="button"
@@ -211,25 +211,25 @@ export function AcquisitionCard({
         {configured && (
           <p className="text-xs text-muted-foreground">
             {provider === "tiingo"
-              ? "Tiingo requests raw daily OHLCV over the selected period. Coverage and access depend on your account and the instrument."
+              ? t("Tiingo requests raw daily OHLCV over the selected period. Coverage and access depend on your account and the instrument.")
               : provider === "alpaca_sip"
-              ? "Alpaca requests SIP daily OHLCV up to yesterday; free Basic accounts may access delayed historical SIP data. Access depends on your Alpaca account and feed entitlement. Each click calls the API."
+              ? t("Alpaca requests SIP daily OHLCV up to yesterday; free Basic accounts may access delayed historical SIP data. Access depends on your Alpaca account and feed entitlement. Each click calls the API.")
               : "Alpha Vantage's free key returns only 100 sessions; full history requires premium access."}
-            {" "}Raw prices are not split/dividend-adjusted. Provider quotas and licensing apply.
+            {" "}{t("Raw prices are not split/dividend-adjusted. Provider quotas and licensing apply.")}
           </p>
         )}
         {status && !configured && (
           <p role="status" className="text-xs text-muted-foreground">
             {provider === "tiingo"
-              ? "To use Tiingo, set FININTEL_TIINGO_API_KEY in the Python backend environment."
+              ? t("To use Tiingo, set FININTEL_TIINGO_API_KEY in the Python backend environment.")
               : provider === "alpaca_sip"
-              ? "To use Alpaca, set FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY in the Python backend environment."
-              : "To use Alpha Vantage, set FININTEL_ALPHA_VANTAGE_API_KEY in the Python backend environment."}
-            {" "}Restart the backend, then select Recheck provider. Credentials never enter the UI.
+              ? t("To use Alpaca, set FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY in the Python backend environment.")
+              : t("To use Alpha Vantage, set FININTEL_ALPHA_VANTAGE_API_KEY in the Python backend environment.")}
+            {" "}{t("Restart the backend, then select Recheck provider. Credentials never enter the UI.")}
             {provider === "alpaca_sip" && status.key_configured
-              ? " Alpha Vantage is already configured; select it above to fetch now."
+              ? t(" Alpha Vantage is already configured; select it above to fetch now.")
               : provider === "alpha_vantage" && status.alpaca_configured
-                ? " Alpaca is already configured; select it above to fetch now."
+                ? t(" Alpaca is already configured; select it above to fetch now.")
                 : ""}
           </p>
         )}
