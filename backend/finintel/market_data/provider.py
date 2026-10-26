@@ -3,8 +3,6 @@
 No live market request in tests. A user-provided key is required for live use.
 The request URL contains the key; the public source URL and errors never do.
 """
-from finintel.settings.credentials import get_secret
-
 
 import json
 import re
@@ -18,6 +16,7 @@ from urllib.parse import urlencode
 import httpx
 from pydantic import ValidationError
 
+from finintel.settings.credentials import get_secret
 from finintel.market_data.models import DailyOHLCV, HistoricalBatch
 
 API_ENDPOINT = "https://www.alphavantage.co/query"
