@@ -1,6 +1,7 @@
 """Secure native provider credential API tests without a live OS keychain."""
 
 import keyring
+from keyring.errors import NoKeyringError
 from fastapi.testclient import TestClient
 
 from finintel.main import app
@@ -60,3 +61,21 @@ def test_invalid_provider_field_rejected_without_key_exposure(monkeypatch):
         )
     assert response.status_code == 422
     assert "private-secret" not in response.text
+
+
+def test_unavailable_os_vault_is_not_misreported_as_missing_credentials(monkeypatch):
+    token = "test-native-token-with-at-least-32-chars"
+    monkeypatch.setenv("FININTEL_PROCESS_TOKEN", token)
+
+    def unavailable(_service, _name):
+        raise NoKeyringError("No secure vault available")
+
+    monkeypatch.setattr(keyring, "get_password", unavailable)
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/settings/providers",
+            headers={"x-finintel-process-token": token},
+        )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "OS secure credential storage unavailable"
+    assert "No secure vault available" not in response.text
