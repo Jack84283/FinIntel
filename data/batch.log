@@ -1,0 +1,21 @@
+{"symbol": "ABBV", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "ADBE", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "AMD", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "AMZN", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "ARKK", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "AVGO", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "BAC", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "BND", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "BRK.B", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "COST", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "CRM", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "DIA", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "DIS", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "EEM", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "EFA", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "GLD", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "GOOG", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "GOOGL", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "HD", "status": "failed", "error_type": "ProviderError"}
+{"symbol": "HYG", "status": "failed", "error_type": "ProviderError"}
+{"succeeded": 0, "failed": 20, "attempted": 20, "selected": 20}
