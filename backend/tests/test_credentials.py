@@ -1,8 +1,8 @@
 """Secure native provider credential API tests without a live OS keychain."""
 
 import keyring
-from keyring.errors import NoKeyringError
 from fastapi.testclient import TestClient
+from keyring.errors import NoKeyringError
 
 from finintel.main import app
 from finintel.settings.credentials import get_secret
