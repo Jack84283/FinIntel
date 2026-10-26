@@ -108,6 +108,18 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Connection through native Tauri IPC or local Vite proxy.": "通过 Tauri 原生通信或本地 Vite 代理连接。",
+  "FinIntel · Local-first · No synthetic market values displayed": "FinIntel · 本地优先 · 不显示虚构市场数据",
+  "Main navigation": "主导航",
+  "Sections": "栏目",
+  "Mobile sections": "移动端栏目",
+  "FinIntel / Overview": "FinIntel / 概览",
+  "FinIntel / Preferences": "FinIntel / 偏好设置",
+  "Loading backend connection": "正在连接后端",
+  "M1 · Local workstation": "M1 · 本地工作台",
+  "Workspace information": "工作区信息",
+  "Checking connection…": "正在检查连接…",
+  "Recheck connection": "重新检查连接",
   "Refresh": "刷新",
   "Retry": "重试",
   "Previous": "上一页",
