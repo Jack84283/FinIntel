@@ -5,7 +5,6 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { accessSync, constants } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
