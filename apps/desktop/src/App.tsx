@@ -76,9 +76,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground lg:grid lg:grid-cols-[208px_minmax(0,1fr)]">
-      <aside className="hidden min-h-screen flex-col border-r border-border bg-muted px-3 py-6 lg:flex" aria-label="Main navigation">
+      <aside className="hidden min-h-screen flex-col border-r border-border bg-muted px-3 py-6 lg:flex" aria-label={t("Main navigation")}>
         <div className="mx-3 mb-12 grid h-11 w-12 place-items-center rounded-lg border border-[#568ad1] text-xl font-extrabold tracking-tight" aria-hidden="true">FI</div>
-        <nav aria-label="Sections" className="flex flex-col gap-1 text-sm">
+        <nav aria-label={t("Sections")} className="flex flex-col gap-1 text-sm">
           {groups.map((group) => (
             <div key={t(group.heading)} className="mb-5 flex flex-col gap-1">
               <span className="mb-2 px-3 text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">{group.heading}</span>
@@ -94,7 +94,7 @@ export default function App() {
       </aside>
 
       <main className="w-full min-w-0 px-3 py-4 sm:px-4 lg:py-5">
-        <nav aria-label="Mobile sections" className="mb-5 flex gap-2 overflow-x-auto pb-2 lg:hidden">
+        <nav aria-label={t("Mobile sections")} className="mb-5 flex gap-2 overflow-x-auto pb-2 lg:hidden">
           {allSections.map(({ id, label, icon: Icon }) => (
             <Button key={id} type="button" className="shrink-0" variant={screen === id ? "secondary" : "ghost"} onClick={() => id === "market" ? openMarkets() : setScreen(id)} aria-current={screen === id ? "page" : undefined}>
               <Icon aria-hidden="true" /> {label}
@@ -128,7 +128,7 @@ export default function App() {
           </section>
         ) : (
           <section aria-labelledby="overview-title">
-            <PageHeader id="overview-title" breadcrumb="FinIntel / Overview" title={t("Private Financial Intelligence")} subtitle={t("Explore locally stored market data and build your private research workspace.")} actions={<Badge variant="outline">M1 · Local workstation</Badge>} />
+            <PageHeader id="overview-title" breadcrumb={t("FinIntel / Overview")} title={t("Private Financial Intelligence")} subtitle={t("Explore locally stored market data and build your private research workspace.")} actions={<Badge variant="outline">{t("M1 · Local workstation")}</Badge>} />
             <section className="max-w-[820px] py-6 lg:py-8">
               <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">{t("Historical research")}</p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">{t("Your local market workspace.")}</h2>
@@ -142,7 +142,7 @@ export default function App() {
               <Card aria-labelledby="backend-title">
                 <CardHeader>
                   <h3 id="backend-title"><CardTitle>{t("Python backend")}</CardTitle></h3>
-                  <CardDescription>Connection through native Tauri IPC or local Vite proxy.</CardDescription>
+                  <CardDescription>{t("Connection through native Tauri IPC or local Vite proxy.")}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div role="status" aria-live="polite" className="flex items-center gap-2">
@@ -151,7 +151,7 @@ export default function App() {
                       : <><CircleOff aria-hidden="true" className="size-4 text-destructive" />{t("Unavailable")}</>}
                   </div>
                   {connection.kind === "loading"
-                    ? <Skeleton aria-label="Loading backend connection" className="h-4 w-48" />
+                    ? <Skeleton aria-label={t("Loading backend connection")} className="h-4 w-48" />
                     : <p className="text-xs text-muted-foreground">{connection.kind === "connected" ? "finintel-backend v" + connection.health.version : connection.message}</p>}
                   <Button type="button" variant="secondary" size="sm" disabled={connection.kind === "loading"} onClick={() => void checkHealth()}><RefreshCw aria-hidden="true" /> Recheck connection</Button>
                 </CardContent>
@@ -167,7 +167,7 @@ export default function App() {
                 </CardContent>
               </Card>
             </div>
-            <footer className="mt-9 text-xs text-muted-foreground">FinIntel · Local-first · No synthetic market values displayed</footer>
+            <footer className="mt-9 text-xs text-muted-foreground">{t("FinIntel · Local-first · No synthetic market values displayed")}</footer>
           </section>
         )}
       </main>
