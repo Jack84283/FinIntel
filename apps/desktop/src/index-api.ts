@@ -142,7 +142,7 @@ export async function fetchStockIndexes(symbol: string, asOf = ""): Promise<Symb
 }
 
 /** Acquisition is explicit and only the local backend knows the provider key. */
-export async function acquireIndex(code: IndexCode): Promise<{ code: IndexCode; snapshot_as_of: string; members: number; source: string; provenance: string }> {
+export async function acquireIndex(code: IndexCode): Promise<{ code: IndexCode; snapshot_as_of: string; members: number; source: string; provenance: string; complete: boolean; unlinked_count: number; source_total: number }> {
   if (!isCode(code)) throw new Error("Invalid index.");
   if (isTauri()) return invoke("index_acquire", { code });
   const url = "/api/v1/market-data/indexes/" + code + "/acquire";
