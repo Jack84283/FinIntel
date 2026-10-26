@@ -69,19 +69,19 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition, 
 
   return (
     <section aria-labelledby="preferences-title" className="min-w-0 space-y-2">
-      <PageHeader id="preferences-title" breadcrumb="FinIntel / Preferences" title={t("Preferences")} subtitle="Personalize the workspace and review local data settings. Changes to appearance stay on this device." actions={<Badge variant="outline" className="shrink-0">{t("Device-local")}</Badge>} />
+      <PageHeader id="preferences-title" breadcrumb="FinIntel / Preferences" title={t("Preferences")} subtitle={t("Personalize the workspace and review local data settings. Changes to appearance stay on this device.")} actions={<Badge variant="outline" className="shrink-0">{t("Device-local")}</Badge>} />
 
       <div className="grid min-w-0 items-start gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
         <div className="flex min-w-0 flex-col gap-2">
           <Card className="min-w-0">
             <CardHeader className="min-w-0 gap-y-2">
               <CardTitle>{t("Appearance")}</CardTitle>
-              <CardDescription>Keep the interface readable and comfortable at any window size.</CardDescription>
+              <CardDescription>{t("Keep the interface readable and comfortable at any window size.")}</CardDescription>
             </CardHeader>
             <CardContent className="min-w-0">
               <div className="border-b border-border pb-6">
                 <p className="mb-1 text-sm font-medium">{t("Color theme")}</p>
-                <p className="mb-4 text-xs leading-5 text-muted-foreground">Switch between high-contrast dark and light surfaces.</p>
+                <p className="mb-4 text-xs leading-5 text-muted-foreground">{t("Switch between high-contrast dark and light surfaces.")}</p>
                 <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
                   <ThemeOption theme="dark" label={t("Dark")} icon={Moon} selected={preferences.theme === "dark"} onSelect={(theme) => updatePreferences({ theme })} />
                   <ThemeOption theme="light" label={t("Light")} icon={Sun} selected={preferences.theme === "light"} onSelect={(theme) => updatePreferences({ theme })} />
@@ -104,18 +104,18 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition, 
           <Card className="min-w-0">
             <CardHeader className="min-w-0 gap-y-2">
               <CardTitle>{t("Historical market data")}</CardTitle>
-              <CardDescription>Review acquisition defaults without interrupting a running backfill.</CardDescription>
+              <CardDescription>{t("Review acquisition defaults without interrupting a running backfill.")}</CardDescription>
             </CardHeader>
             <CardContent className="min-w-0 divide-y divide-border">
-              <SettingRow title="Background historical window" detail="The local backfill script currently defaults to ten years of available daily data.">
-                <Badge variant="secondary">10 years</Badge>
+              <SettingRow title={t("Background historical window")} detail={t("The local backfill script currently defaults to ten years of available daily data.")}>
+                <Badge variant="secondary">{t("10 years")}</Badge>
               </SettingRow>
-              <SettingRow title="Storage format" detail="Daily OHLCV bars are validated and stored in the local SQLite database.">
+              <SettingRow title={t("Storage format")} detail={t("Daily OHLCV bars are validated and stored in the local SQLite database.")}>
                 <Badge variant="outline">SQLite</Badge>
               </SettingRow>
-              <SettingRow title="Acquisition controls" detail="Select instruments and data providers, or inspect an active import in Data Acquisition.">
+              <SettingRow title={t("Acquisition controls")} detail={t("Select instruments and data providers, or inspect an active import in Data Acquisition.")}>
                 <Button type="button" variant="secondary" size="sm" onClick={onOpenAcquisition}>
-                  Open Data Acquisition <ArrowUpRight aria-hidden="true" />
+                  {t("Open Data Acquisition")} <ArrowUpRight aria-hidden="true" />
                 </Button>
               </SettingRow>
             </CardContent>
@@ -132,24 +132,24 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition, 
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${backend.kind === "connected" ? "bg-positive" : backend.kind === "loading" ? "bg-warning" : "bg-destructive"}`} />
                 <span role="status" aria-live="polite" className="min-w-0 break-words text-sm font-medium">
-                  {backend.kind === "connected" ? `Connected · v${backend.version}` : backend.kind === "loading" ? "Checking connection…" : "Not connected"}
+                  {backend.kind === "connected" ? `Connected · v${backend.version}` : backend.kind === "loading" ? t("Checking connection…") : t("Not connected")}
                 </span>
               </div>
               <Button type="button" variant="outline" size="sm" disabled={backend.kind === "loading"} onClick={onRecheckBackend}>
-                <RefreshCw aria-hidden="true" /> Recheck
+                <RefreshCw aria-hidden="true" /> {t("Recheck")}
               </Button>
             </CardContent>
           </Card>
           <Card className="min-w-0">
             <CardHeader className="flex min-w-0 flex-col items-start gap-2">
               <div className="flex min-w-0 items-center gap-2"><LockKeyhole aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">{t("Privacy & storage")}</CardTitle></div>
-              <CardDescription>Built for a private, local-first financial workspace.</CardDescription>
+              <CardDescription>{t("Built for a private, local-first financial workspace.")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <div className="flex min-w-0 gap-3"><HardDrive aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Historical prices and research data are stored locally.</p></div>
-              <div className="flex min-w-0 gap-3"><ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Provider credentials remain in your backend environment, not in these preferences.</p></div>
-              <div className="flex min-w-0 gap-3"><Monitor aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Appearance preferences are saved only on this device.</p></div>
-              <div className="flex min-w-0 gap-3"><Database aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Changing the theme or motion preference does not modify market history.</p></div>
+              <div className="flex min-w-0 gap-3"><HardDrive aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">{t("Historical prices and research data are stored locally.")}</p></div>
+              <div className="flex min-w-0 gap-3"><ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">{t("Provider credentials remain in your backend environment, not in these preferences.")}</p></div>
+              <div className="flex min-w-0 gap-3"><Monitor aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">{t("Appearance preferences are saved only on this device.")}</p></div>
+              <div className="flex min-w-0 gap-3"><Database aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">{t("Changing the theme or motion preference does not modify market history.")}</p></div>
             </CardContent>
           </Card>
         </aside>
