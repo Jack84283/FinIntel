@@ -34,8 +34,8 @@ def _name(provider: str, field: str) -> str:
 def stored(provider: str, field: str) -> bool:
     try:
         return bool(keyring.get_password(SERVICE, _name(provider, field)))
-    except KeyringError:
-        return False
+    except KeyringError as exc:
+        raise CredentialStoreError("OS secure credential storage unavailable") from exc
 
 
 def get_secret(provider: str, field: str) -> str:
