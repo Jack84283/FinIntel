@@ -194,7 +194,7 @@ class CatalogEntry(BaseModel):
 class SymbolSearchResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source: Literal["starter", "alpha_vantage"]
+    source: Literal["starter", "alpha_vantage", "equibles_proxy"]
     updated_at: str | None
     total: int
     results: list[CatalogEntry]
