@@ -75,9 +75,7 @@ def test_unlinked_holding_is_reported_without_fake_ticker(monkeypatch):
         },
     )
     saved = []
-    monkeypatch.setattr(
-        equibles, "load_membership", lambda *a, **k: (saved.append((a, k)) or 1)
-    )
+    monkeypatch.setattr(equibles, "load_membership", lambda *a, **k: saved.append((a, k)) or 1)
     result = equibles.acquire_index("SP500")
     assert saved[0][0][3] == ["AAPL"]
     assert saved[0][1]["expected_count"] == 1
