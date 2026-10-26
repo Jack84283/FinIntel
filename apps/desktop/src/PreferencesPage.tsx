@@ -69,7 +69,7 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition, 
 
   return (
     <section aria-labelledby="preferences-title" className="min-w-0 space-y-2">
-      <PageHeader id="preferences-title" breadcrumb="FinIntel / Preferences" title={t("Preferences")} subtitle={t("Personalize the workspace and review local data settings. Changes to appearance stay on this device.")} actions={<Badge variant="outline" className="shrink-0">{t("Device-local")}</Badge>} />
+      <PageHeader id="preferences-title" breadcrumb={t("FinIntel / Preferences")} title={t("Preferences")} subtitle={t("Personalize the workspace and review local data settings. Changes to appearance stay on this device.")} actions={<Badge variant="outline" className="shrink-0">{t("Device-local")}</Badge>} />
 
       <div className="grid min-w-0 items-start gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
         <div className="flex min-w-0 flex-col gap-2">
@@ -122,7 +122,7 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition, 
           </Card>
         </div>
 
-        <aside className="flex min-w-0 flex-col gap-2" aria-label="Workspace information">
+        <aside className="flex min-w-0 flex-col gap-2" aria-label={t("Workspace information")}>
           <Card className="min-w-0">
             <CardHeader className="flex min-w-0 flex-col items-start gap-2">
               <div className="flex min-w-0 items-center gap-2"><Activity aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">{t("Local backend")}</CardTitle></div>
