@@ -1,4 +1,5 @@
 import { PageHeader } from "./PageHeader";
+import { ProviderCredentialsCard } from "./ProviderCredentialsCard";
 import { translate } from "./localization";
 import { useState } from "react";
 import { Activity, ArrowUpRight, Check, Database, HardDrive, LockKeyhole, Monitor, Moon, RefreshCw, ShieldCheck, Sun } from "lucide-react";
@@ -101,6 +102,7 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition, 
             </CardContent>
           </Card>
 
+          <ProviderCredentialsCard />
           <Card className="min-w-0">
             <CardHeader className="min-w-0 gap-y-2">
               <CardTitle>{t("Historical market data")}</CardTitle>
