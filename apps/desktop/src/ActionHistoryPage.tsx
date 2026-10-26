@@ -106,7 +106,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
             </div>
           )}
           <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-            <p className="text-muted-foreground" aria-live="polite">{total ? `Showing ${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} of ${total.toLocaleString()} imports` : "No matching imports"} · Page {page + 1} of {pageCount}</p>
+            <p className="text-muted-foreground" aria-live="polite">{total ? `Showing ${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} of ${total.toLocaleString()} imports` : t("No matching imports")} · Page {page + 1} of {pageCount}</p>
             <div className="flex items-center gap-2">
               <Button type="button" variant="secondary" size="sm" disabled={state !== "ready" || page === 0} onClick={() => setPage((v) => Math.max(0, v - 1))}>{t("Previous")}</Button>
               <Button type="button" variant="secondary" size="sm" disabled={state !== "ready" || page + 1 >= pageCount} onClick={() => setPage((v) => v + 1)}>{t("Next")}</Button>
