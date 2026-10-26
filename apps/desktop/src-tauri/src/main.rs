@@ -477,6 +477,13 @@ fn main() {
             // Native development can keep using the standard developer backend.
             // Production bundles launch an app-owned backend with a private port.
             if cfg!(debug_assertions) {
+                // Combined developer launcher starts Python and provides a shared random token.
+                // Plain `tauri dev` without that launcher retains read-only legacy mode.
+                if let Ok(token) = std::env::var("FININTEL_PROCESS_TOKEN") {
+                    if token.len() >= 32 {
+                        BACKEND_TOKEN.set(token).map_err(|_| "Token already initialized")?;
+                    }
+                }
                 return Ok(());
             }
             let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
