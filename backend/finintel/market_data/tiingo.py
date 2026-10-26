@@ -1,6 +1,4 @@
 """Tiingo raw daily prices adapter. Token is sent only in HTTP headers."""
-from finintel.settings.credentials import get_secret
-
 
 import json
 from datetime import UTC, date, datetime, timedelta
@@ -10,6 +8,7 @@ from urllib.parse import quote
 import httpx
 from pydantic import ValidationError
 
+from finintel.settings.credentials import get_secret
 from finintel.market_data.models import DailyOHLCV, HistoricalBatch
 from finintel.market_data.provider import (
     SYMBOL_PATTERN,
