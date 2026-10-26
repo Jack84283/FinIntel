@@ -108,6 +108,9 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Trading volume by": "成交量（按",
+  "interval for": "周期，共",
+
   "Data source": "数据源",
   "Recheck provider": "重新检查数据源",
   "Select a stock or ETF symbol above, or enter a ticker manually.": "请在上方选择股票或 ETF，或手动输入证券代码。",
