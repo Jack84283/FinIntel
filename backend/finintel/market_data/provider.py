@@ -16,8 +16,8 @@ from urllib.parse import urlencode
 import httpx
 from pydantic import ValidationError
 
-from finintel.settings.credentials import get_secret
 from finintel.market_data.models import DailyOHLCV, HistoricalBatch
+from finintel.settings.credentials import get_secret
 
 API_ENDPOINT = "https://www.alphavantage.co/query"
 TERMS_URL = "https://www.alphavantage.co/terms_of_service/"
