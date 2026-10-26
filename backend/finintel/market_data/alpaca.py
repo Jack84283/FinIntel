@@ -3,6 +3,8 @@
 Credentials are supplied only through backend environment variables and
 headers. No provider response, key, or secret is logged or saved in SQLite.
 """
+from finintel.settings.credentials import get_secret
+
 
 import json
 import os
@@ -60,8 +62,8 @@ def _pace_request() -> None:
 
 def alpaca_configured() -> bool:
     return bool(
-        os.environ.get("FININTEL_ALPACA_API_KEY_ID", "").strip()
-        and os.environ.get("FININTEL_ALPACA_API_SECRET_KEY", "").strip()
+        get_secret("alpaca_sip", "key_id").strip()
+        and get_secret("alpaca_sip", "secret_key").strip()
     )
 
 
@@ -138,8 +140,8 @@ class AlpacaDailyProvider:
     """One explicitly requested bounded date interval, with page-token traversal."""
 
     def __init__(self, *, client: httpx.Client | None = None) -> None:
-        self._key = os.environ.get("FININTEL_ALPACA_API_KEY_ID", "").strip()
-        self._secret = os.environ.get("FININTEL_ALPACA_API_SECRET_KEY", "").strip()
+        self._key = get_secret("alpaca_sip", "key_id").strip()
+        self._secret = get_secret("alpaca_sip", "secret_key").strip()
         if not self._key or not self._secret:
             raise ProviderError(
                 "Configure FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY"
