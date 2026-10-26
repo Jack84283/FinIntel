@@ -1,6 +1,20 @@
 use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use tauri::Manager;
+use tauri_plugin_shell::{process::CommandChild, ShellExt};
 
-const BACKEND: &str = "http://127.0.0.1:8765";
+static BACKEND_PORT: OnceLock<u16> = OnceLock::new();
+static BACKEND_TOKEN: OnceLock<String> = OnceLock::new();
+
+struct ManagedBackend(Mutex<Option<CommandChild>>);
+
+fn backend_base() -> String {
+    format!("http://127.0.0.1:{}", BACKEND_PORT.get().copied().unwrap_or(8765))
+}
+
+fn backend_token() -> &'static str {
+    BACKEND_TOKEN.get().map(String::as_str).unwrap_or("")
+}
 
 async fn read_backend(path: &str, params: &[(&str, String)]) -> Result<serde_json::Value, String> {
     // Fixed loopback host, strictly bounded routes and parameters.
@@ -10,13 +24,14 @@ async fn read_backend(path: &str, params: &[(&str, String)]) -> Result<serde_jso
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Could not initialize the local HTTP client.".to_string())?;
-    let mut url = reqwest::Url::parse(&format!("{BACKEND}{path}"))
+    let mut url = reqwest::Url::parse(&format!("{}{path}", backend_base()))
         .map_err(|_| "Invalid local backend route.".to_string())?;
     if !params.is_empty() {
         url.query_pairs_mut().extend_pairs(params.iter().map(|(k, v)| (*k, v.as_str())));
     }
     let response = client
         .get(url)
+        .header("x-finintel-process-token", backend_token())
         .send()
         .await
         .map_err(|_| "Could not reach the local Python backend.".to_string())?;
@@ -62,7 +77,8 @@ async fn market_acquire_daily(
         .build()
         .map_err(|_| "Could not initialize the local HTTP client.".to_string())?;
     let response = client
-        .post(format!("{BACKEND}/api/v1/market-data/acquisition"))
+        .post(format!("{}/api/v1/market-data/acquisition", backend_base()))
+        .header("x-finintel-process-token", backend_token())
         .header("x-finintel-client", "local-workstation")
         .json(&serde_json::json!({
             "symbol": symbol.to_ascii_uppercase(),
@@ -118,7 +134,8 @@ async fn market_sync_symbols() -> Result<serde_json::Value, String> {
         .build()
         .map_err(|_| "Could not initialize local HTTP client.".to_string())?;
     let response = client
-        .post(format!("{BACKEND}/api/v1/market-data/symbols/sync"))
+        .post(format!("{}/api/v1/market-data/symbols/sync", backend_base()))
+        .header("x-finintel-process-token", backend_token())
         .header("x-finintel-client", "local-workstation")
         .send()
         .await
@@ -258,7 +275,8 @@ async fn validation_start(checks: Vec<String>) -> Result<serde_json::Value, Stri
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Could not initialize local HTTP client.".to_string())?;
-    let response = client.post(format!("{BACKEND}/api/v1/validation/run"))
+    let response = client.post(format!("{}/api/v1/validation/run", backend_base()))
+        .header("x-finintel-process-token", backend_token())
         .json(&serde_json::json!({"checks": checks}))
         .send().await
         .map_err(|_| "Could not reach local validation backend.".to_string())?;
@@ -282,7 +300,8 @@ async fn validation_corporate_reference(symbol: String) -> Result<serde_json::Va
         .build()
         .map_err(|_| "Could not initialize local HTTP client.".to_string())?;
     let response = client
-        .post(format!("{BACKEND}/api/v1/validation/corporate-reference"))
+        .post(format!("{}/api/v1/validation/corporate-reference", backend_base()))
+        .header("x-finintel-process-token", backend_token())
         .json(&serde_json::json!({"symbol": symbol}))
         .send().await
         .map_err(|_| "Could not reach local validation backend.".to_string())?;
@@ -307,7 +326,8 @@ async fn index_acquire(code: String) -> Result<serde_json::Value, String> {
         .build()
         .map_err(|_| "Could not initialize local HTTP client.".to_string())?;
     let response = client
-        .post(format!("{BACKEND}/api/v1/market-data/indexes/{code}/acquire"))
+        .post(format!("{}/api/v1/market-data/indexes/{code}/acquire", backend_base()))
+        .header("x-finintel-process-token", backend_token())
         .header("x-finintel-client", "local-workstation")
         .send()
         .await
@@ -383,6 +403,34 @@ async fn index_stock_memberships(
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .setup(|app| {
+            // Native development can keep using the standard developer backend.
+            // Production bundles launch an app-owned backend with a private port.
+            if cfg!(debug_assertions) {
+                return Ok(());
+            }
+            let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+            let port = listener.local_addr()?.port();
+            drop(listener);
+            let token = uuid::Uuid::new_v4().to_string();
+            let app_data = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&app_data)?;
+            let db_path = app_data.join("finintel.sqlite3");
+            BACKEND_PORT.set(port).map_err(|_| "Port already initialized")?;
+            BACKEND_TOKEN.set(token.clone()).map_err(|_| "Token already initialized")?;
+            let (mut receiver, child) = app.shell()
+                .sidecar("finintel-backend")?
+                .env("FININTEL_BACKEND_PORT", port.to_string())
+                .env("FININTEL_PROCESS_TOKEN", token)
+                .env("FININTEL_DB_PATH", db_path.to_string_lossy().into_owned())
+                .spawn()?;
+            tauri::async_runtime::spawn(async move {
+                while receiver.recv().await.is_some() {}
+            });
+            app.manage(ManagedBackend(Mutex::new(Some(child))));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             backend_health,
             validation_status,
@@ -402,6 +450,17 @@ fn main() {
             index_constituents,
             index_stock_memberships
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run FinIntel");
+        .build(tauri::generate_context!())
+        .expect("failed to build FinIntel")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(owned) = app.try_state::<ManagedBackend>() {
+                    if let Ok(mut guard) = owned.0.lock() {
+                        if let Some(child) = guard.take() {
+                            let _ = child.kill();
+                        }
+                    }
+                }
+            }
+        });
 }

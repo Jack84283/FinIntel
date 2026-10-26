@@ -65,6 +65,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf pkg-config
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build native Python sidecar
+        run: |
+          python -m pip install -e './backend[dev]' pyinstaller
+          python scripts/build_sidecar.py
       - name: Install JavaScript dependencies
         run: npm ci --no-audit --no-fund
       - name: Build frontend assets

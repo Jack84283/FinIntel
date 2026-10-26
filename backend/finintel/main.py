@@ -1,6 +1,10 @@
 """Local-only backend API for the FinIntel workstation."""
 
-from fastapi import FastAPI
+import os
+from hmac import compare_digest
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from finintel import __version__
@@ -33,3 +37,15 @@ def health() -> HealthResponse:
 app.include_router(market_data_router)
 app.include_router(validation_router)
 app.include_router(membership_router)
+
+@app.middleware("http")
+async def require_desktop_process_token(request: Request, call_next):
+    """An app-owned sidecar rejects requests from unrelated loopback clients."""
+    expected = os.getenv("FININTEL_PROCESS_TOKEN", "")
+    if expected and not compare_digest(
+        request.headers.get("x-finintel-process-token", ""), expected
+    ):
+        return JSONResponse(
+            status_code=403, content={"detail": "Desktop process authorization required"}
+        )
+    return await call_next(request)
