@@ -58,21 +58,29 @@ def test_incomplete_acquisition_never_writes(monkeypatch):
         equibles.acquire_index("SP500")
 
 
-def test_unlinked_holding_never_writes(monkeypatch):
+def test_unlinked_holding_is_reported_without_fake_ticker(monkeypatch):
     monkeypatch.setattr(
         equibles,
         "_fetch",
         lambda code, offset: {
             "slug": "sp-500",
             "asOfDate": "2026-10-23",
-            "constituentCount": 1,
+            "constituentCount": 2,
             "unlinkedCount": 1,
-            "data": [{"ticker": None, "isLinked": False}],
-            "meta": {"offset": 0, "count": 1, "hasMore": False, "total": 1},
+            "data": [
+                {"ticker": "AAPL", "name": "Apple Inc.", "isLinked": True},
+                {"ticker": None, "name": "Unmatched security", "isLinked": False},
+            ],
+            "meta": {"offset": 0, "count": 2, "hasMore": False, "total": 2},
         },
     )
+    saved = []
     monkeypatch.setattr(
-        equibles, "load_membership", lambda *a, **k: pytest.fail("wrote unlinked data")
+        equibles, "load_membership", lambda *a, **k: (saved.append((a, k)) or 1)
     )
-    with pytest.raises(equibles.EquiblesError, match="lack linked tickers"):
-        equibles.acquire_index("SP500")
+    result = equibles.acquire_index("SP500")
+    assert saved[0][0][3] == ["AAPL"]
+    assert saved[0][1]["expected_count"] == 1
+    assert result["complete"] is False
+    assert result["unlinked_count"] == 1
+    assert "incomplete" in result["source"]
