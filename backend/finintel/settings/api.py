@@ -6,6 +6,7 @@ from hmac import compare_digest
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from finintel.settings.connection_test import test_connection
 from finintel.settings.credentials import (
     FIELDS,
     CredentialStoreError,
@@ -63,3 +64,15 @@ def remove_provider_secret(provider: str, field: str, request: Request) -> dict[
     except CredentialStoreError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"configured": False}
+
+
+@router.post("/providers/{provider}/test")
+def test_provider_connection(provider: str, request: Request) -> dict:
+    """Explicit read-only external provider request; no price or metadata persistence."""
+    _require_managed(request)
+    if provider not in FIELDS:
+        raise HTTPException(status_code=422, detail="Unsupported provider")
+    try:
+        return test_connection(provider)
+    except CredentialStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
