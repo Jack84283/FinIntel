@@ -108,6 +108,9 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Calendar": "日历",
+  "Clear date": "清除日期",
+  "Today": "今天",
   "No catalog match. You can still enter a valid ticker manually.": "目录中没有匹配项，仍可手动输入有效代码。",
   "Type a symbol or company name to see suggestions. Select a match, or enter an exact ticker.": "输入证券代码或公司名称查看建议，选择匹配项或输入准确代码。",
   "Symbol sync failed:": "证券目录同步失败：",
