@@ -86,10 +86,7 @@ def load_membership(
                     "INSERT OR IGNORE INTO symbol_catalog "
                     "(symbol, name, asset_type, exchange, source, updated_at) "
                     "VALUES (?, ?, 'Stock', '', 'equibles_proxy', ?)",
-                    (
-                        (symbol, names[symbol], datetime.now(UTC).isoformat())
-                        for symbol in tickers
-                    ),
+                    ((symbol, names[symbol], datetime.now(UTC).isoformat()) for symbol in tickers),
                 )
             conn.execute(
                 "DELETE FROM index_memberships WHERE index_code=? AND as_of=?",
