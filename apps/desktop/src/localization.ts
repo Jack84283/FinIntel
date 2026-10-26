@@ -108,6 +108,9 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Index": "指数",
+  "Mutual Fund": "共同基金",
+  "instruments are reference entries only. Select a Stock or ETF to fetch daily prices from": "证券只是参考目录条目。请选择股票或 ETF，从下列数据源获取每日价格：",
   "No observations in this date range.": "所选日期范围内没有数据。",
   "Historical": "历史",
   "candlestick chart showing": "K 线图，包含",
