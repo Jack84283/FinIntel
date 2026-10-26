@@ -12,7 +12,7 @@ import {
   type ConstituentPage, type IndexCode, type IndexRecord, type SymbolIndexes,
 } from "./index-api";
 
-const PAGE_SIZE = 50;
+const FETCH_SIZE = 100;
 
 /** Dated evidence-backed equity index membership; does not infer from ETF holdings. */
 export function IndexMembershipPage() {
@@ -20,7 +20,6 @@ export function IndexMembershipPage() {
   const [asOf, setAsOf] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [page, setPage] = useState(0);
   const [revision, setRevision] = useState(0);
   const [catalog, setCatalog] = useState<IndexRecord[]>([]);
   const [snapshot, setSnapshot] = useState<ConstituentPage | null>(null);
@@ -43,7 +42,6 @@ export function IndexMembershipPage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setPage(0);
       setSearch(searchInput.trim());
     }, 250);
     return () => window.clearTimeout(timer);
@@ -52,20 +50,37 @@ export function IndexMembershipPage() {
   useEffect(() => {
     let active = true;
     setState("loading");
-    fetchConstituents(selected, asOf, search, page * PAGE_SIZE, PAGE_SIZE)
-      .then(result => {
+    setSnapshot(null);
+    const loadAll = async () => {
+      try {
+        const first = await fetchConstituents(selected, asOf, search, 0, FETCH_SIZE);
         if (!active) return;
-        setSnapshot(result);
+        const items = [...first.items];
+        for (let offset = items.length; offset < first.total; offset += FETCH_SIZE) {
+          if (!active) return;
+          const next = await fetchConstituents(selected, asOf, search, offset, FETCH_SIZE);
+          if (!active) return;
+          if (next.snapshot_as_of !== first.snapshot_as_of || next.total !== first.total) {
+            throw new Error("Index snapshot changed during loading. Refresh to try again.");
+          }
+          items.push(...next.items);
+          if (next.items.length === 0) {
+            throw new Error("Index source returned an incomplete constituent list.");
+          }
+        }
+        if (!active) return;
+        setSnapshot({ ...first, items });
         setError("");
         setState("ready");
-      })
-      .catch(reason => {
+      } catch (reason) {
         if (!active) return;
         setError(reason instanceof Error ? reason.message : String(reason));
         setState("error");
-      });
+      }
+    };
+    void loadAll();
     return () => { active = false; };
-  }, [selected, asOf, search, page, revision]);
+  }, [selected, asOf, search, revision]);
 
   useEffect(() => {
     setStockResult(null);
@@ -110,7 +125,6 @@ export function IndexMembershipPage() {
     }
   };
 
-  const pageCount = Math.max(1, Math.ceil((snapshot?.total ?? 0) / PAGE_SIZE));
   const selectedMeta = catalog.find(item => item.code === selected);
   return (
     <section className="space-y-2" aria-labelledby="index-membership-title">
@@ -134,7 +148,7 @@ export function IndexMembershipPage() {
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
             <div className="w-full max-w-xs">
-              <MarketDatePicker label="As-of date" value={asOf} onChange={value => { setAsOf(value); setPage(0); }} />
+              <MarketDatePicker label="As-of date" value={asOf} onChange={value => { setAsOf(value); }} />
             </div>
             <Button type="button" size="sm" variant="outline" onClick={() => setAsOf("")}>
               Latest available
@@ -149,7 +163,7 @@ export function IndexMembershipPage() {
                   key={code}
                   type="button"
                   aria-pressed={selected === code}
-                  onClick={() => { setSelected(code); setPage(0); }}
+                  onClick={() => { setSelected(code); }}
                   className={"rounded-md border p-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring " +
                     (selected === code ? "border-ring bg-secondary" : "border-border hover:bg-accent")}
                 >
@@ -285,19 +299,11 @@ export function IndexMembershipPage() {
               </table>
             </div>
           )}
-          {snapshot?.snapshot_as_of && (
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>
-                {snapshot.total === 0 ? "No results" : "Showing " +
-                  (page * PAGE_SIZE + 1) + "–" +
-                  Math.min((page + 1) * PAGE_SIZE, snapshot.total) +
-                  " of " + snapshot.total.toLocaleString() + " matching securities"}
-              </span>
-              <div className="flex gap-2">
-                <Button size="sm" type="button" variant="secondary" disabled={page === 0 || state !== "ready"} onClick={() => setPage(n => Math.max(0, n - 1))}>Previous</Button>
-                <Button size="sm" type="button" variant="secondary" disabled={page + 1 >= pageCount || state !== "ready"} onClick={() => setPage(n => n + 1)}>Next</Button>
-              </div>
-            </div>
+          {state === "ready" && snapshot?.snapshot_as_of && (
+            <p className="text-xs text-muted-foreground" role="status">
+              Showing all {snapshot.total.toLocaleString()} matching securities
+              {search ? " for the current filter" : ""}.
+            </p>
           )}
           <p className="text-xs text-muted-foreground">
             Imported snapshots are not live. A missing membership source is unknown, not proof of exclusion.
