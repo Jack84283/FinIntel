@@ -4,6 +4,7 @@
  * Production installers continue to use the packaged, Tauri-managed sidecar.
  */
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +20,8 @@ const cargoBin = join(cargoHome, "bin");
 if (existsSync(join(cargoBin, isWin ? "cargo.exe" : "cargo"))) {
   process.env.PATH = cargoBin + (isWin ? ";" : ":") + (process.env.PATH || "");
 }
+// Shared only with the launched Python and native Tauri processes, never Vite/client code.
+process.env.FININTEL_PROCESS_TOKEN = randomBytes(32).toString("hex");
 const children = new Set();
 let stopping = false;
 
@@ -64,7 +67,7 @@ try {
   for (let attempt = 0; attempt < 80 && !stopping; attempt++) {
     if (backend.exitCode !== null) break;
     try {
-      const res = await fetch(health, { signal: AbortSignal.timeout(700) });
+      const res = await fetch(health, { headers: { "x-finintel-process-token": process.env.FININTEL_PROCESS_TOKEN }, signal: AbortSignal.timeout(700) });
       if (res.ok) {
         const body = await res.json();
         if (body.service === "finintel-backend") { ready = true; break; }
