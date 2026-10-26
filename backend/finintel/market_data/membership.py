@@ -59,13 +59,15 @@ def load_membership(
     conn = _write_connection(db if db is not None else database_path())
     try:
         # A recognized ETF/mutual fund/index is not an equity constituent.
-        rows = conn.execute(
-            "SELECT symbol, asset_type FROM symbol_catalog "
-            "WHERE symbol IN (" + ",".join("?" for _ in tickers) + ")",
-            tickers,
-        ).fetchall()
-        if any(row["asset_type"] != "Stock" for row in rows):
-            raise ValueError("Index constituent list includes a known non-stock instrument")
+        for start in range(0, len(tickers), 400):
+            part = tickers[start : start + 400]
+            rows = conn.execute(
+                "SELECT symbol, asset_type FROM symbol_catalog "
+                "WHERE symbol IN (" + ",".join("?" for _ in part) + ")",
+                part,
+            ).fetchall()
+            if any(row["asset_type"] != "Stock" for row in rows):
+                raise ValueError("Index constituent list includes a known non-stock instrument")
         with conn:
             conn.execute(
                 "DELETE FROM index_memberships WHERE index_code=? AND as_of=?",
