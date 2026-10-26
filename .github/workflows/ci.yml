@@ -84,3 +84,12 @@ jobs:
         run: npm run build
       - name: Check native Rust shell
         run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Package macOS app bundle
+        if: runner.os == 'macOS'
+        run: npm run tauri:build --workspace @finintel/desktop -- --bundles app
+      - name: Package Windows installer
+        if: runner.os == 'Windows'
+        run: npm run tauri:build --workspace @finintel/desktop -- --bundles nsis
+      - name: Package Linux DEB
+        if: runner.os == 'Linux'
+        run: npm run tauri:build --workspace @finintel/desktop -- --bundles deb
