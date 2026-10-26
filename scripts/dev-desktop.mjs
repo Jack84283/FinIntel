@@ -47,7 +47,7 @@ try {
   // Do not start Tauri against an unrelated backend that already owns the port.
   try {
     const response = await fetch(health, { signal: AbortSignal.timeout(900) });
-    if (response.ok) throw new Error("Port 8765 already has a backend. Stop it before using the combined launcher.");
+    if (response.status) throw new Error("Port 8765 already has a listener. Stop it before using the combined launcher.");
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Port 8765")) throw error;
   }
