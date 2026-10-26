@@ -18,6 +18,25 @@ No membership records are fabricated or bundled in the public repository.
 FinIntel only displays constituents after a dated snapshot from an
 **independently verified and authorized** source is imported on the local Mac.
 
+## Equibles API acquisition (experimental)
+
+Configure `FININTEL_EQUIBLES_API_KEY` in the environment of the Python backend and
+restart that backend. Keep the secret out of Git, frontend code, and screenshots.
+In **Data & Operations → Index Constituents**, select one of the four indexes
+and choose **Fetch constituents**. Alternatively, use the local POST endpoint:
+
+```bash
+curl -f -X POST http://127.0.0.1:8765/api/v1/market-data/indexes/SP500/acquire
+```
+
+This action explicitly downloads all pages from Equibles; it checks the date,
+declared count, linked tickers and pagination before committing the snapshot.
+The source is recorded as an **ETF holdings-derived proxy**, not an official
+index constituent certification. Other imported dates and other indexes are
+retained. API terms and local data storage permission remain subject to the
+user's Equibles plan. The initial integration imports symbols and provenance;
+weights/ranks/fund holdings fields are not yet preserved in the SQLite schema.
+
 ## Import a full point-in-time snapshot
 
 Download or obtain a constituent export through a provider whose license permits
