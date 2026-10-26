@@ -1,6 +1,4 @@
 """Equibles index constituents acquisition. Explicit user-triggered network access only."""
-from finintel.settings.credentials import get_secret
-
 
 import json
 from datetime import date
@@ -8,6 +6,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from finintel.settings.credentials import get_secret
 from finintel.market_data.membership import INDEX_NAMES, load_membership
 
 INDEX_SLUGS = {
