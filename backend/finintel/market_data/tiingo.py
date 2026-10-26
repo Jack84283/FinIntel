@@ -1,7 +1,8 @@
 """Tiingo raw daily prices adapter. Token is sent only in HTTP headers."""
+from finintel.settings.credentials import get_secret
+
 
 import json
-import os
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from urllib.parse import quote
@@ -23,7 +24,7 @@ TERMS = "https://www.tiingo.com/about/terms"
 
 
 def tiingo_configured() -> bool:
-    return bool(os.environ.get("FININTEL_TIINGO_API_KEY", "").strip())
+    return bool(get_secret("tiingo", "api_key").strip())
 
 
 def parse_prices(data: bytes) -> list[DailyOHLCV]:
@@ -57,7 +58,7 @@ def parse_prices(data: bytes) -> list[DailyOHLCV]:
 
 class TiingoDailyProvider:
     def __init__(self, *, client: httpx.Client | None = None) -> None:
-        self._token = os.environ.get("FININTEL_TIINGO_API_KEY", "").strip()
+        self._token = get_secret("tiingo", "api_key").strip()
         if not self._token:
             raise ProviderError("Configure FININTEL_TIINGO_API_KEY in the Python backend")
         self._client = client
