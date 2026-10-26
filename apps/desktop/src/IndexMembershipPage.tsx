@@ -146,14 +146,16 @@ export function IndexMembershipPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-end gap-3">
             <div className="w-full max-w-xs">
               <MarketDatePicker label="As-of date" value={asOf} onChange={value => { setAsOf(value); }} />
             </div>
-            <Button type="button" size="sm" variant="outline" onClick={() => setAsOf("")}>
-              Latest available
-            </Button>
-            <span className="text-xs text-muted-foreground">Blank date uses the latest local snapshot.</span>
+            <div className="flex min-h-12 flex-wrap items-center gap-3">
+              <Button type="button" size="sm" variant="outline" onClick={() => setAsOf("")}>
+                Latest available
+              </Button>
+              <span className="text-xs text-muted-foreground">Blank date uses the latest local snapshot.</span>
+            </div>
           </div>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4" role="group" aria-label="Select an index">
             {INDEX_CODES.map(code => {
@@ -268,8 +270,9 @@ export function IndexMembershipPage() {
           {state === "error" && <p role="alert" className="text-sm text-destructive">{error}</p>}
           {state === "ready" && !snapshot?.snapshot_as_of && (
             <p className="py-6 text-sm text-muted-foreground">
-              Membership is unknown until a dated, authorized constituent CSV is imported.
-              Use the documented local import command in docs/INDEX_MEMBERSHIP.md.
+              No imported constituent list is available for {selectedMeta?.name ?? selected} on or before this date.
+              The index definitions alone do not provide stock memberships. Import a full, dated constituent CSV
+              from an authorized source using the instructions in docs/INDEX_MEMBERSHIP.md, then select Refresh.
             </p>
           )}
           {state === "ready" && snapshot?.snapshot_as_of && snapshot.total === 0 && (
