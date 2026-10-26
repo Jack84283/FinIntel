@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { useLocale } from "../localization";
 
 interface MarketDatePickerProps {
   label: string;
@@ -7,7 +8,6 @@ interface MarketDatePickerProps {
   onChange: (value: string) => void;
 }
 
-const weekdays = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const formatDate = (date: Date) =>
   [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
 const parseDate = (value: string) => {
@@ -19,6 +19,7 @@ const parseDate = (value: string) => {
 
 /** Theme-aware alternative to unstyleable native browser calendar popups. */
 export function MarketDatePicker({ label, value, onChange }: MarketDatePickerProps) {
+  const { language, t } = useLocale();
   const [open, setOpen] = useState(false);
   const [month, setMonth] = useState(() => {
     const date = parseDate(value) ?? new Date();
@@ -40,6 +41,7 @@ export function MarketDatePicker({ label, value, onChange }: MarketDatePickerPro
   const lastDay = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
   const selected = parseDate(value);
   const today = formatDate(new Date());
+  const weekdays = Array.from({ length: 7 }, (_, day) => new Intl.DateTimeFormat(language, { weekday: "short" }).format(new Date(2024, 0, 7 + day)));
   const days = Array.from({ length: Math.ceil((firstWeekday + lastDay) / 7) * 7 }, (_, index) => index - firstWeekday + 1);
 
   return (
@@ -59,13 +61,13 @@ export function MarketDatePicker({ label, value, onChange }: MarketDatePickerPro
         }}
         className="flex h-12 w-full min-w-0 items-center justify-between gap-2 rounded-md border border-input bg-muted px-3 text-left text-base text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <span className={value ? "" : "text-muted-foreground"}>{value || "Select date"}</span>
+        <span className={value ? "" : "text-muted-foreground"}>{selected ? new Intl.DateTimeFormat(language, { year: "numeric", month: "short", day: "numeric" }).format(selected) : t("Select date")}</span>
         <CalendarDays aria-hidden="true" className="size-5 shrink-0" />
       </button>
       {open && (
         <div
           role="dialog"
-          aria-label={label + " calendar"}
+          aria-label={label + " · " + t("Calendar")}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.stopPropagation();
@@ -75,11 +77,11 @@ export function MarketDatePicker({ label, value, onChange }: MarketDatePickerPro
           className="absolute left-0 top-full z-40 mt-1 w-[min(340px,calc(100vw-40px))] rounded-xl border border-border bg-card p-4 text-card-foreground shadow-xl"
         >
           <div className="mb-4 flex items-center justify-between gap-2">
-            <button type="button" aria-label="Previous month" className="rounded-md p-2 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>
+            <button type="button" aria-label={t("Previous month")} className="rounded-md p-2 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>
               <ChevronLeft className="size-5" aria-hidden="true" />
             </button>
-            <strong className="text-lg">{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong>
-            <button type="button" aria-label="Next month" className="rounded-md p-2 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>
+            <strong className="text-lg">{month.toLocaleDateString(language, { month: "long", year: "numeric" })}</strong>
+            <button type="button" aria-label={t("Next month")} className="rounded-md p-2 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>
               <ChevronRight className="size-5" aria-hidden="true" />
             </button>
           </div>
@@ -92,7 +94,7 @@ export function MarketDatePicker({ label, value, onChange }: MarketDatePickerPro
                 <button
                   key={date}
                   type="button"
-                  aria-label={new Date(month.getFullYear(), month.getMonth(), day).toLocaleDateString(undefined, { dateStyle: "full" })}
+                  aria-label={new Date(month.getFullYear(), month.getMonth(), day).toLocaleDateString(language, { dateStyle: "full" })}
                   aria-pressed={date === value}
                   onClick={() => { onChange(date); setOpen(false); }}
                   className={`h-10 rounded-md text-base tabular-nums hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${date === value ? "bg-primary text-primary-foreground hover:bg-primary" : date === today ? "border border-ring" : ""}`}
@@ -103,8 +105,8 @@ export function MarketDatePicker({ label, value, onChange }: MarketDatePickerPro
             })}
           </div>
           <div className="mt-3 flex justify-between gap-2 border-t border-border pt-3 text-sm">
-            <button type="button" className="rounded-md px-2 py-1 hover:bg-accent" onClick={() => { onChange(""); setOpen(false); }}>Clear date</button>
-            <button type="button" className="rounded-md px-2 py-1 hover:bg-accent" onClick={() => { onChange(today); setOpen(false); }}>Today</button>
+            <button type="button" className="rounded-md px-2 py-1 hover:bg-accent" onClick={() => { onChange(""); setOpen(false); }}>{t("Clear date")}</button>
+            <button type="button" className="rounded-md px-2 py-1 hover:bg-accent" onClick={() => { onChange(today); setOpen(false); }}>{t("Today")}</button>
           </div>
         </div>
       )}
