@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  credentialRemove, credentialSave, credentialStatuses, credentialsNativeAvailable,
+  credentialRemove, credentialSave, credentialStatuses, credentialTest, credentialsNativeAvailable,
+  type ConnectionTestResult,
   type CredentialField, type CredentialStatus, type ProviderId,
 } from "./credentials-api";
 import { useLocale } from "./localization";
@@ -19,6 +20,8 @@ export function ProviderCredentialsCard() {
   const [status, setStatus] = useState<CredentialStatus | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState<ProviderId | null>(null);
+  const [testResults, setTestResults] = useState<Partial<Record<ProviderId, ConnectionTestResult>>>({});
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const native = credentialsNativeAvailable();
@@ -47,6 +50,7 @@ export function ProviderCredentialsCard() {
     try {
       if (remove) await credentialRemove(provider, field);
       else await credentialSave(provider, field, secret);
+      setTestResults(previous => ({ ...previous, [provider]: undefined }));
       await reload();
       setMessage(t(remove ? "Credential deleted." : "Credential saved securely."));
     } catch (reason) {
@@ -54,6 +58,20 @@ export function ProviderCredentialsCard() {
     } finally {
       setDraft(previous => ({ ...previous, [key]: "" }));
       setBusy(false);
+    }
+  };
+
+  const test = async (provider: ProviderId) => {
+    setTesting(provider);
+    setError("");
+    setTestResults(previous => ({ ...previous, [provider]: undefined }));
+    try {
+      const result = await credentialTest(provider);
+      setTestResults(previous => ({ ...previous, [provider]: result }));
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setTesting(null);
     }
   };
 
@@ -90,6 +108,18 @@ export function ProviderCredentialsCard() {
                   </div>
                 );
               })}
+              <div className="flex flex-wrap items-center gap-3">
+                <Button type="button" size="sm" variant="outline"
+                  disabled={busy || testing !== null || !provider.fields.every(field => status?.[provider.id]?.[field.id] === true)}
+                  onClick={() => { void test(provider.id); }}>
+                  {testing === provider.id ? t("Testing…") : t("Test Connection")}
+                </Button>
+                {testResults[provider.id] && <p role="status" aria-live="polite" className="text-xs text-muted-foreground">
+                  {t(testResults[provider.id]!.status)} · {t(testResults[provider.id]!.message)}
+                  {testResults[provider.id]!.http_status != null ? ` · HTTP ${testResults[provider.id]!.http_status}` : ""}
+                  {` · ${testResults[provider.id]!.elapsed_ms} ms`}
+                </p>}
+              </div>
             </div>
           ))}
           <Button size="sm" type="button" variant="outline" disabled={busy} onClick={() => { void reload().catch(() => {}); }}>{t("Refresh")}</Button>
