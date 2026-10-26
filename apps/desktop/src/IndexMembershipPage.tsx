@@ -1,4 +1,5 @@
 import { PageHeader } from "./PageHeader";
+import { useLocale } from "./localization";
 import { MarketDatePicker } from "./components/MarketDatePicker";
 import { searchSymbols, type CatalogSymbol } from "./symbol-catalog-api";
 import { useEffect, useState, type FormEvent } from "react";
@@ -16,6 +17,7 @@ const FETCH_SIZE = 100;
 
 /** Dated evidence-backed equity index membership; does not infer from ETF holdings. */
 export function IndexMembershipPage() {
+  const { t } = useLocale();
   const [selected, setSelected] = useState<IndexCode>("SP500");
   const [asOf, setAsOf] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -152,16 +154,16 @@ export function IndexMembershipPage() {
     <section className="space-y-2" aria-labelledby="index-membership-title">
       <PageHeader
         id="index-membership-title"
-        breadcrumb="FinIntel / Data & Operations"
-        title="Index Constituents"
-        subtitle="Discover which securities belonged to which indexes, using sourced local snapshots."
+        breadcrumb={t("FinIntel / Data & Operations")}
+        title={t("Index Constituents")}
+        subtitle={t("Discover which securities belonged to which indexes, using sourced local snapshots.")}
         actions={<Button type="button" variant="secondary" size="sm" onClick={() => setRevision(value => value + 1)}>
           <RefreshCw aria-hidden="true" /> Refresh
         </Button>}
       />
       <Card>
         <CardHeader className="grid-cols-1">
-          <CardTitle>Index membership snapshots</CardTitle>
+          <CardTitle>{t("Index membership snapshots")}</CardTitle>
           <CardDescription>
             Membership reflects each index’s latest stored snapshot on or before the selected date.
             No membership is inferred from stock prices or ETF holdings.
@@ -170,17 +172,17 @@ export function IndexMembershipPage() {
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-end gap-3">
             <div className="w-full max-w-xs">
-              <MarketDatePicker label="As-of date" value={asOf} onChange={value => { setAsOf(value); }} />
+              <MarketDatePicker label={t("As-of date")} value={asOf} onChange={value => { setAsOf(value); }} />
             </div>
             <div className="flex min-h-12 flex-wrap items-center gap-3">
               <Button type="button" size="sm" variant="outline" onClick={() => setAsOf("")}>
                 Latest available
               </Button>
-              <span className="text-xs text-muted-foreground">Blank date uses the latest local snapshot.</span>
+              <span className="text-xs text-muted-foreground">{t("Blank date uses the latest local snapshot.")}</span>
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">Equibles snapshots are ETF-holdings proxies, not official index constituents.</p>
+            <p className="text-xs text-muted-foreground">{t("Equibles snapshots are ETF-holdings proxies, not official index constituents.")}</p>
             <Button type="button" size="sm" disabled={acquiring}
               onClick={() => { void download(); }}>
               <Download aria-hidden="true" />
@@ -189,7 +191,7 @@ export function IndexMembershipPage() {
           </div>
           {acquireError && <p role="alert" className="text-sm text-destructive">{acquireError}</p>}
           {acquireMessage && <p role="status" className="text-sm text-positive">{acquireMessage}</p>}
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4" role="group" aria-label="Select an index">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4" role="group" aria-label={t("Select an index")}>
             {INDEX_CODES.map(code => {
               const item = catalog.find(entry => entry.code === code);
               return (
@@ -217,19 +219,19 @@ export function IndexMembershipPage() {
 
       <Card>
         <CardHeader className="grid-cols-1">
-          <CardTitle>Stock index lookup</CardTitle>
-          <CardDescription>Search by stock symbol or company name to check all four indexes as of the chosen date.</CardDescription>
+          <CardTitle>{t("Stock index lookup")}</CardTitle>
+          <CardDescription>{t("Search by stock symbol or company name to check all four indexes as of the chosen date.")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <form onSubmit={event => { void lookup(event); }} className="flex flex-wrap items-center gap-2">
             <div className="relative w-full max-w-md">
               <input
                 role="combobox"
-                aria-label="Lookup stock symbol or company name"
+                aria-label={t("Lookup stock symbol or company name")}
                 aria-autocomplete="list"
                 aria-controls="index-stock-suggestions"
                 aria-expanded={stockFocused && stock.trim().length > 0}
-                placeholder="Search symbol or company name, e.g. AAPL or Apple"
+                placeholder={t("Search symbol or company name, e.g. AAPL or Apple")}
                 maxLength={80}
                 value={stock}
                 onChange={event => { setStock(event.target.value); setStockSearching(true); setStockOptions([]); setStockResult(null); }}
@@ -247,9 +249,9 @@ export function IndexMembershipPage() {
                 className="h-10 w-full rounded-md border border-input bg-muted px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
               {stockFocused && stock.trim() && (
-                <div id="index-stock-suggestions" role="listbox" aria-label="Matching stocks"
+                <div id="index-stock-suggestions" role="listbox" aria-label={t("Matching stocks")}
                   className="absolute inset-x-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-md border border-border bg-card p-1 shadow-lg">
-                  {stockSearching ? <p className="px-3 py-2 text-xs text-muted-foreground">Searching local stocks…</p> :
+                  {stockSearching ? <p className="px-3 py-2 text-xs text-muted-foreground">{t("Searching local stocks…")}</p> :
                     stockOptions.length ? stockOptions.map(item => (
                       <button key={item.symbol} type="button" role="option" aria-selected={false}
                         onMouseDown={event => event.preventDefault()}
@@ -258,7 +260,7 @@ export function IndexMembershipPage() {
                         <span className="w-20 shrink-0 font-semibold">{item.symbol}</span>
                         <span className="min-w-0 truncate text-muted-foreground">{item.name}</span>
                       </button>
-                    )) : <p className="px-3 py-2 text-xs text-muted-foreground">No local stock matches; exact ticker entry is supported.</p>}
+                    )) : <p className="px-3 py-2 text-xs text-muted-foreground">{t("No local stock matches; exact ticker entry is supported.")}</p>}
                 </div>
               )}
             </div>
@@ -291,14 +293,14 @@ export function IndexMembershipPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <input
-            aria-label="Filter index constituents"
-            placeholder="Search ticker or company name"
+            aria-label={t("Filter index constituents")}
+            placeholder={t("Search ticker or company name")}
             value={searchInput}
             maxLength={80}
             onChange={event => setSearchInput(event.target.value)}
             className="h-9 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm"
           />
-          {state === "loading" && <Skeleton aria-label="Loading index constituents" className="h-28 w-full" />}
+          {state === "loading" && <Skeleton aria-label={t("Loading index constituents")} className="h-28 w-full" />}
           {state === "error" && <p role="alert" className="text-sm text-destructive">{error}</p>}
           {state === "ready" && !snapshot?.snapshot_as_of && (
             <p className="py-6 text-sm text-muted-foreground">
@@ -308,16 +310,16 @@ export function IndexMembershipPage() {
             </p>
           )}
           {state === "ready" && snapshot?.snapshot_as_of && snapshot.total === 0 && (
-            <p className="py-6 text-sm text-muted-foreground">No securities match this filter.</p>
+            <p className="py-6 text-sm text-muted-foreground">{t("No securities match this filter.")}</p>
           )}
           {state === "ready" && snapshot && snapshot.items.length > 0 && (
             <div className="overflow-x-auto rounded-md border border-border">
               <table className="w-full min-w-[650px] text-left text-xs">
                 <thead className="bg-muted text-muted-foreground">
-                  <tr><th scope="col" className="px-3 py-2">Ticker</th>
-                    <th scope="col" className="px-3 py-2">Company</th>
-                    <th scope="col" className="px-3 py-2">Type</th>
-                    <th scope="col" className="px-3 py-2">Indexes</th></tr>
+                  <tr><th scope="col" className="px-3 py-2">{t("Ticker")}</th>
+                    <th scope="col" className="px-3 py-2">{t("Company")}</th>
+                    <th scope="col" className="px-3 py-2">{t("Type")}</th>
+                    <th scope="col" className="px-3 py-2">{t("Indexes")}</th></tr>
                 </thead>
                 <tbody>{snapshot.items.map(item => (
                   <tr key={item.symbol} className="border-t border-border">
