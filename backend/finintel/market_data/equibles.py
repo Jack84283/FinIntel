@@ -111,8 +111,12 @@ def acquire_index(code: str) -> dict:
         raise EquiblesError("Equibles index download is incomplete.")
     source = "Equibles / ETF holdings proxy; " + INDEX_SLUGS[code] + "; " + first["asOfDate"]
     count = load_membership(
-        code, first["asOfDate"], source, symbols,
-        expected_count=first["constituentCount"], names=names,
+        code,
+        first["asOfDate"],
+        source,
+        symbols,
+        expected_count=first["constituentCount"],
+        names=names,
     )
     return {
         "code": code,
