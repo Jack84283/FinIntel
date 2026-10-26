@@ -220,17 +220,7 @@ export function AcquisitionCard({
         )}
         {status && !configured && (
           <p role="status" className="text-xs text-muted-foreground">
-            {provider === "tiingo"
-              ? t("To use Tiingo, set FININTEL_TIINGO_API_KEY in the Python backend environment.")
-              : provider === "alpaca_sip"
-              ? t("To use Alpaca, set FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY in the Python backend environment.")
-              : t("To use Alpha Vantage, set FININTEL_ALPHA_VANTAGE_API_KEY in the Python backend environment.")}
-            {" "}{t("Restart the backend, then select Recheck provider. Credentials never enter the UI.")}
-            {provider === "alpaca_sip" && status.key_configured
-              ? t(" Alpha Vantage is already configured; select it above to fetch now.")
-              : provider === "alpha_vantage" && status.alpaca_configured
-                ? t(" Alpaca is already configured; select it above to fetch now.")
-                : ""}
+            {t("Configure this provider in Preferences → Data provider API keys. Browser-only development still supports environment credentials.")}
           </p>
         )}
         {statusError && <p role="alert" className="text-xs text-destructive">{statusError}</p>}
