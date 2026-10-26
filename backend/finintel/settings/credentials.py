@@ -1,5 +1,7 @@
 """OS credential-vault access: no secrets in SQLite or frontend read responses."""
+
 import os
+
 import keyring
 from keyring.errors import PasswordDeleteError
 
@@ -18,19 +20,23 @@ ENV_FALLBACK = {
     ("equibles", "api_key"): "FININTEL_EQUIBLES_API_KEY",
 }
 
+
 class CredentialStoreError(RuntimeError):
     """No usable secure OS credential service."""
+
 
 def _name(provider: str, field: str) -> str:
     if field not in FIELDS.get(provider, ()):
         raise ValueError("Unsupported credential provider or field")
     return f"{provider}.{field}"
 
+
 def stored(provider: str, field: str) -> bool:
     try:
         return bool(keyring.get_password(SERVICE, _name(provider, field)))
     except Exception:
         return False
+
 
 def get_secret(provider: str, field: str) -> str:
     """OS vault primary; environment fallback only for developer-run CLI."""
@@ -45,6 +51,7 @@ def get_secret(provider: str, field: str) -> str:
         return ""
     return os.environ.get(ENV_FALLBACK[(provider, field)], "").strip()
 
+
 def set_secret(provider: str, field: str, secret: str) -> None:
     name = _name(provider, field)
     value = secret.strip()
@@ -54,6 +61,7 @@ def set_secret(provider: str, field: str, secret: str) -> None:
         keyring.set_password(SERVICE, name, value)
     except Exception as exc:
         raise CredentialStoreError("OS secure credential storage unavailable") from exc
+
 
 def delete_secret(provider: str, field: str) -> None:
     name = _name(provider, field)
