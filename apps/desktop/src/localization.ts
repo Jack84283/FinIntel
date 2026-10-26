@@ -108,6 +108,21 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Stored": "已保存",
+  "observations": "条记录",
+  "new": "新增",
+  "revised": "修订",
+  "unchanged": "未变化",
+  "older": "较早",
+  "Through": "截至",
+  "Local charts refreshed.": "本地图表已刷新。",
+  "Showing": "显示",
+  "of": "共",
+  "imports": "条导入记录",
+  "Page": "第",
+  "All": "全部",
+  "No matching imports": "没有匹配的导入记录",
+  "for the current filter": "按当前筛选条件",
   "examples": "个示例",
   "Started:": "开始：",
   "Finished:": "完成：",
