@@ -151,3 +151,17 @@ def test_full_import_history_search_and_pagination(tmp_path, monkeypatch):
     assert named.json()["total"] == 2
     assert absent.json()["total"] == wrong_provider.json()["total"] == 0
     assert bad.status_code == 422
+
+
+def test_equibles_source_is_accepted_by_symbol_api(tmp_path, monkeypatch):
+    db = _seed(tmp_path, monkeypatch)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO symbol_catalog "
+            "(symbol, name, asset_type, exchange, source, updated_at) "
+            "VALUES ('ZXEQ', 'Example Equity', 'Stock', '', 'equibles_proxy', '2026-10-23')"
+        )
+    with TestClient(app) as client:
+        response = client.get("/api/v1/market-data/symbols?q=ZXEQ")
+    assert response.status_code == 200
+    assert response.json()["results"][0]["source"] == "equibles_proxy"
