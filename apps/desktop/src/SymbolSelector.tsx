@@ -109,7 +109,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
           Instrument
         </label>
         <span className="text-[11px] text-muted-foreground">
-          {catalogSource === "starter" ? "Starter directory" : "Local provider directory"}
+          {catalogSource === "starter" ? t("Starter directory") : t("Local provider directory")}
           {catalogTotal > 0 ? " · " + catalogTotal.toLocaleString() + " symbols" : ""}
         </span>
       </div>
@@ -184,7 +184,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
                 ))
               ) : (
                 <p className="px-3 py-2 text-xs text-muted-foreground">
-                  No catalog match. You can still enter a valid ticker manually.
+                  {t("No catalog match. You can still enter a valid ticker manually.")}
                 </p>
               )}
             </div>
@@ -204,11 +204,11 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
       </div>
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
         <p className="text-xs leading-5 text-muted-foreground">
-          Type a symbol or company name to see suggestions. Select a match, or enter an exact ticker.
+          {t("Type a symbol or company name to see suggestions. Select a match, or enter an exact ticker.")}
         </p>
         <Button type="button" size="sm" variant="secondary" onClick={() => void performSync()} disabled={disabled || syncing || !keyConfigured}>
           <RefreshCw aria-hidden="true" className={syncing ? "animate-spin" : ""} />
-          {syncing ? "Syncing…" : "Sync symbols"}
+          {syncing ? t("Syncing…") : t("Sync symbols")}
         </Button>
       </div>
       {catalogSource === "starter" && (
@@ -216,7 +216,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
       )}
       {notice && <p role="status" className="text-xs text-positive">{notice}</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-      {syncError && <p role="alert" className="text-xs text-destructive">Symbol sync failed: {syncError}. Existing directory retained.</p>}
+      {syncError && <p role="alert" className="text-xs text-destructive">{t("Symbol sync failed:")} {syncError}. {t("Existing directory retained.")}</p>}
       {!keyConfigured && <p className="text-[11px] text-muted-foreground">{t("Sync requires an Alpha Vantage backend key. Existing local symbols remain searchable.")}</p>}
     </div>
   );
