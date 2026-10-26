@@ -6,6 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
+from finintel.market_data.equibles import EquiblesError, acquire_index, configured
 from finintel.market_data.membership import (
     index_constituents,
     list_indexes,
@@ -107,6 +108,22 @@ def get_index_constituents(
             code, as_of=as_of.isoformat() if as_of else None, query=q, limit=limit, offset=offset
         )
     except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/equibles/status")
+def equibles_status() -> dict:
+    return {"configured": configured(), "provider": "equibles"}
+
+
+@router.post("/{code}/acquire")
+def acquire_constituents(code: IndexCode) -> dict:
+    """Explicit local-only write: fetch all Equibles pages, validate, and import."""
+    try:
+        return acquire_index(code)
+    except (EquiblesError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except StorageError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

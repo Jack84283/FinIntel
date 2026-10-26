@@ -140,3 +140,20 @@ export async function fetchStockIndexes(symbol: string, asOf = ""): Promise<Symb
     }),
   };
 }
+
+/** Acquisition is explicit and only the local backend knows the provider key. */
+export async function acquireIndex(code: IndexCode): Promise<{ code: IndexCode; snapshot_as_of: string; members: number; source: string; provenance: string; complete: boolean; unlinked_count: number; source_total: number }> {
+  if (!isCode(code)) throw new Error("Invalid index.");
+  if (isTauri()) return invoke("index_acquire", { code });
+  const url = "/api/v1/market-data/indexes/" + code + "/acquire";
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "X-FinIntel-Client": "local-workstation" },
+  });
+  if (!response.ok) {
+    const error: unknown = await response.json().catch(() => ({}));
+    const detail = error && typeof error === "object" && "detail" in error ? (error as { detail: unknown }).detail : null;
+    throw new Error(typeof detail === "string" ? detail : "Index acquisition failed (HTTP " + response.status + ").");
+  }
+  return response.json();
+}

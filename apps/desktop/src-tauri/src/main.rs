@@ -296,6 +296,37 @@ async fn validation_corporate_reference(symbol: String) -> Result<serde_json::Va
 }
 
 
+#[tauri::command]
+async fn index_acquire(code: String) -> Result<serde_json::Value, String> {
+    if !valid_index(&code) {
+        return Err("Invalid index code.".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(180))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize local HTTP client.".to_string())?;
+    let response = client
+        .post(format!("{BACKEND}/api/v1/market-data/indexes/{code}/acquire"))
+        .header("x-finintel-client", "local-workstation")
+        .send()
+        .await
+        .map_err(|_| "Could not reach local index acquisition backend.".to_string())?;
+    let status = response.status();
+    let payload = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|_| "Index acquisition returned malformed JSON.".to_string())?;
+    if !status.is_success() {
+        let detail = payload
+            .get("detail")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Index acquisition failed.");
+        return Err(format!("HTTP {}: {detail}", status.as_u16()));
+    }
+    Ok(payload)
+}
+
 fn valid_index(code: &str) -> bool {
     matches!(code, "SP500" | "DJIA" | "NDX" | "RUT")
 }
@@ -366,6 +397,7 @@ fn main() {
             market_acquire_daily,
             market_symbols,
             market_sync_symbols,
+            index_acquire,
             index_catalog,
             index_constituents,
             index_stock_memberships
