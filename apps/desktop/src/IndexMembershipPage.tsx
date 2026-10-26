@@ -338,8 +338,8 @@ export function IndexMembershipPage() {
           )}
           {state === "ready" && snapshot?.snapshot_as_of && (
             <p className="text-xs text-muted-foreground" role="status">
-              Showing all {snapshot.total.toLocaleString()} matching securities
-              {search ? " for the current filter" : ""}.
+              {t("Showing all")} {snapshot.total.toLocaleString()} {t("matching securities")}
+              {search ? t(" for the current filter") : ""}.
             </p>
           )}
           <p className="text-xs text-muted-foreground">
