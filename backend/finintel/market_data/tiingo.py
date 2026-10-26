@@ -8,7 +8,6 @@ from urllib.parse import quote
 import httpx
 from pydantic import ValidationError
 
-from finintel.settings.credentials import get_secret
 from finintel.market_data.models import DailyOHLCV, HistoricalBatch
 from finintel.market_data.provider import (
     SYMBOL_PATTERN,
@@ -17,6 +16,7 @@ from finintel.market_data.provider import (
     ProviderRateLimited,
     ProviderUnavailable,
 )
+from finintel.settings.credentials import get_secret
 
 BASE = "https://api.tiingo.com/tiingo/daily"
 TERMS = "https://www.tiingo.com/about/terms"
