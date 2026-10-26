@@ -108,6 +108,23 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Test Connection": "测试连接",
+  "Testing…": "正在测试…",
+  "connected": "连接成功",
+  "limited": "权限受限",
+  "authentication_failed": "认证失败",
+  "rate_limited": "请求限流",
+  "unreachable": "连接不可用",
+  "invalid_response": "响应异常",
+  "not_configured": "尚未配置",
+  "Authentication and selected service access succeeded.": "身份验证及所选服务访问成功。",
+  "Credentials accepted but this service or subscription is not available.": "凭据已接受，但当前服务或订阅不可用。",
+  "The provider rejected the saved credentials.": "数据源拒绝了保存的凭据。",
+  "The provider has limited requests; try again later.": "数据源已限制请求，请稍后再试。",
+  "Could not contact the provider within the timeout.": "在超时时间内无法连接数据源。",
+  "The provider returned an unexpected response.": "数据源返回了意外响应。",
+  "Save all required credentials before testing.": "请先保存全部必需的凭据。",
+
   "Status unavailable": "无法读取状态",
   "Searching…": "正在搜索…",
 "Provider credentials are managed in the secure settings card on this page.": "数据源凭据在本页的安全设置卡片中管理。",
