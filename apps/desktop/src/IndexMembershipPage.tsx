@@ -1,0 +1,254 @@
+import { PageHeader } from "./PageHeader";
+import { useEffect, useState, type FormEvent } from "react";
+import { RefreshCw, Search } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  fetchConstituents, fetchIndexes, fetchStockIndexes, INDEX_CODES,
+  type ConstituentPage, type IndexCode, type IndexRecord, type SymbolIndexes,
+} from "./index-api";
+
+const PAGE_SIZE = 50;
+
+/** Dated evidence-backed equity index membership; does not infer from ETF holdings. */
+export function IndexMembershipPage() {
+  const [selected, setSelected] = useState<IndexCode>("SP500");
+  const [asOf, setAsOf] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const [revision, setRevision] = useState(0);
+  const [catalog, setCatalog] = useState<IndexRecord[]>([]);
+  const [snapshot, setSnapshot] = useState<ConstituentPage | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [error, setError] = useState("");
+  const [stock, setStock] = useState("");
+  const [stockResult, setStockResult] = useState<SymbolIndexes | null>(null);
+  const [stockError, setStockError] = useState("");
+  const [stockBusy, setStockBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetchIndexes(asOf).then(result => { if (active) setCatalog(result); })
+      .catch(() => { if (active) setCatalog([]); });
+    return () => { active = false; };
+  }, [asOf, revision]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setPage(0);
+      setSearch(searchInput.trim());
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    let active = true;
+    setState("loading");
+    fetchConstituents(selected, asOf, search, page * PAGE_SIZE, PAGE_SIZE)
+      .then(result => {
+        if (!active) return;
+        setSnapshot(result);
+        setError("");
+        setState("ready");
+      })
+      .catch(reason => {
+        if (!active) return;
+        setError(reason instanceof Error ? reason.message : String(reason));
+        setState("error");
+      });
+    return () => { active = false; };
+  }, [selected, asOf, search, page, revision]);
+
+  useEffect(() => {
+    setStockResult(null);
+    setStockError("");
+  }, [asOf]);
+
+  const lookup = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setStockBusy(true);
+    setStockResult(null);
+    setStockError("");
+    try {
+      setStockResult(await fetchStockIndexes(stock, asOf));
+    } catch (reason: unknown) {
+      setStockError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setStockBusy(false);
+    }
+  };
+
+  const pageCount = Math.max(1, Math.ceil((snapshot?.total ?? 0) / PAGE_SIZE));
+  const selectedMeta = catalog.find(item => item.code === selected);
+  return (
+    <section className="space-y-2" aria-labelledby="index-membership-title">
+      <PageHeader
+        id="index-membership-title"
+        breadcrumb="FinIntel / Data & Operations"
+        title="Index Constituents"
+        subtitle="Discover which securities belonged to which indexes, using sourced local snapshots."
+        actions={<Button type="button" variant="secondary" size="sm" onClick={() => setRevision(value => value + 1)}>
+          <RefreshCw aria-hidden="true" /> Refresh
+        </Button>}
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle>Index membership snapshots</CardTitle>
+          <CardDescription>
+            Membership reflects each index’s latest stored snapshot on or before the selected date.
+            No membership is inferred from stock prices or ETF holdings.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="text-xs text-muted-foreground" htmlFor="index-asof">As-of date</label>
+            <input
+              id="index-asof" type="date" aria-label="Index membership as-of date"
+              max={new Date().toISOString().slice(0, 10)}
+              value={asOf}
+              onChange={event => { setAsOf(event.target.value); setPage(0); }}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+            />
+            <Button type="button" size="sm" variant="outline" onClick={() => setAsOf("")}>
+              Latest available
+            </Button>
+            <span className="text-xs text-muted-foreground">Blank date uses the latest local snapshot.</span>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4" role="group" aria-label="Select an index">
+            {INDEX_CODES.map(code => {
+              const item = catalog.find(entry => entry.code === code);
+              return (
+                <button
+                  key={code}
+                  type="button"
+                  aria-pressed={selected === code}
+                  onClick={() => { setSelected(code); setPage(0); }}
+                  className={"rounded-md border p-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring " +
+                    (selected === code ? "border-ring bg-secondary" : "border-border hover:bg-accent")}
+                >
+                  <p className="text-sm font-semibold">{item?.name ?? code}</p>
+                  <p className="mt-2 text-xl font-semibold tabular-nums">
+                    {item?.members == null ? "—" : item.members.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {item?.snapshot_as_of ? "Snapshot " + item.snapshot_as_of : "No imported snapshot"}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Stock index lookup</CardTitle>
+          <CardDescription>Enter a ticker to check all four indexes as of the chosen date.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <form onSubmit={event => { void lookup(event); }} className="flex flex-wrap items-center gap-2">
+            <input
+              aria-label="Lookup stock ticker"
+              placeholder="e.g. AAPL"
+              maxLength={15}
+              value={stock}
+              onChange={event => setStock(event.target.value)}
+              className="h-9 w-48 rounded-md border border-input bg-background px-3 text-sm uppercase"
+            />
+            <Button size="sm" type="submit" disabled={stockBusy || !stock.trim()}>
+              <Search aria-hidden="true" /> {stockBusy ? "Searching…" : "Check indexes"}
+            </Button>
+          </form>
+          {stockError && <p role="alert" className="text-sm text-destructive">{stockError}</p>}
+          {stockResult && (
+            <div className="flex flex-wrap items-center gap-2 text-sm" role="status">
+              <span className="font-semibold">{stockResult.symbol}</span>
+              {stockResult.indexes.map(item => (
+                <Badge key={item.code} variant={item.is_member === true ? "success" : "outline"}>
+                  {item.name}: {item.is_member === null ? "Unknown" : item.is_member ? "Included" : "Not in snapshot"}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{selectedMeta?.name ?? selected} — Constituents</CardTitle>
+          <CardDescription>
+            {snapshot?.snapshot_as_of
+              ? "Effective snapshot: " + snapshot.snapshot_as_of + " · Source: " + (snapshot.source ?? "Unknown")
+              : "No constituent snapshot has been imported for this date."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <input
+            aria-label="Filter index constituents"
+            placeholder="Search ticker or company name"
+            value={searchInput}
+            maxLength={80}
+            onChange={event => setSearchInput(event.target.value)}
+            className="h-9 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm"
+          />
+          {state === "loading" && <Skeleton aria-label="Loading index constituents" className="h-28 w-full" />}
+          {state === "error" && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          {state === "ready" && !snapshot?.snapshot_as_of && (
+            <p className="py-6 text-sm text-muted-foreground">
+              Membership is unknown until a dated, authorized constituent CSV is imported.
+              Use the documented local import command in docs/INDEX_MEMBERSHIP.md.
+            </p>
+          )}
+          {state === "ready" && snapshot?.snapshot_as_of && snapshot.total === 0 && (
+            <p className="py-6 text-sm text-muted-foreground">No securities match this filter.</p>
+          )}
+          {state === "ready" && snapshot && snapshot.items.length > 0 && (
+            <div className="overflow-x-auto rounded-md border border-border">
+              <table className="w-full min-w-[650px] text-left text-xs">
+                <thead className="bg-muted text-muted-foreground">
+                  <tr><th scope="col" className="px-3 py-2">Ticker</th>
+                    <th scope="col" className="px-3 py-2">Company</th>
+                    <th scope="col" className="px-3 py-2">Type</th>
+                    <th scope="col" className="px-3 py-2">Indexes</th></tr>
+                </thead>
+                <tbody>{snapshot.items.map(item => (
+                  <tr key={item.symbol} className="border-t border-border">
+                    <td className="px-3 py-2 font-semibold">{item.symbol}</td>
+                    <td className="px-3 py-2">{item.name}</td>
+                    <td className="px-3 py-2">{item.asset_type}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        {item.member_indexes.map(code => <Badge variant="outline" key={code}>{code}</Badge>)}
+                      </div>
+                    </td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+          {snapshot?.snapshot_as_of && (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>
+                {snapshot.total === 0 ? "No results" : "Showing " +
+                  (page * PAGE_SIZE + 1) + "–" +
+                  Math.min((page + 1) * PAGE_SIZE, snapshot.total) +
+                  " of " + snapshot.total.toLocaleString() + " matching securities"}
+              </span>
+              <div className="flex gap-2">
+                <Button size="sm" type="button" variant="secondary" disabled={page === 0 || state !== "ready"} onClick={() => setPage(n => Math.max(0, n - 1))}>Previous</Button>
+                <Button size="sm" type="button" variant="secondary" disabled={page + 1 >= pageCount || state !== "ready"} onClick={() => setPage(n => n + 1)}>Next</Button>
+              </div>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Imported snapshots are not live. A missing membership source is unknown, not proof of exclusion.
+            Historical accuracy depends on the source and the snapshot dates.
+          </p>
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
