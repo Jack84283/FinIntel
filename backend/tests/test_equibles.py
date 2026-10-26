@@ -6,7 +6,7 @@ from finintel.market_data import equibles
 
 
 def test_acquisition_paginates_and_commits_once(monkeypatch):
-    data = [{"ticker": "AAPL", "isLinked": True}, {"ticker": "MSFT", "isLinked": True}]
+    data = [{"ticker": "AAPL", "name": "Apple Inc.", "isLinked": True}, {"ticker": "MSFT", "name": "Microsoft Corp", "isLinked": True}]
     seen = []
     saved = []
 
@@ -32,6 +32,7 @@ def test_acquisition_paginates_and_commits_once(monkeypatch):
     assert seen == [("SP500", 0), ("SP500", 1)]
     assert saved[0][0][3] == ["AAPL", "MSFT"]
     assert saved[0][1]["expected_count"] == 2
+    assert saved[0][1]["names"]["AAPL"] == "Apple Inc."
     assert result["provenance"] == "fund_derived_proxy"
 
 
