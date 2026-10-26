@@ -6,8 +6,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from finintel.settings.credentials import get_secret
 from finintel.market_data.membership import INDEX_NAMES, load_membership
+from finintel.settings.credentials import get_secret
 
 INDEX_SLUGS = {
     "SP500": "sp-500",
