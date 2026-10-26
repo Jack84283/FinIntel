@@ -78,6 +78,8 @@ class SymbolIndexes(BaseModel):
 def get_indexes(as_of: date | None = None) -> list[dict]:
     try:
         return list_indexes(as_of=as_of.isoformat() if as_of else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except StorageError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
