@@ -108,6 +108,23 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "examples": "个示例",
+  "Started:": "开始：",
+  "Finished:": "完成：",
+  "Less than nine years observed:": "实际覆盖不足九年的序列：",
+  "Weekday gaps are candidates, not confirmed missing sessions.": "工作日缺口只是候选，尚未确认为缺失交易日。",
+  "Checked": "已检查",
+  "symbol": "代码",
+  "provider": "数据源",
+  "date": "日期",
+  "previous": "上一交易日",
+  "next": "下一交易日",
+  "issue": "问题",
+  "series": "序列",
+  "seconds": "秒",
+  "rows": "记录数",
+  "first": "首日",
+  "last": "末日",
   "Calendar": "日历",
   "Clear date": "清除日期",
   "Today": "今天",
