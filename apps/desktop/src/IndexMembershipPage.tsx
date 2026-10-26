@@ -186,7 +186,7 @@ export function IndexMembershipPage() {
             <Button type="button" size="sm" disabled={acquiring}
               onClick={() => { void download(); }}>
               <Download aria-hidden="true" />
-              {acquiring ? "Fetching constituents…" : "Fetch constituents"}
+              {acquiring ? t("Fetching constituents…") : "Fetch constituents"}
             </Button>
           </div>
           {acquireError && <p role="alert" className="text-sm text-destructive">{acquireError}</p>}
@@ -208,7 +208,7 @@ export function IndexMembershipPage() {
                     {item?.members == null ? "—" : item.members.toLocaleString()}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {item?.snapshot_as_of ? "Snapshot " + item.snapshot_as_of : "No imported snapshot"}
+                    {item?.snapshot_as_of ? t("Snapshot ") + item.snapshot_as_of : t("No imported snapshot")}
                   </p>
                 </button>
               );
@@ -265,7 +265,7 @@ export function IndexMembershipPage() {
               )}
             </div>
             <Button size="sm" type="submit" disabled={stockBusy || !stock.trim()}>
-              <Search aria-hidden="true" /> {stockBusy ? "Searching…" : "Check indexes"}
+              <Search aria-hidden="true" /> {stockBusy ? t("Searching…") : "Check indexes"}
             </Button>
           </form>
           {stockError && <p role="alert" className="text-sm text-destructive">{stockError}</p>}
@@ -274,7 +274,7 @@ export function IndexMembershipPage() {
               <span className="font-semibold">{stockResult.symbol}</span>
               {stockResult.indexes.map(item => (
                 <Badge key={item.code} variant={item.is_member === true ? "success" : "outline"}>
-                  {item.name}: {item.is_member === null ? "Unknown" : item.is_member ? "Included" : "Not in snapshot"}
+                  {item.name}: {item.is_member === null ? t("Unknown") : item.is_member ? t("Included") : t("Not in snapshot")}
                 </Badge>
               ))}
             </div>
@@ -287,7 +287,7 @@ export function IndexMembershipPage() {
           <CardTitle>{selectedMeta?.name ?? selected} — Constituents</CardTitle>
           <CardDescription>
             {snapshot?.snapshot_as_of
-              ? "Effective snapshot: " + snapshot.snapshot_as_of + " · Source: " + (snapshot.source ?? "Unknown")
+              ? t("Effective snapshot: ") + snapshot.snapshot_as_of + " · Source: " + (snapshot.source ?? t("Unknown"))
               : "No constituent snapshot has been imported for this date."}
           </CardDescription>
         </CardHeader>
@@ -343,8 +343,8 @@ export function IndexMembershipPage() {
             </p>
           )}
           <p className="text-xs text-muted-foreground">
-            Imported snapshots are not live. A missing membership source is unknown, not proof of exclusion.
-            Historical accuracy depends on the source and the snapshot dates.
+            {t("Imported snapshots are not live. A missing membership source is unknown, not proof of exclusion.")}
+            {t("Historical accuracy depends on the source and the snapshot dates.")}
           </p>
         </CardContent>
       </Card>
