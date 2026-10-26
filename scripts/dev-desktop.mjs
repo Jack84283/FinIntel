@@ -62,7 +62,7 @@ function legacyListenerPids(port) {
   if (isWin) return []; // Windows legacy ownership cannot be verified safely.
   try {
     return execFileSync("lsof", ["-nP", "-t", "-iTCP:" + port, "-sTCP:LISTEN"], { encoding: "utf8", timeout: 3000 })
-      .trim().split(/\\s+/).map(Number).filter(pid => Number.isSafeInteger(pid) && pid > 0);
+      .trim().split(/\s+/).map(Number).filter(pid => Number.isSafeInteger(pid) && pid > 0);
   } catch { return []; }
 }
 
@@ -71,10 +71,10 @@ function verifiedLegacy(pid, port) {
   try {
     const command = execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8", timeout: 3000 }).trim();
     const cwd = execFileSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], { encoding: "utf8", timeout: 3000 })
-      .split("\\n").find(line => line.startsWith("n"))?.slice(1);
+      .split("\n").find(line => line.startsWith("n"))?.slice(1);
     const inCheckout = cwd === root || cwd?.startsWith(root + "/");
     const expected = port === 8765
-      ? /(?:uvicorn.*finintel\\.main:app|finintel\\.desktop_entry)/.test(command)
+      ? /(?:uvicorn.*finintel\.main:app|finintel\.desktop_entry)/.test(command)
       : /(?:vite|tauri)/.test(command) && command.includes("FinIntel");
     return Boolean(inCheckout && expected);
   } catch { return false; }
