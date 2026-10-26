@@ -62,6 +62,7 @@ def acquire_index(code: str) -> dict:
         raise EquiblesError("Unknown index.")
     symbols = []
     names = {}
+    unlinked = []
     first = None
     offset = 0
     while True:
@@ -83,8 +84,8 @@ def acquire_index(code: str) -> dict:
             expected = page.get("constituentCount")
             if not isinstance(expected, int) or not 1 <= expected <= 5000:
                 raise EquiblesError("Invalid source constituent count.")
-            if page.get("unlinkedCount") != 0:
-                raise EquiblesError("Some fund holdings lack linked tickers; import aborted.")
+            if not isinstance(page.get("unlinkedCount"), int) or not 0 <= page["unlinkedCount"] <= expected:
+                raise EquiblesError("Invalid source unlinked count.")
         if (
             page.get("asOfDate") != first["asOfDate"]
             or page.get("constituentCount") != first["constituentCount"]
@@ -95,11 +96,14 @@ def acquire_index(code: str) -> dict:
         ):
             raise EquiblesError("Equibles pages differ or returned incomplete data.")
         for row in data:
-            if not isinstance(row, dict) or row.get("isLinked") is not True:
-                raise EquiblesError("Encountered an unlinked or malformed holding.")
+            if not isinstance(row, dict):
+                raise EquiblesError("Encountered a malformed holding.")
+            if row.get("isLinked") is not True or not row.get("ticker"):
+                unlinked.append({"rank": row.get("rank"), "name": row.get("name")})
+                continue
             ticker = row.get("ticker")
             if not isinstance(ticker, str):
-                raise EquiblesError("Holding is missing a ticker.")
+                raise EquiblesError("Holding ticker must be a string.")
             symbols.append(ticker)
             names[ticker.strip().upper()] = row.get("name")
         offset += len(data)
@@ -107,15 +111,21 @@ def acquire_index(code: str) -> dict:
             raise EquiblesError("Equibles returned more rows than declared.")
         if not meta.get("hasMore"):
             break
-    if len(symbols) != first["constituentCount"]:
+    if len(symbols) + len(unlinked) != first["constituentCount"]:
         raise EquiblesError("Equibles index download is incomplete.")
+    if len(unlinked) != first["unlinkedCount"]:
+        raise EquiblesError("Equibles unlinked count does not match downloaded rows.")
+    if not symbols:
+        raise EquiblesError("No linked tickers available to import.")
     source = "Equibles / ETF holdings proxy; " + INDEX_SLUGS[code] + "; " + first["asOfDate"]
+    if unlinked:
+        source += "; incomplete: " + str(len(unlinked)) + " unlinked holdings"
     count = load_membership(
         code,
         first["asOfDate"],
         source,
         symbols,
-        expected_count=first["constituentCount"],
+        expected_count=len(symbols),
         names=names,
     )
     return {
@@ -124,4 +134,8 @@ def acquire_index(code: str) -> dict:
         "members": count,
         "source": source,
         "provenance": "fund_derived_proxy",
+        "source_total": first["constituentCount"],
+        "unlinked_count": len(unlinked),
+        "complete": len(unlinked) == 0,
+        "unlinked_holdings": unlinked[:20],
     }
