@@ -203,7 +203,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
               <Database aria-hidden="true" /> Data Acquisition
             </Button>
             <Button type="button" variant={showSearch ? "secondary" : "outline"} size="sm" aria-expanded={showSearch} aria-controls="market-search-panel" onClick={() => setShowSearch((current) => !current)}>
-              <SlidersHorizontal aria-hidden="true" /> {showSearch ? "Hide filters" : "Show filters"}
+              <SlidersHorizontal aria-hidden="true" /> {showSearch ? t("Hide filters") : t("Show filters")}
             </Button></>} />    {indexState === "loading" && (
         <Card><CardContent><Skeleton className="h-8 w-64" aria-label={t("Loading local instruments")} /></CardContent></Card>
       )}
@@ -347,7 +347,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
             <>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <Metric label={t("Instrument")} value={series.symbol} note={priceProvider + " · " + formatInteger(bars.length) + " loaded sessions"} />
-                <Metric label={t("Last close")} value={last ? price(last.close) : "—"} note={last?.session_date ?? "No trading sessions"} />
+                <Metric label={t("Last close")} value={last ? price(last.close) : "—"} note={last?.session_date ?? t("No trading sessions")} />
                 <Metric label={t("Daily change")} value={closeChange === null ? "—" : (closeChange >= 0 ? "+" : "") + price(String(closeChange))} note="Compared with prior loaded session" />
                 <Metric label={t("Loaded observations")} value={formatInteger(bars.length)} note={series.has_more ? "Bounded result · more stored" : "Available stored data"} />
               </div>
@@ -424,10 +424,10 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                   <p>{t("Provider:")} <span className="text-foreground">{series.provider}</span></p>
                   <p>{t("Frequency:")} <span className="text-foreground">{series.frequency}</span></p>
                   <p>{t("Data kind:")} <span className="text-foreground">{series.data_kind}</span></p>
-                  <p>{t("Retrieved at:")} <span className="text-foreground">{series.retrieved_at ?? "Unavailable"}</span></p>
-                  <p>{t("Provider last refreshed:")} <span className="text-foreground">{series.provider_last_refreshed ?? "Unavailable"}</span></p>
+                  <p>{t("Retrieved at:")} <span className="text-foreground">{series.retrieved_at ?? t("Unavailable")}</span></p>
+                  <p>{t("Provider last refreshed:")} <span className="text-foreground">{series.provider_last_refreshed ?? t("Unavailable")}</span></p>
                   <p>{t("Stored sessions:")} <span className="text-foreground">{formatInteger(bars.length) + (series.has_more ? " (partial)" : "")}</span></p>
-                  <p className="sm:col-span-2 break-all">{t("Source URL:")} <span className="text-foreground">{series.source_url ?? "Unavailable"}</span></p>
+                  <p className="sm:col-span-2 break-all">{t("Source URL:")} <span className="text-foreground">{series.source_url ?? t("Unavailable")}</span></p>
                 </CardContent>
               </Card>
             </>
