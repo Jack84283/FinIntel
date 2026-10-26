@@ -3,8 +3,6 @@
 Never initiated by an ordinary Data Validation scan. Reference requests require
 an operator action and a locally configured provider token.
 """
-from finintel.settings.credentials import get_secret
-
 
 import sqlite3
 from datetime import date
@@ -14,6 +12,7 @@ from urllib.parse import quote
 
 import httpx
 
+from finintel.settings.credentials import get_secret
 from finintel.market_data.provider import SYMBOL_PATTERN, ProviderError
 
 
