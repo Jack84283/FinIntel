@@ -3,10 +3,12 @@
  * Development launcher for FinIntel. Owns the Python backend and Tauri frontend.
  * Production installers continue to use the packaged, Tauri-managed sidecar.
  */
-import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { spawn, execFileSync } from "node:child_process";
+import { randomBytes, createHash } from "node:crypto";
+import { existsSync, openSync, closeSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { connect } from "node:net";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -22,7 +24,86 @@ if (existsSync(join(cargoBin, isWin ? "cargo.exe" : "cargo"))) {
 }
 // Shared only with the launched Python and native Tauri processes, never Vite/client code.
 process.env.FININTEL_PROCESS_TOKEN = randomBytes(32).toString("hex");
+const lockPath = join(tmpdir(), "finintel-dev-" + createHash("sha256").update(root).digest("hex").slice(0, 24) + ".lock");
+const instanceId = randomBytes(16).toString("hex");
+let ownLock = false;
 const children = new Set();
+
+function alive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error?.code === "EPERM"; }
+}
+
+// PID reuse or an unrelated listener must never lead to an unrelated process being killed.
+function matchesLauncher(pid) {
+  try {
+    const command = isWin
+      ? execFileSync("powershell.exe", ["-NoProfile", "-Command", "(Get-CimInstance Win32_Process -Filter 'ProcessId = " + pid + "').CommandLine"], { encoding: "utf8", timeout: 3000 })
+      : execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8", timeout: 3000 });
+    return command.includes("dev-desktop.mjs") && command.includes("node");
+  } catch { return false; }
+}
+
+async function portFree(port) {
+  return new Promise(resolveFree => {
+    const socket = connect({ host: "127.0.0.1", port });
+    socket.setTimeout(450);
+    socket.once("connect", () => { socket.destroy(); resolveFree(false); });
+    socket.once("timeout", () => { socket.destroy(); resolveFree(false); });
+    socket.once("error", error => { socket.destroy(); resolveFree(error.code === "ECONNREFUSED"); });
+  });
+}
+
+async function waitForPorts() {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    if (await portFree(8765) && await portFree(1420)) return;
+    await sleep(200);
+  }
+  throw new Error("FinIntel ports 8765/1420 are still in use. Refusing to terminate unrelated processes.");
+}
+
+function lockOwner() {
+  try { return JSON.parse(readFileSync(lockPath, "utf8")); }
+  catch (error) { if (error?.code === "ENOENT") return null; throw new Error("Cannot inspect FinIntel launcher lock."); }
+}
+
+async function acquireLock() {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const fd = openSync(lockPath, "wx", 0o600);
+      try { writeFileSync(fd, JSON.stringify({ pid: process.pid, id: instanceId, root })); }
+      finally { closeSync(fd); }
+      ownLock = true;
+      await waitForPorts();
+      return;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+    const owner = lockOwner();
+    if (!owner) continue;
+    if (owner.root !== root) throw new Error("Launcher lock belongs to a different checkout.");
+    if (alive(owner.pid)) {
+      if (!matchesLauncher(owner.pid)) throw new Error("FinIntel launcher PID cannot be verified; refusing to stop it.");
+      console.log("Stopping previous FinIntel development instance (PID " + owner.pid + ")...");
+      process.kill(owner.pid, "SIGTERM");
+      for (let i = 0; i < 50 && alive(owner.pid); i++) await sleep(200);
+      if (alive(owner.pid)) throw new Error("Previous FinIntel instance did not stop cleanly.");
+    }
+    // Only remove the same lock observed above; do not unlink a new owner's lock.
+    const current = lockOwner();
+    if (current?.id === owner.id && current?.pid === owner.pid) unlinkSync(lockPath);
+  }
+  throw new Error("Could not acquire FinIntel development launcher ownership.");
+}
+
+function releaseLock() {
+  if (!ownLock) return;
+  try { if (lockOwner()?.id === instanceId) unlinkSync(lockPath); }
+  catch { /* avoid masking shutdown */ }
+  ownLock = false;
+}
+
 let stopping = false;
 
 function child(command, args) {
@@ -46,6 +127,7 @@ function stop(code = 0) {
       }
     }
   }
+  releaseLock();
   process.exitCode = code;
 }
 process.on("SIGINT", () => stop(0));
@@ -53,13 +135,7 @@ process.on("SIGTERM", () => stop(0));
 
 const health = "http://127.0.0.1:8765/api/v1/health";
 try {
-  // Do not start Tauri against an unrelated backend that already owns the port.
-  try {
-    const response = await fetch(health, { signal: AbortSignal.timeout(900) });
-    if (response.status) throw new Error("Port 8765 already has a listener. Stop it before using the combined launcher.");
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Port 8765")) throw error;
-  }
+  await acquireLock();
 
   const backend = child(python, ["-m", "uvicorn", "finintel.main:app", "--host", "127.0.0.1", "--port", "8765"]);
   backend.on("exit", (code) => { if (!stopping) stop(code || 1); });
