@@ -108,6 +108,8 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Historical download completed.": "历史数据下载完成。",
+  "Historical download failed. See details below.": "历史数据下载失败，请查看下方详情。",
   "Notifications": "通知",
   "Dismiss notification": "关闭通知",
   "Credential operation failed. See details below.": "凭据操作失败，请查看下方详情。",
