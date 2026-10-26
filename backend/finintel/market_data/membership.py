@@ -11,7 +11,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from finintel.market_data.provider import SYMBOL_PATTERN
-from finintel.storage.db import _read_connection, _write_connection, database_path
+from finintel.storage.db import StorageError, _read_connection, _write_connection, database_path
 
 INDEX_NAMES = {
     "SP500": "S&P 500",
@@ -97,6 +97,10 @@ def load_membership(
                 ((index_code, symbol, effective_date, source) for symbol in sorted(tickers)),
             )
         return len(tickers)
+    except sqlite3.IntegrityError as exc:
+        raise ValueError("Index import violates a local database constraint; check symbols and catalog types") from exc
+    except sqlite3.Error as exc:
+        raise StorageError("Index import failed while writing the local database; no complete snapshot was saved") from exc
     finally:
         conn.close()
 
