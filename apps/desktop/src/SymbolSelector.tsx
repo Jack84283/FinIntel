@@ -60,7 +60,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
           if (ignore) return;
           setResults([]);
           setSearching(false);
-          setError(reason instanceof Error ? reason.message : "Local symbol search unavailable");
+          setError(reason instanceof Error ? reason.message : t("Local symbol search unavailable"));
         });
     }, 180);
     return () => {
