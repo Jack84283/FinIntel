@@ -470,6 +470,30 @@ async fn credential_delete(
     Ok(serde_json::json!({"configured": false}))
 }
 
+#[tauri::command]
+async fn credential_test(provider: String) -> Result<serde_json::Value, String> {
+    if !matches!(provider.as_str(), "alpha_vantage" | "alpaca_sip" | "tiingo" | "equibles")
+        || backend_token().is_empty()
+    {
+        return Err("Invalid provider connection test request.".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(16))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize connection test client.".to_string())?;
+    let response = client
+        .post(format!("{}/api/v1/settings/providers/{provider}/test", backend_base()))
+        .header("x-finintel-process-token", backend_token())
+        .send().await
+        .map_err(|_| "Local connection test service unavailable.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Provider test could not run (HTTP {}).", response.status()));
+    }
+    response.json::<serde_json::Value>().await
+        .map_err(|_| "Provider connection test returned malformed JSON.".to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -512,6 +536,7 @@ fn main() {
             credential_status,
             credential_set,
             credential_delete,
+            credential_test,
             validation_status,
             validation_start,
             validation_corporate_reference,
