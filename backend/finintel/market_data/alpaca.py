@@ -3,8 +3,6 @@
 Credentials are supplied only through backend environment variables and
 headers. No provider response, key, or secret is logged or saved in SQLite.
 """
-from finintel.settings.credentials import get_secret
-
 
 import json
 import os
@@ -17,6 +15,7 @@ from urllib.parse import urlencode
 import httpx
 from pydantic import ValidationError
 
+from finintel.settings.credentials import get_secret
 from finintel.market_data.models import DailyOHLCV, HistoricalBatch
 from finintel.market_data.provider import (
     SYMBOL_PATTERN,
