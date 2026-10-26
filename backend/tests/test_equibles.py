@@ -70,5 +70,5 @@ def test_unlinked_holding_never_writes(monkeypatch):
     monkeypatch.setattr(
         equibles, "load_membership", lambda *a, **k: pytest.fail("wrote unlinked data")
     )
-    with pytest.raises(equibles.EquiblesError, match="unlinked"):
+    with pytest.raises(equibles.EquiblesError, match="lack linked tickers"):
         equibles.acquire_index("SP500")
