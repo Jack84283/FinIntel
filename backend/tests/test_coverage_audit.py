@@ -116,9 +116,7 @@ def test_pre_ipo_and_post_delisting_dates_not_counted_as_gaps(tmp_path):
         db,
         through=date(2026, 10, 23),
         years=1,
-        listing_evidence=listing(
-            "NEW", "2026-10-20", "2026-10-23", delisted="2026-10-20"
-        ),
+        listing_evidence=listing("NEW", "2026-10-20", "2026-10-23", delisted="2026-10-20"),
     )
     assert result["series"][0]["eligible_sessions"] == 1
     assert result["series"][0]["eligible_gap_candidates"] == 0
@@ -154,9 +152,7 @@ def test_empty_series_with_stale_listing_evidence(tmp_path):
         db,
         through=date(2026, 10, 23),
         years=1,
-        listing_evidence=listing(
-            "AAPL", "2026-10-21", "2026-10-23", verified="2026-10-22"
-        ),
+        listing_evidence=listing("AAPL", "2026-10-21", "2026-10-23", verified="2026-10-22"),
     )
     assert result["series"][0]["observed_sessions"] == 0
     assert result["series"][0]["status"] == "stale_listing_evidence"
@@ -196,9 +192,7 @@ def test_sourced_calendar_override_when_catalog_exchange_missing(tmp_path):
     )
     evidence = listing("ABC", "2026-10-23", "2026-10-23")
     evidence["ABC"]["calendar"] = "XNAS"
-    result = audit_coverage(
-        db, through=date(2026, 10, 23), years=1, listing_evidence=evidence
-    )
+    result = audit_coverage(db, through=date(2026, 10, 23), years=1, listing_evidence=evidence)
     assert result["series"][0]["status"] == "calendar_coverage_present"
 
 
