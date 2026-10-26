@@ -55,6 +55,42 @@ async function portFree(port) {
   });
 }
 
+// Migrate old development sessions launched before the lock existed.
+// Only stop listeners whose command line is a FinIntel backend or Vite process
+// and whose working directory is within this exact checkout.
+function legacyListenerPids(port) {
+  if (isWin) return []; // Windows legacy ownership cannot be verified safely.
+  try {
+    return execFileSync("lsof", ["-nP", "-t", "-iTCP:" + port, "-sTCP:LISTEN"], { encoding: "utf8", timeout: 3000 })
+      .trim().split(/\\s+/).map(Number).filter(pid => Number.isSafeInteger(pid) && pid > 0);
+  } catch { return []; }
+}
+
+function verifiedLegacy(pid, port) {
+  if (isWin) return false;
+  try {
+    const command = execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8", timeout: 3000 }).trim();
+    const cwd = execFileSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], { encoding: "utf8", timeout: 3000 })
+      .split("\\n").find(line => line.startsWith("n"))?.slice(1);
+    const inCheckout = cwd === root || cwd?.startsWith(root + "/");
+    const expected = port === 8765
+      ? /(?:uvicorn.*finintel\\.main:app|finintel\\.desktop_entry)/.test(command)
+      : /(?:vite|tauri)/.test(command) && command.includes("FinIntel");
+    return Boolean(inCheckout && expected);
+  } catch { return false; }
+}
+
+async function stopLegacyListeners() {
+  if (isWin) return;
+  for (const port of [8765, 1420]) {
+    for (const pid of legacyListenerPids(port)) {
+      if (!verifiedLegacy(pid, port)) continue;
+      console.log("Stopping previous FinIntel process on port " + port + " (PID " + pid + ")...");
+      try { process.kill(pid, "SIGTERM"); } catch (error) { if (error?.code !== "ESRCH") throw error; }
+    }
+  }
+}
+
 async function waitForPorts() {
   for (let attempt = 0; attempt < 50; attempt++) {
     if (await portFree(8765) && await portFree(1420)) return;
@@ -75,6 +111,7 @@ async function acquireLock() {
       try { writeFileSync(fd, JSON.stringify({ pid: process.pid, id: instanceId, root })); }
       finally { closeSync(fd); }
       ownLock = true;
+      await stopLegacyListeners();
       await waitForPorts();
       return;
     } catch (error) {
