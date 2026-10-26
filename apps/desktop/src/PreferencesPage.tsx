@@ -1,10 +1,11 @@
 import { PageHeader } from "./PageHeader";
+import { translate } from "./localization";
 import { useState } from "react";
 import { Activity, ArrowUpRight, Check, Database, HardDrive, LockKeyhole, Monitor, Moon, RefreshCw, ShieldCheck, Sun } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { readWorkspacePreferences, saveWorkspacePreferences, type ColorTheme, type WorkspacePreferences } from "./workspace-preferences";
+import { readWorkspacePreferences, saveWorkspacePreferences, type ColorTheme, type AppLanguage, type WorkspacePreferences } from "./workspace-preferences";
 
 type BackendState =
   | { kind: "loading" }
@@ -15,6 +16,7 @@ interface PreferencesPageProps {
   backend: BackendState;
   onRecheckBackend: () => void;
   onOpenAcquisition: () => void;
+  onLanguageChange: (language: AppLanguage) => void;
 }
 
 function SettingRow({ title, detail, children }: {
@@ -53,38 +55,47 @@ function ThemeOption({ theme, selected, onSelect, label, icon: Icon }: {
   );
 }
 
-export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }: PreferencesPageProps) {
+export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition, onLanguageChange }: PreferencesPageProps) {
   const [preferences, setPreferences] = useState<WorkspacePreferences>(readWorkspacePreferences);
 
   const updatePreferences = (changes: Partial<WorkspacePreferences>) => {
     const next = { ...preferences, ...changes };
     setPreferences(next);
     saveWorkspacePreferences(next);
+    if (changes.language) onLanguageChange(changes.language);
   };
+
+  const t = (key: Parameters<typeof translate>[1]) => translate(preferences.language, key);
 
   return (
     <section aria-labelledby="preferences-title" className="min-w-0 space-y-2">
-      <PageHeader id="preferences-title" breadcrumb="FinIntel / Preferences" title="Preferences" subtitle="Personalize the workspace and review local data settings. Changes to appearance stay on this device." actions={<Badge variant="outline" className="shrink-0">Device-local</Badge>} />
+      <PageHeader id="preferences-title" breadcrumb="FinIntel / Preferences" title={t("Preferences")} subtitle="Personalize the workspace and review local data settings. Changes to appearance stay on this device." actions={<Badge variant="outline" className="shrink-0">{t("Device-local")}</Badge>} />
 
       <div className="grid min-w-0 items-start gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
         <div className="flex min-w-0 flex-col gap-2">
           <Card className="min-w-0">
             <CardHeader className="min-w-0 gap-y-2">
-              <CardTitle>Appearance</CardTitle>
+              <CardTitle>{t("Appearance")}</CardTitle>
               <CardDescription>Keep the interface readable and comfortable at any window size.</CardDescription>
             </CardHeader>
             <CardContent className="min-w-0">
               <div className="border-b border-border pb-6">
-                <p className="mb-1 text-sm font-medium">Color theme</p>
+                <p className="mb-1 text-sm font-medium">{t("Color theme")}</p>
                 <p className="mb-4 text-xs leading-5 text-muted-foreground">Switch between high-contrast dark and light surfaces.</p>
                 <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-                  <ThemeOption theme="dark" label="Dark" icon={Moon} selected={preferences.theme === "dark"} onSelect={(theme) => updatePreferences({ theme })} />
-                  <ThemeOption theme="light" label="Light" icon={Sun} selected={preferences.theme === "light"} onSelect={(theme) => updatePreferences({ theme })} />
+                  <ThemeOption theme="dark" label={t("Dark")} icon={Moon} selected={preferences.theme === "dark"} onSelect={(theme) => updatePreferences({ theme })} />
+                  <ThemeOption theme="light" label={t("Light")} icon={Sun} selected={preferences.theme === "light"} onSelect={(theme) => updatePreferences({ theme })} />
                 </div>
               </div>
-              <SettingRow title="Reduce motion" detail="Minimize interface animations and transitions. Your operating system's reduced-motion preference is also respected.">
+              <SettingRow title={t("Language")} detail={t("Select the interface language.")}>
+                <div role="group" aria-label={t("Language")} className="flex gap-2">
+                  <Button type="button" size="sm" variant={preferences.language === "en" ? "secondary" : "outline"} aria-pressed={preferences.language === "en"} onClick={() => updatePreferences({ language: "en" })}>English</Button>
+                  <Button type="button" size="sm" variant={preferences.language === "zh-CN" ? "secondary" : "outline"} aria-pressed={preferences.language === "zh-CN"} onClick={() => updatePreferences({ language: "zh-CN" })}>简体中文</Button>
+                </div>
+              </SettingRow>
+              <SettingRow title={t("Reduce motion")} detail="Minimize interface animations and transitions. Your operating system's reduced-motion preference is also respected.">
                 <Button type="button" size="sm" variant={preferences.reduceMotion ? "secondary" : "outline"} aria-pressed={preferences.reduceMotion} onClick={() => updatePreferences({ reduceMotion: !preferences.reduceMotion })}>
-                  {preferences.reduceMotion ? "Enabled" : "Disabled"}
+                  {preferences.reduceMotion ? t("Enabled") : t("Disabled")}
                 </Button>
               </SettingRow>
             </CardContent>
@@ -92,7 +103,7 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
 
           <Card className="min-w-0">
             <CardHeader className="min-w-0 gap-y-2">
-              <CardTitle>Historical market data</CardTitle>
+              <CardTitle>{t("Historical market data")}</CardTitle>
               <CardDescription>Review acquisition defaults without interrupting a running backfill.</CardDescription>
             </CardHeader>
             <CardContent className="min-w-0 divide-y divide-border">
@@ -114,7 +125,7 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
         <aside className="flex min-w-0 flex-col gap-2" aria-label="Workspace information">
           <Card className="min-w-0">
             <CardHeader className="flex min-w-0 flex-col items-start gap-2">
-              <div className="flex min-w-0 items-center gap-2"><Activity aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">Local backend</CardTitle></div>
+              <div className="flex min-w-0 items-center gap-2"><Activity aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">{t("Local backend")}</CardTitle></div>
               <CardDescription>Connection to FinIntel's local Python service.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -131,7 +142,7 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }
           </Card>
           <Card className="min-w-0">
             <CardHeader className="flex min-w-0 flex-col items-start gap-2">
-              <div className="flex min-w-0 items-center gap-2"><LockKeyhole aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">Privacy & storage</CardTitle></div>
+              <div className="flex min-w-0 items-center gap-2"><LockKeyhole aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">{t("Privacy & storage")}</CardTitle></div>
               <CardDescription>Built for a private, local-first financial workspace.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
