@@ -367,7 +367,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                 <CardHeader>
                   <CardTitle><span className="flex items-center gap-2"><BarChart3 aria-hidden="true" className="size-5" /> {t("OHLCV history")}</span></CardTitle>
                   <CardAction><Badge variant="outline">{series.price_adjustment.replaceAll("_", " ")}</Badge></CardAction>
-                  <CardDescription className="col-span-2 mt-2">{first && last ? first.session_date + " – " + last.session_date : "No sessions in selected range"} · historical end-of-day data</CardDescription>
+                  <CardDescription className="col-span-2 mt-2">{first && last ? first.session_date + " – " + last.session_date : t("No sessions in selected range")} · {t("historical end-of-day data")}</CardDescription>
                 </CardHeader>
                 <CardContent><MarketCharts bars={bars} period={period} /></CardContent>
               </Card>
