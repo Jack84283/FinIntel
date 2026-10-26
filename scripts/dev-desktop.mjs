@@ -5,6 +5,7 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { accessSync, constants } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -14,6 +15,11 @@ const isWin = process.platform === "win32";
 const venvPython = join(root, ".venv", isWin ? "Scripts" : "bin", isWin ? "python.exe" : "python");
 const python = process.env.FININTEL_PYTHON || (existsSync(venvPython) ? venvPython : isWin ? "python" : "python3");
 const npm = isWin ? "npm.cmd" : "npm";
+const cargoHome = process.env.CARGO_HOME || join(process.env.HOME || process.env.USERPROFILE || "", ".cargo");
+const cargoBin = join(cargoHome, "bin");
+if (existsSync(join(cargoBin, isWin ? "cargo.exe" : "cargo"))) {
+  process.env.PATH = cargoBin + (isWin ? ";" : ":") + (process.env.PATH || "");
+}
 const children = new Set();
 let stopping = false;
 
