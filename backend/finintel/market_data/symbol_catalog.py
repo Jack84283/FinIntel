@@ -3,8 +3,6 @@
 Only explicit user actions contact the listing-status provider. The starter
 catalog is deliberately small and is not a complete or real-time listing.
 """
-from finintel.settings.credentials import get_secret
-
 
 import csv
 import io
@@ -14,6 +12,7 @@ from datetime import UTC, datetime
 
 import httpx
 
+from finintel.settings.credentials import get_secret
 from finintel.market_data.provider import (
     API_ENDPOINT,
     SYMBOL_PATTERN,
