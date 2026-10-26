@@ -138,7 +138,7 @@ export function AcquisitionCard({
             </div>
             <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="grid min-w-0 gap-2 text-xs text-muted-foreground">
-            Data source
+            {t("Data source")}
             <select
               aria-label={t("Historical market data provider")}
               value={provider}
@@ -198,7 +198,7 @@ export function AcquisitionCard({
             disabled={pending || status === null && !statusError}
           >
             <RefreshCw aria-hidden="true" />
-            Recheck provider
+            {t("Recheck provider")}
           </Button>
           </div>
         </form>
@@ -209,7 +209,7 @@ export function AcquisitionCard({
         )}
         {!symbol.trim() && (
           <p role="status" className="text-xs text-muted-foreground">
-            Select a stock or ETF symbol above, or enter a ticker manually.
+            {t("Select a stock or ETF symbol above, or enter a ticker manually.")}
           </p>
         )}
         {configured && (
