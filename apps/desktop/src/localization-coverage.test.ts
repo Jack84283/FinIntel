@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { translate } from "./localization";
 
 const screens = [
   "App.tsx", "AcquisitionCard.tsx", "ActionHistoryPage.tsx", "DataAcquisitionPage.tsx",
@@ -23,5 +24,31 @@ describe("localization catalog coverage", () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+});
+
+describe("Chinese translations on commonly overlooked routes", () => {
+  it("translates chart, search, market, acquisition, and toast text", () => {
+    const keys = [
+      "Recheck connection", "No observations in this date range.",
+      "Historical", "candlestick chart showing", "intervals",
+      "No sessions in selected range", "historical end-of-day data",
+      "Local symbol search unavailable", "Stored",
+      "instruments are reference entries only. Select a Stock or ETF to fetch daily prices from",
+      "Credential operation failed. See details below.",
+      "Connection test failed. See details below.",
+    ];
+    for (const key of keys) {
+      expect(translate("zh-CN", key), key).not.toBe(key);
+    }
+  });
+
+  it("does not leave literal button and status strings on key routes", () => {
+    for (const screen of ["App.tsx", "DataAcquisitionPage.tsx", "market-chart.tsx"]) {
+      const source = readFileSync(join(import.meta.dirname, screen), "utf8");
+      expect(source).not.toMatch(/>\\s*Recheck connection\\s*</);
+      expect(source).not.toMatch(/>\\s*No observations in this date range\\.\\s*</);
+      expect(source).not.toMatch(/>\\s*Stored\\s*\\{/);
+    }
   });
 });
