@@ -3,9 +3,10 @@
 No live market request in tests. A user-provided key is required for live use.
 The request URL contains the key; the public source URL and errors never do.
 """
+from finintel.settings.credentials import get_secret
+
 
 import json
-import os
 import re
 import time
 from collections.abc import Callable
@@ -163,7 +164,7 @@ class AlphaVantageDailyProvider:
         max_attempts: int = 3,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
-        self._api_key = (api_key or os.environ.get("FININTEL_ALPHA_VANTAGE_API_KEY", "")).strip()
+        self._api_key = (api_key or get_secret("alpha_vantage", "api_key")).strip()
         if not self._api_key:
             raise ProviderError(
                 "Set FININTEL_ALPHA_VANTAGE_API_KEY in the local environment "
