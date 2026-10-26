@@ -108,6 +108,19 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Data source": "数据源",
+  "Recheck provider": "重新检查数据源",
+  "Select a stock or ETF symbol above, or enter a ticker manually.": "请在上方选择股票或 ETF，或手动输入证券代码。",
+  "Open Markets": "打开市场",
+  "View in Markets": "在市场页面查看",
+  "Refresh": "刷新",
+  "Latest available": "最新可用数据",
+  "Membership reflects each index’s latest stored snapshot on or before the selected date. No membership is inferred from stock prices or ETF holdings.": "指数成员关系以所选日期当天或之前保存的最新快照为准，不根据股价或 ETF 持仓推断。",
+  "Reload local data": "重新加载本地数据",
+  "Display period": "显示周期",
+  "Display is limited to 4,000 latest records. Use date filters to examine older stored sessions.": "最多显示最近 4,000 条记录。请使用日期筛选查看更早的本地数据。",
+  "Instrument": "证券",
+
   "Index": "指数",
   "Mutual Fund": "共同基金",
   "instruments are reference entries only. Select a Stock or ETF to fetch daily prices from": "证券只是参考目录条目。请选择股票或 ETF，从下列数据源获取每日价格：",
