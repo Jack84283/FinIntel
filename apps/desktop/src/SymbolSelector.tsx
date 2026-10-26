@@ -1,3 +1,4 @@
+import { useLocale } from "./localization";
 import { useEffect, useId, useState } from "react";
 import { Check, RefreshCw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ const MAX_SUGGESTIONS = 8;
 
 /** Debounced local-only typeahead; never loads the complete symbol directory. */
 export function SymbolSelector({ value, onChange, keyConfigured, disabled }: SymbolSelectorProps) {
+  const { t } = useLocale();
   const [query, setQuery] = useState(value);
   const [kind, setKind] = useState<AssetFilter>("All");
   const [results, setResults] = useState<CatalogSymbol[]>([]);
@@ -122,7 +124,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
             aria-expanded={showSuggestions}
             aria-activedescendant={showSuggestions && active >= 0 ? listId + "-option-" + active : undefined}
             type="search"
-            placeholder="Search ticker or company, e.g. AAPL or Apple"
+            placeholder={t("Search ticker or company, e.g. AAPL or Apple")}
             autoComplete="off"
             spellCheck={false}
             className="h-10 w-full min-w-0 rounded-md border border-input bg-muted pl-9 pr-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -157,11 +159,11 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
             <div
               id={listId + "-list"}
               role="listbox"
-              aria-label="Matching instruments"
+              aria-label={t("Matching instruments")}
               className="absolute inset-x-0 top-full z-30 mt-1 max-h-72 overflow-y-auto rounded-md border border-border bg-card p-1 shadow-lg"
             >
               {searching ? (
-                <p className="px-3 py-2 text-xs text-muted-foreground">Searching local instruments…</p>
+                <p className="px-3 py-2 text-xs text-muted-foreground">{t("Searching local instruments…")}</p>
               ) : results.length ? (
                 results.map((item, index) => (
                   <button
@@ -189,15 +191,15 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
           )}
         </div>
         <select
-          aria-label="Filter by asset type"
+          aria-label={t("Filter by asset type")}
           value={kind}
           onChange={(event) => setKind(event.target.value as AssetFilter)}
           className="h-10 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           disabled={disabled || syncing}
         >
-          <option value="All">All stocks and ETFs</option>
-          <option value="Stock">Stocks</option>
-          <option value="ETF">ETFs</option>
+          <option value="All">{t("All stocks and ETFs")}</option>
+          <option value="Stock">{t("Stocks")}</option>
+          <option value="ETF">{t("ETFs")}</option>
         </select>
       </div>
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
@@ -210,12 +212,12 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
         </Button>
       </div>
       {catalogSource === "starter" && (
-        <p className="text-[11px] text-muted-foreground">Sync adds active US stocks and ETFs. Index and mutual fund entries require separate price adapters.</p>
+        <p className="text-[11px] text-muted-foreground">{t("Sync adds active US stocks and ETFs. Index and mutual fund entries require separate price adapters.")}</p>
       )}
       {notice && <p role="status" className="text-xs text-positive">{notice}</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       {syncError && <p role="alert" className="text-xs text-destructive">Symbol sync failed: {syncError}. Existing directory retained.</p>}
-      {!keyConfigured && <p className="text-[11px] text-muted-foreground">Sync requires an Alpha Vantage backend key. Existing local symbols remain searchable.</p>}
+      {!keyConfigured && <p className="text-[11px] text-muted-foreground">{t("Sync requires an Alpha Vantage backend key. Existing local symbols remain searchable.")}</p>}
     </div>
   );
 }
