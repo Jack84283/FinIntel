@@ -295,6 +295,61 @@ async fn validation_corporate_reference(symbol: String) -> Result<serde_json::Va
     Ok(payload)
 }
 
+
+fn valid_index(code: &str) -> bool {
+    matches!(code, "SP500" | "DJIA" | "NDX" | "RUT")
+}
+
+#[tauri::command]
+async fn index_catalog(as_of: Option<String>) -> Result<serde_json::Value, String> {
+    if as_of.as_deref().is_some_and(|date| !valid_date(date)) {
+        return Err("Invalid as-of date.".to_string());
+    }
+    let mut params = vec![];
+    if let Some(date) = as_of { params.push(("as_of", date)); }
+    read_backend("/api/v1/market-data/indexes", &params).await
+}
+
+#[tauri::command]
+async fn index_constituents(
+    code: String,
+    as_of: Option<String>,
+    q: String,
+    limit: u8,
+    offset: u32,
+) -> Result<serde_json::Value, String> {
+    if !valid_index(&code) || q.len() > 80 || q.chars().any(|c| c.is_control()) ||
+       limit == 0 || limit > 100 || as_of.as_deref().is_some_and(|d| !valid_date(d)) {
+        return Err("Invalid index query.".to_string());
+    }
+    let mut params = vec![
+        ("q", q),
+        ("limit", limit.to_string()),
+        ("offset", offset.to_string()),
+    ];
+    if let Some(date) = as_of { params.push(("as_of", date)); }
+    read_backend(
+        &format!("/api/v1/market-data/indexes/{code}/constituents"),
+        &params,
+    ).await
+}
+
+#[tauri::command]
+async fn index_stock_memberships(
+    symbol: String,
+    as_of: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if !valid_symbol(&symbol) || as_of.as_deref().is_some_and(|d| !valid_date(d)) {
+        return Err("Invalid stock membership query.".to_string());
+    }
+    let mut params = vec![];
+    if let Some(date) = as_of { params.push(("as_of", date)); }
+    read_backend(
+        &format!("/api/v1/market-data/indexes/symbol/{}/memberships", symbol.to_ascii_uppercase()),
+        &params,
+    ).await
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -310,7 +365,10 @@ fn main() {
             market_acquisition_status,
             market_acquire_daily,
             market_symbols,
-            market_sync_symbols
+            market_sync_symbols,
+            index_catalog,
+            index_constituents,
+            index_stock_memberships
         ])
         .run(tauri::generate_context!())
         .expect("failed to run FinIntel");
