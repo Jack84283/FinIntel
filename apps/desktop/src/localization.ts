@@ -108,6 +108,7 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Cannot fetch market data. Review the requirement below.": "无法获取市场数据，请查看下方提示。",
   "Constituents": "成分股",
   "ETF holdings proxy": "ETF 持仓代理数据",
   "Validation started.": "校验已启动。",
