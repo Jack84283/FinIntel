@@ -123,7 +123,7 @@ export function DataValidationPage() {
       </Card>
       <Card>
         <CardHeader><CardTitle>{t("Latest validation")}</CardTitle>
-          <CardDescription>Status: {job.status} {job.stage ? "· " + job.stage : ""}</CardDescription>
+          <CardDescription>{t("Status")}: {t(job.status)} {job.stage ? "· " + t(job.stage) : ""}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {job.started_at && <p className="text-xs text-muted-foreground">{t("Started:")} {new Date(job.started_at).toLocaleString(language)}</p>}
