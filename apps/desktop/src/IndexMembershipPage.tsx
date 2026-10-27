@@ -1,5 +1,6 @@
 import { PageHeader } from "./PageHeader";
 import { useLocale } from "./localization";
+import { useNotify } from "./notifications";
 import { MarketDatePicker } from "./components/MarketDatePicker";
 import { searchSymbols, type CatalogSymbol } from "./symbol-catalog-api";
 import { useEffect, useState, type FormEvent } from "react";
@@ -18,6 +19,7 @@ const FETCH_SIZE = 100;
 /** Dated evidence-backed equity index membership; does not infer from ETF holdings. */
 export function IndexMembershipPage() {
   const { t } = useLocale();
+  const notify = useNotify();
   const [selected, setSelected] = useState<IndexCode>("SP500");
   const [asOf, setAsOf] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -113,7 +115,7 @@ export function IndexMembershipPage() {
       stockOptions.find(item => item.name.toLowerCase().startsWith(stock.trim().toLowerCase()));
     const symbol = chosen?.symbol ?? ticker;
     if (!/^[A-Z0-9][A-Z0-9.-]{0,14}$/.test(symbol)) {
-      setStockError("Select a company from the suggestions or enter a valid ticker.");
+      setStockError(t("Select a company from the suggestions or enter a valid ticker."));
       return;
     }
     setStock(symbol);
@@ -125,6 +127,7 @@ export function IndexMembershipPage() {
       setStockResult(await fetchStockIndexes(symbol, asOf));
     } catch (reason: unknown) {
       setStockError(reason instanceof Error ? reason.message : String(reason));
+      notify(t("Index lookup failed. See details below."), "error");
     } finally {
       setStockBusy(false);
     }
@@ -141,9 +144,11 @@ export function IndexMembershipPage() {
         result.snapshot_as_of + (result.complete ? "." :
         ". INCOMPLETE: " + result.unlinked_count.toLocaleString() +
         " holdings have no linked ticker and are excluded. Do not treat this as a full index."));
+      notify(t(result.complete ? "Index constituents imported." : "Index import incomplete. Review details below."), result.complete ? "success" : "warning");
       setRevision(value => value + 1);
     } catch (reason) {
       setAcquireError(reason instanceof Error ? reason.message : String(reason));
+      notify(t("Index import failed. See details below."), "error");
     } finally {
       setAcquiring(false);
     }
