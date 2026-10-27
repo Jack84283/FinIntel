@@ -305,8 +305,6 @@ const additionalChinese: Readonly<Record<string, string>> = {
   "Snapshot ": "快照 ",
   "Effective snapshot: ": "有效快照：",
   "Start date must not exceed end date.": "开始日期不得晚于结束日期。",
-  "Bounded result · more stored": "显示有限结果 · 本地还有更多数据",
-  "Available stored data": "可用的本地数据",
   "Session": "交易日",
   "Close": "收盘价",
   "Volume": "成交量",
