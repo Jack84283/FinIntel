@@ -134,7 +134,7 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition, 
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${backend.kind === "connected" ? "bg-positive" : backend.kind === "loading" ? "bg-warning" : "bg-destructive"}`} />
                 <span role="status" aria-live="polite" className="min-w-0 break-words text-sm font-medium">
-                  {backend.kind === "connected" ? `Connected · v${backend.version}` : backend.kind === "loading" ? t("Checking connection…") : t("Not connected")}
+                  {backend.kind === "connected" ? `${t("Connected")} · v${backend.version}` : backend.kind === "loading" ? t("Checking connection…") : t("Not connected")}
                 </span>
               </div>
               <Button type="button" variant="outline" size="sm" disabled={backend.kind === "loading"} onClick={onRecheckBackend}>
