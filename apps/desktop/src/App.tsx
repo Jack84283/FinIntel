@@ -152,7 +152,7 @@ export default function App() {
                   </div>
                   {connection.kind === "loading"
                     ? <Skeleton aria-label={t("Loading backend connection")} className="h-4 w-48" />
-                    : <p className="text-xs text-muted-foreground">{connection.kind === "connected" ? "finintel-backend v" + connection.health.version : connection.message}</p>}
+                    : <p className="text-xs text-muted-foreground">{connection.kind === "connected" ? t("Backend") + " · finintel-backend v" + connection.health.version : connection.message}</p>}
                   <Button type="button" variant="secondary" size="sm" disabled={connection.kind === "loading"} onClick={() => void checkHealth()}><RefreshCw aria-hidden="true" /> {t("Recheck connection")}</Button>
                 </CardContent>
               </Card>
