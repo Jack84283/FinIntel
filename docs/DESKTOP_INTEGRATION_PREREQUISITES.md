@@ -57,3 +57,12 @@ This is a standing engineering requirement for future FinIntel PRs, not limited 
 - For packaged builds, provider adapters obtain credentials from the OS vault rather than environment variables; environment fallback remains for separate developer CLI/backend workflows. Missing or locked Linux secret services must fail safely.
 - Cross-platform native build script generates the PyInstaller sidecar for each host target; CI attempts macOS, Windows and Ubuntu Rust checks. Actual .app/.dmg, Windows installer and Linux package launch, keyring integration, process exit/restart, and migration must be verified on real installations before marking complete.
 - CI may be queued/cancelled across rapid branch commits. Never interpret committed code as passing tests until the latest GitHub workflow has a successful conclusion.
+
+## Database backup and restore policy (October 27)
+
+- FinIntel does **not** run a daily or periodic database backup job. Opening or leaving the app running does not create scheduled snapshots.
+- Use **Preferences → Database backup & restore → Backup now** to make a manual SQLite snapshot.
+- A verified recovery snapshot is created automatically before an existing database undergoes a schema-version upgrade, or before a user confirms **Merge** or **Replace** restoration.
+- Restore offers **Cancel** (no write), **Merge** (retain newer market observations and add missing data), and **Replace** (overwrite, with a typed confirmation). Backups from the former daily policy, if already created, remain visible and restorable.
+- Backup files reside next to the active database in its private `backups/` directory. There is no scheduled rotation or automatic deletion of user backups or pre-operation recovery points.
+- Validate on a disposable full-size copy before merging: SQLite integrity, price/series/history preservation, interrupted restore behavior, and rollback to the pre-restore snapshot. Migration from a developer database location into an installed app remains separate acceptance work.
