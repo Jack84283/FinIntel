@@ -51,6 +51,7 @@ export function AcquisitionCard({
         if (cancelled) return;
         setStatus(null);
         setStatusError(err instanceof Error ? err.message : t("Local backend unavailable"));
+        notify(t("Provider status could not be loaded. See details below."), "error");
       });
     return () => { cancelled = true; };
   }, [statusTick]);
