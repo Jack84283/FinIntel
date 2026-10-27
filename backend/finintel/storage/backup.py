@@ -141,9 +141,36 @@ def create_backup(*, db: Path | None = None, reason: str = "manual") -> dict[str
 
 
 def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, object]:
+    """Fast, read-only preview. Full integrity checks occur before any restore write.
+
+    Do not run quick_check, foreign_key_check, or COUNT(*) over daily_prices here:
+    those scan tens of millions of historical bars and would block the UI.
+    """
     path = db if db is not None else database_path()
     backup = _resolve(path, identifier)
-    return {**_entry(backup), **_validated(backup, version=False)}
+    try:
+        with sqlite3.connect(backup.resolve().as_uri() + "?mode=ro", uri=True, timeout=10) as conn:
+            version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            tables = {
+                row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            if not {"instruments", "series", "ingestion_runs", "daily_prices"}.issubset(tables):
+                raise StorageError("Backup lacks required market data tables")
+            if not 1 <= version <= SCHEMA_VERSION:
+                raise StorageError("Backup schema is not supported by this FinIntel version")
+            counts = {
+                table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in (
+                    "instruments", "series", "ingestion_runs", "symbol_catalog",
+                    "action_events", "index_memberships",
+                )
+                if table in tables
+            }
+            return {**_entry(backup), "schema_version": version, "counts": counts}
+    except sqlite3.Error as exc:
+        raise StorageError("Could not read SQLite backup metadata") from exc
 
 
 def _merge(staging: Path, source: Path) -> None:
