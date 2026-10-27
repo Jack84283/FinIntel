@@ -107,6 +107,27 @@
   button:not(:disabled), [role="button"]:not([aria-disabled="true"]) { cursor: pointer; }
 }
 
+/* All toast severities have high-contrast surfaces in both themes. */
+.finintel-toast[data-toast-severity="success"] {
+  background-color: #15803d;
+  border-color: #166534;
+  color: #ffffff;
+}
+.finintel-toast[data-toast-severity="warning"] {
+  background-color: #f59e0b;
+  border-color: #d97706;
+  color: #111827;
+}
+:root:not([data-theme="light"]) .finintel-toast[data-toast-severity="success"] {
+  background-color: #166534;
+  border-color: #22c55e;
+  color: #ffffff;
+}
+:root:not([data-theme="light"]) .finintel-toast[data-toast-severity="warning"] {
+  background-color: #fbbf24;
+  border-color: #f59e0b;
+  color: #111827;
+}
 /* Notification colors use FinIntel's data-theme selector, not Tailwind's .dark class. */
 .finintel-toast {
   background-color: var(--card);
