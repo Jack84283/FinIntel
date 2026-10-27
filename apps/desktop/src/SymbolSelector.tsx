@@ -1,4 +1,5 @@
 import { useLocale } from "./localization";
+import { useNotify } from "./notifications";
 import { useEffect, useId, useState } from "react";
 import { Check, RefreshCw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ const MAX_SUGGESTIONS = 8;
 /** Debounced local-only typeahead; never loads the complete symbol directory. */
 export function SymbolSelector({ value, onChange, keyConfigured, disabled }: SymbolSelectorProps) {
   const { t } = useLocale();
+  const notify = useNotify();
   const [query, setQuery] = useState(value);
   const [kind, setKind] = useState<AssetFilter>("All");
   const [results, setResults] = useState<CatalogSymbol[]>([]);
@@ -92,10 +94,12 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
     setNotice("");
     try {
       const updated = await syncSymbols();
-      setNotice(updated.total.toLocaleString() + " active stock/ETF symbols saved locally.");
+      setNotice(updated.total.toLocaleString() + " " + t("active stock/ETF symbols saved locally."));
+      notify(t("Symbol directory synchronized successfully."), "success");
       setRevision((old) => old + 1);
     } catch (reason: unknown) {
       setSyncError(reason instanceof Error ? reason.message : String(reason));
+      notify(t("Symbol synchronization failed. See details below."), "error");
     } finally {
       setSyncing(false);
     }
