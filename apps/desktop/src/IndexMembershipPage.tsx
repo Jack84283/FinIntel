@@ -288,10 +288,10 @@ export function IndexMembershipPage() {
 
       <Card>
         <CardHeader className="grid-cols-1">
-          <CardTitle>{selectedMeta?.name ?? selected} — Constituents</CardTitle>
+          <CardTitle>{selectedMeta?.name ?? selected} — {t("Constituents")}</CardTitle>
           <CardDescription>
             {snapshot?.snapshot_as_of
-              ? t("Effective snapshot: ") + snapshot.snapshot_as_of + " · Source: " + (snapshot.source ?? t("Unknown"))
+              ? t("Effective snapshot: ") + snapshot.snapshot_as_of + " · " + t("Source") + ": " + (snapshot.source ? snapshot.source.replace("ETF holdings proxy", t("ETF holdings proxy")) : t("Unknown"))
               : "No constituent snapshot has been imported for this date."}
           </CardDescription>
         </CardHeader>
