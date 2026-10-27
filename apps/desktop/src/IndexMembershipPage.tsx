@@ -264,7 +264,7 @@ export function IndexMembershipPage() {
               )}
             </div>
             <Button size="sm" type="submit" disabled={stockBusy || !stock.trim()}>
-              <Search aria-hidden="true" /> {stockBusy ? t("Searching…") : "Check indexes"}
+              <Search aria-hidden="true" /> {stockBusy ? t("Searching…") : t("Check indexes")}
             </Button>
           </form>
           {stockError && <p role="alert" className="text-sm text-destructive">{stockError}</p>}
