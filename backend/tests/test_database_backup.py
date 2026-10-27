@@ -6,7 +6,6 @@ import pytest
 
 from finintel.storage.backup import (
     create_backup,
-    daily_backup,
     inspect_backup,
     list_backups,
     restore_backup,
@@ -71,16 +70,17 @@ def symbols(path):
         }
 
 
-def test_daily_snapshot_and_manual_backup(tmp_path):
+def test_manual_backup_only(tmp_path):
     path = tmp_path / "finintel.sqlite3"
     seed(path, "AAPL", "90", "2026-10-20T00:00:00")
-    first = daily_backup(db=path)
-    assert first is not None
-    assert daily_backup(db=path) is None
+    assert list_backups(db=path) == []
     manual = create_backup(db=path)
-    assert len(list_backups(db=path)) == 2
+    assert len(list_backups(db=path)) == 1
     assert inspect_backup(manual["id"], db=path)["counts"]["daily_prices"] == 1
-    assert first["reason"] == "auto"
+    assert manual["reason"] == "manual"
+    # Routine database operations do not create scheduled snapshots.
+    seed(path, "MSFT", "120", "2026-10-20T00:00:00")
+    assert len(list_backups(db=path)) == 1
 
 
 def test_merge_preserves_newer_prices_and_adds_missing_instruments(tmp_path):
