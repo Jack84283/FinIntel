@@ -108,6 +108,14 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Status": "状态",
+  "idle": "空闲",
+  "running": "运行中",
+  "queued": "排队中",
+  "completed": "已完成",
+  "failed": "失败",
+  "Backend": "后端服务",
+
   "Download history": "下载历史数据",
   "local series": "条本地行情序列",
   "Could not load stored prices for": "无法加载已存储的行情：",
