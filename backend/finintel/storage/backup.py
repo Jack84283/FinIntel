@@ -18,7 +18,9 @@ from uuid import uuid4
 from finintel.storage.db import SCHEMA_VERSION, StorageError, _write_connection, database_path
 
 _LOCK = threading.Lock()
-_BACKUP_ID = re.compile(r"^finintel-(?:auto|manual|pre-restore)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}[.]sqlite3$")
+_BACKUP_ID = re.compile(
+    r"^finintel-(?:auto|manual|pre-restore)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}[.]sqlite3$"
+)
 _RETENTION_DAYS = 7
 
 
@@ -47,8 +49,13 @@ def _validated(path: Path, *, version: bool = True) -> dict[str, object]:
             counts = {
                 table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 for table in (
-                    "instruments", "series", "daily_prices", "ingestion_runs",
-                    "symbol_catalog", "action_events", "index_memberships",
+                    "instruments",
+                    "series",
+                    "daily_prices",
+                    "ingestion_runs",
+                    "symbol_catalog",
+                    "action_events",
+                    "index_memberships",
                 )
                 if table in tables
             }
@@ -91,7 +98,9 @@ def _snapshot(path: Path, reason: str) -> dict[str, object]:
 def _entry(path: Path) -> dict[str, object]:
     return {
         "id": path.name,
-        "reason": "pre-restore" if path.name.startswith("finintel-pre-restore-") else path.name.split("-")[1],
+        "reason": "pre-restore"
+        if path.name.startswith("finintel-pre-restore-")
+        else path.name.split("-")[1],
         "created_at": datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat(),
         "size_bytes": path.stat().st_size,
     }
@@ -112,8 +121,11 @@ def list_backups(*, db: Path | None = None) -> list[dict[str, object]]:
     if not folder.is_dir():
         return []
     return sorted(
-        [_entry(p) for p in folder.iterdir() if _BACKUP_ID.fullmatch(p.name) and p.is_file()
-         and not p.is_symlink()],
+        [
+            _entry(p)
+            for p in folder.iterdir()
+            if _BACKUP_ID.fullmatch(p.name) and p.is_file() and not p.is_symlink()
+        ],
         key=lambda row: str(row["created_at"]),
         reverse=True,
     )
@@ -136,8 +148,11 @@ def daily_backup(*, db: Path | None = None) -> dict[str, object] | None:
         return None
     try:
         today = datetime.now(UTC).strftime("%Y%m%d")
-        existing = [row for row in list_backups(db=path)
-                    if row["reason"] == "auto" and str(row["id"]).split("-")[2].startswith(today)]
+        existing = [
+            row
+            for row in list_backups(db=path)
+            if row["reason"] == "auto" and str(row["id"]).split("-")[2].startswith(today)
+        ]
         if existing:
             return None
         result = _snapshot(path, "auto")
@@ -162,9 +177,7 @@ def _merge(staging: Path, source: Path) -> None:
         dest.execute("ATTACH DATABASE ? AS incoming", (str(source.resolve()),))
         try:
             with dest:
-                dest.execute(
-                    "INSERT OR IGNORE INTO instruments SELECT * FROM incoming.instruments"
-                )
+                dest.execute("INSERT OR IGNORE INTO instruments SELECT * FROM incoming.instruments")
                 dest.execute(
                     "INSERT OR IGNORE INTO series(symbol,provider,frequency,adjustment,data_kind) "
                     "SELECT symbol,provider,frequency,adjustment,data_kind FROM incoming.series"
@@ -211,8 +224,7 @@ def _merge(staging: Path, source: Path) -> None:
                     "WHERE excluded.retrieved_at > daily_prices.retrieved_at"
                 )
                 dest.execute(
-                    "INSERT OR IGNORE INTO symbol_catalog "
-                    "SELECT * FROM incoming.symbol_catalog"
+                    "INSERT OR IGNORE INTO symbol_catalog SELECT * FROM incoming.symbol_catalog"
                 )
                 dest.execute(
                     "INSERT OR IGNORE INTO index_memberships "
@@ -275,7 +287,12 @@ def restore_backup(identifier: str, mode: str, *, db: Path | None = None) -> dic
                 if recovery is not None:
                     _copy_sqlite(_resolve(path, str(recovery["id"])), path)
                 raise StorageError("Restore failed; the prior database was recovered") from exc
-        return {"mode": mode, "restored": identifier, "recovery_backup": recovery, "status": "restored"}
+        return {
+            "mode": mode,
+            "restored": identifier,
+            "recovery_backup": recovery,
+            "status": "restored",
+        }
     except sqlite3.Error as exc:
         raise StorageError("Unable to restore the selected SQLite backup") from exc
     finally:
