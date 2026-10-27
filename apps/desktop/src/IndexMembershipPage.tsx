@@ -83,6 +83,7 @@ export function IndexMembershipPage() {
         if (!active) return;
         setError(reason instanceof Error ? reason.message : String(reason));
         setState("error");
+        notify(t("Index constituents could not be loaded. See details below."), "error");
       }
     };
     void loadAll();
@@ -116,6 +117,7 @@ export function IndexMembershipPage() {
     const symbol = chosen?.symbol ?? ticker;
     if (!/^[A-Z0-9][A-Z0-9.-]{0,14}$/.test(symbol)) {
       setStockError(t("Select a company from the suggestions or enter a valid ticker."));
+      notify(t("Select a valid ticker to check indexes."), "warning");
       return;
     }
     setStock(symbol);
