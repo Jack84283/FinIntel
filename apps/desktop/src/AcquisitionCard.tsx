@@ -83,6 +83,7 @@ export function AcquisitionCard({
     // backend availability, but do not call any provider in these cases.
     if (blockReason) {
       setError(blockReason);
+      notify(t("Cannot fetch market data. Review the requirement below."), "warning");
       return;
     }
     setPending(true);
