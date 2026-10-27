@@ -1,15 +1,13 @@
 """Native desktop provider credential API. No read response contains secrets."""
 
 import os
-from typing import Literal
 from hmac import compare_digest
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from finintel.settings.connection_test import test_connection
-from finintel.storage.backup import create_backup, inspect_backup, list_backups, restore_backup
-from finintel.storage.db import StorageError
 from finintel.settings.credentials import (
     FIELDS,
     CredentialStoreError,
@@ -17,6 +15,8 @@ from finintel.settings.credentials import (
     set_secret,
     stored,
 )
+from finintel.storage.backup import create_backup, inspect_backup, list_backups, restore_backup
+from finintel.storage.db import StorageError
 
 router = APIRouter(prefix="/api/v1/settings", tags=["desktop-settings"])
 
