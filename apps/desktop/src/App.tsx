@@ -129,10 +129,10 @@ export default function App() {
         ) : (
           <section aria-labelledby="overview-title">
             <PageHeader id="overview-title" breadcrumb={t("FinIntel / Overview")} title={t("Private Financial Intelligence")} subtitle={t("Explore locally stored market data and build your private research workspace.")} actions={<Badge variant="outline">{t("M1 · Local workstation")}</Badge>} />
-            <section className="max-w-[820px] py-6 lg:py-8">
+            <section className="w-full min-w-0 py-6 lg:py-8">
               <p className="text-[10px] font-bold tracking-[0.16em] text-[#8aa5c3] uppercase">{t("Historical research")}</p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">{t("Your local market workspace.")}</h2>
-              <p className="mt-4 max-w-[68ch] text-sm leading-7 text-muted-foreground">
+              <p className="mt-4 w-full whitespace-normal text-sm leading-7 text-muted-foreground">
                 {t("Use Data Acquisition to fetch prices and review completed import actions. Open Markets to explore stored OHLCV charts, historical tables, and instrument-level source provenance.")}
               </p>
               <Button type="button" className="mt-5" onClick={() => openMarkets()}><BarChart3 aria-hidden="true" /> {t("Open Market Data Explorer")}</Button>
