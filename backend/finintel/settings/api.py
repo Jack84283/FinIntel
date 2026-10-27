@@ -1,12 +1,15 @@
 """Native desktop provider credential API. No read response contains secrets."""
 
 import os
+from typing import Literal
 from hmac import compare_digest
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from finintel.settings.connection_test import test_connection
+from finintel.storage.backup import create_backup, inspect_backup, list_backups, restore_backup
+from finintel.storage.db import StorageError
 from finintel.settings.credentials import (
     FIELDS,
     CredentialStoreError,
@@ -76,3 +79,42 @@ def test_provider_connection(provider: str, request: Request) -> dict:
         return test_connection(provider)
     except CredentialStoreError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+class RestoreRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    backup_id: str = Field(min_length=1, max_length=120)
+    mode: Literal["merge", "replace"]
+
+
+@router.get("/backups")
+def database_backups(request: Request) -> dict:
+    _require_managed(request)
+    return {"items": list_backups()}
+
+
+@router.post("/backups")
+def database_backup_now(request: Request) -> dict:
+    _require_managed(request)
+    try:
+        return create_backup()
+    except StorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/backups/{backup_id}")
+def database_backup_preview(backup_id: str, request: Request) -> dict:
+    _require_managed(request)
+    try:
+        return inspect_backup(backup_id)
+    except StorageError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/backups/restore")
+def database_restore(payload: RestoreRequest, request: Request) -> dict:
+    _require_managed(request)
+    try:
+        return restore_backup(payload.backup_id, payload.mode)
+    except (StorageError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
