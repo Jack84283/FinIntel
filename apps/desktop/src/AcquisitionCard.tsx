@@ -157,7 +157,7 @@ export function AcquisitionCard({
             </select>
           </label>
           <label className="grid min-w-0 gap-2 text-xs text-muted-foreground">
-            Download history
+            {t("Download history")}
             {provider !== "alpha_vantage" ? (
               <select
                 aria-label={t("Historical data length")}
