@@ -1,7 +1,7 @@
 """Local-only backend API for the FinIntel workstation."""
 
-import os
 import logging
+import os
 import threading
 from hmac import compare_digest
 
@@ -13,9 +13,9 @@ from finintel import __version__
 from finintel.market_data.membership_api import router as membership_router
 from finintel.market_data.validation_api import router as validation_router
 from finintel.settings.api import router as settings_router
+from finintel.storage.api import router as market_data_router
 from finintel.storage.backup import daily_backup
 from finintel.storage.db import StorageError
-from finintel.storage.api import router as market_data_router
 
 app = FastAPI(
     title="FinIntel Local API",
