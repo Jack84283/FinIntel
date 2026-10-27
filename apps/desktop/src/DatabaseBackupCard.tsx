@@ -90,7 +90,7 @@ export function DatabaseBackupCard() {
     <Card className="min-w-0">
       <CardHeader>
         <CardTitle><span className="flex items-center gap-2"><DatabaseBackup aria-hidden="true" className="size-4" />{t("Database backup & restore")}</span></CardTitle>
-        <CardDescription>{t("Automatic daily local backups. Inspect a snapshot, then merge or replace data with recovery protection.")}</CardDescription>
+        <CardDescription>{t("Create backups manually. FinIntel creates a recovery backup before database migration or restore.")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {!native ? (
