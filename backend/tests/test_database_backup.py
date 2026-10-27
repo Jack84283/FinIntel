@@ -76,7 +76,11 @@ def test_manual_backup_only(tmp_path):
     assert list_backups(db=path) == []
     manual = create_backup(db=path)
     assert len(list_backups(db=path)) == 1
-    assert inspect_backup(manual["id"], db=path)["counts"]["daily_prices"] == 1
+    inspected = inspect_backup(manual["id"], db=path)
+    assert inspected["counts"]["instruments"] == 1
+    assert inspected["schema_version"] == 6
+    # The UI preview stays lightweight even for tens of millions of price rows.
+    assert "daily_prices" not in inspected["counts"]
     assert manual["reason"] == "manual"
     # Routine database operations do not create scheduled snapshots.
     seed(path, "MSFT", "120", "2026-10-20T00:00:00")
@@ -124,6 +128,8 @@ def test_invalid_mode_id_and_corruption_never_change_destination(tmp_path):
     with pytest.raises(StorageError):
         restore_backup("../../elsewhere.sqlite3", "replace", db=target)
     (target.parent / "backups" / saved["id"]).write_bytes(b"not sqlite")
+    with pytest.raises(StorageError):
+        inspect_backup(saved["id"], db=target)
     with pytest.raises(StorageError):
         restore_backup(saved["id"], "replace", db=target)
     assert symbols(target) == {"AAPL": "100"}
