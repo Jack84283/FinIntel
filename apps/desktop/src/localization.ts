@@ -108,6 +108,8 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Fetch & store": "获取并存储",
+  "Fetch and store": "获取并存储",
   "Status": "状态",
   "idle": "空闲",
   "running": "运行中",
