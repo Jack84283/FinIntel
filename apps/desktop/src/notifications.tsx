@@ -9,6 +9,12 @@ const NotificationContext = createContext<Notify>(() => {});
 export const useNotify = () => useContext(NotificationContext);
 const durations: Record<Severity, number> = { success: 4000, info: 5000, warning: 8000, error: 10000 };
 const icons = { success: CheckCircle2, info: Info, warning: AlertTriangle, error: XCircle };
+const toastColors: Record<Severity, string> = {
+  success: "border-border bg-card text-card-foreground",
+  warning: "border-border bg-card text-card-foreground",
+  info: "border-blue-600 bg-blue-600 text-white dark:border-blue-500 dark:bg-blue-700 dark:text-white",
+  error: "border-red-600 bg-red-600 text-white dark:border-red-500 dark:bg-red-700 dark:text-white",
+};
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<Notice[]>([]);
@@ -58,10 +64,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         return <div key={item.id} role={item.severity === "error" ? "alert" : "status"}
           onMouseEnter={() => pause(item.id)} onMouseLeave={() => resume(item.id)}
           onFocusCapture={() => pause(item.id)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) resume(item.id); }}
-          className="pointer-events-auto flex items-start gap-2 rounded-lg border border-border bg-card p-3 text-sm text-card-foreground shadow-lg">
+          className={`pointer-events-auto flex items-start gap-2 rounded-lg border p-3 text-sm shadow-lg ${toastColors[item.severity]}`}>
           <Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
           <p className="min-w-0 flex-1 break-words">{item.message}</p>
-          <button type="button" aria-label={t("Dismiss notification")} onClick={() => dismiss(item.id)} className="rounded p-1 hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"><X aria-hidden="true" className="size-4" /></button>
+          <button type="button" aria-label={t("Dismiss notification")} onClick={() => dismiss(item.id)} className="rounded p-1 hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"><X aria-hidden="true" className="size-4" /></button>
         </div>;
       })}
     </div>
