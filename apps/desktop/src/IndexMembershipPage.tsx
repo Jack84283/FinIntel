@@ -185,7 +185,7 @@ export function IndexMembershipPage() {
             <Button type="button" size="sm" disabled={acquiring}
               onClick={() => { void download(); }}>
               <Download aria-hidden="true" />
-              {acquiring ? t("Fetching constituents…") : "Fetch constituents"}
+              {acquiring ? t("Fetching constituents…") : t("Fetch constituents")}
             </Button>
           </div>
           {acquireError && <p role="alert" className="text-sm text-destructive">{acquireError}</p>}
