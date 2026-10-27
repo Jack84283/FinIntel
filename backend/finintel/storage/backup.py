@@ -58,9 +58,11 @@ def _validated(path: Path, *, version: bool = True) -> dict[str, object]:
 
 
 def _copy_sqlite(source: Path, destination: Path) -> None:
-    with sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True, timeout=30) as incoming:
-        with sqlite3.connect(destination, timeout=30) as output:
-            incoming.backup(output, pages=1000, sleep=0.05)
+    with (
+        sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True, timeout=30) as incoming,
+        sqlite3.connect(destination, timeout=30) as output,
+    ):
+        incoming.backup(output, pages=1000, sleep=0.05)
 
 
 def _snapshot(path: Path, reason: str) -> dict[str, object]:
