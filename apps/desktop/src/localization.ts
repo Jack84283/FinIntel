@@ -108,6 +108,7 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Source": "来源",
   "Select a stock or ETF symbol before fetching market data.": "获取市场数据前，请先选择股票或 ETF 代码。",
   "Provider status could not be loaded. See details below.": "无法获取数据源状态，请查看下方详情。",
   "Credential status refreshed.": "凭据状态已刷新。",
