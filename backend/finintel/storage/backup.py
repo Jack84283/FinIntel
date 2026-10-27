@@ -89,7 +89,7 @@ def _snapshot(path: Path, reason: str) -> dict[str, object]:
 def _entry(path: Path) -> dict[str, object]:
     return {
         "id": path.name,
-        "reason": path.name.split("-")[1],
+        "reason": "pre-restore" if path.name.startswith("finintel-pre-restore-") else path.name.split("-")[1],
         "created_at": datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat(),
         "size_bytes": path.stat().st_size,
     }
@@ -157,7 +157,7 @@ def _merge(staging: Path, source: Path) -> None:
     """Merge all schema-v6 data; use original source IDs only through mapping tables."""
     with sqlite3.connect(staging, timeout=30) as dest:
         dest.execute("PRAGMA foreign_keys = ON")
-        dest.execute("ATTACH DATABASE ? AS incoming", (source.as_uri() + "?mode=ro",))
+        dest.execute("ATTACH DATABASE ? AS incoming", (str(source.resolve()),))
         try:
             with dest:
                 dest.execute(
