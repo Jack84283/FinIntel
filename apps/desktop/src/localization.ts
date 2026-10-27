@@ -109,7 +109,7 @@ const translations = {
 
 const additionalChinese: Readonly<Record<string, string>> = {
   "Database backup & restore": "数据库备份与恢复",
-  "Automatic daily local backups. Inspect a snapshot, then merge or replace data with recovery protection.": "每日自动进行本地备份。检查快照后可合并或替换数据，并保留恢复备份。",
+  "Create backups manually. FinIntel creates a recovery backup before database migration or restore.": "可手动创建数据库备份。FinIntel 会在数据库迁移或恢复前自动创建安全备份。",
   "Backup management requires the managed native desktop.": "数据库备份管理需要使用受管理的本机桌面应用。",
   "Backup now": "立即备份",
   "Working…": "正在处理…",
