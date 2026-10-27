@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from finintel.main import app
+from finintel.settings import api as settings_api
 from finintel.settings import connection_test
 
 TOKEN = "test-native-token-with-at-least-32-chars"
@@ -55,7 +56,7 @@ def test_bounded_http_diagnostics_are_sanitized(monkeypatch, code, expected):
 def test_endpoint_requires_process_authorization(monkeypatch):
     monkeypatch.setenv("FININTEL_PROCESS_TOKEN", TOKEN)
     monkeypatch.setattr(
-        connection_test,
+        settings_api,
         "test_connection",
         lambda provider: {"status": "connected", "provider": provider},
     )
