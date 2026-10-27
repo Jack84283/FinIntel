@@ -191,7 +191,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
   };
 
   const sortLabel = (column: SortColumn, label: string) =>
-    label + (sortColumn === column ? (descending ? " ↓" : " ↑") : "");
+    t(label) + (sortColumn === column ? (descending ? " ↓" : " ↑") : "");
 
   return (
     <section className="space-y-2" aria-labelledby="markets-title">
