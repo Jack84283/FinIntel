@@ -18,7 +18,7 @@ from uuid import uuid4
 from finintel.storage.db import SCHEMA_VERSION, StorageError, _write_connection, database_path
 
 _LOCK = threading.Lock()
-_BACKUP_ID = re.compile(r"^finintel-(?:auto|manual|pre-restore)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}\\.sqlite3$")
+_BACKUP_ID = re.compile(r"^finintel-(?:auto|manual|pre-restore)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}[.]sqlite3$")
 _RETENTION_DAYS = 7
 
 
