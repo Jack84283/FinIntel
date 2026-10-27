@@ -188,7 +188,7 @@ export function AcquisitionCard({
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
           <Button type="submit" disabled={pending} size="sm">
             {pending ? <RefreshCw aria-hidden="true" className="animate-spin" /> : <ArrowDownToLine aria-hidden="true" />}
-            {pending ? t("Fetching…") : "Fetch & store"}
+            {pending ? t("Fetching…") : t("Fetch & store")}
           </Button>
           <Button
             type="button"
