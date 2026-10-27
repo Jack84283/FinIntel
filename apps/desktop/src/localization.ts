@@ -108,6 +108,9 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Provider status could not be loaded. See details below.": "无法获取数据源状态，请查看下方详情。",
+  "Credential status refreshed.": "凭据状态已刷新。",
+  "Credential status could not be refreshed. See details below.": "无法刷新凭据状态，请查看下方详情。",
   "Symbol directory synchronized successfully.": "证券目录同步成功。",
   "Symbol synchronization failed. See details below.": "证券目录同步失败，请查看下方详情。",
   "active stock/ETF symbols saved locally.": "个活跃股票／ETF 代码已保存至本地。",
