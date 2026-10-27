@@ -1,4 +1,5 @@
 """Provider connection checks never store market data or reveal credentials."""
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -41,9 +42,11 @@ def test_provider_success_uses_saved_key_read_only(monkeypatch, provider, payloa
 )
 def test_bounded_http_diagnostics_are_sanitized(monkeypatch, code, expected):
     monkeypatch.setattr(connection_test, "get_secret", lambda _provider, _field: "private-key")
-    with httpx.Client(transport=httpx.MockTransport(
-        lambda _request: httpx.Response(code, json={"secret": "private-key"})
-    )) as session:
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(code, json={"secret": "private-key"})
+        )
+    ) as session:
         result = connection_test.test_connection("tiingo", client=session)
     assert result["status"] == expected
     assert "private-key" not in str(result)
@@ -51,7 +54,11 @@ def test_bounded_http_diagnostics_are_sanitized(monkeypatch, code, expected):
 
 def test_endpoint_requires_process_authorization(monkeypatch):
     monkeypatch.setenv("FININTEL_PROCESS_TOKEN", TOKEN)
-    monkeypatch.setattr(connection_test, "test_connection", lambda provider: {"status": "connected", "provider": provider})
+    monkeypatch.setattr(
+        connection_test,
+        "test_connection",
+        lambda provider: {"status": "connected", "provider": provider},
+    )
     with TestClient(app) as client:
         denied = client.post("/api/v1/settings/providers/tiingo/test")
         valid = client.post(
@@ -64,7 +71,11 @@ def test_endpoint_requires_process_authorization(monkeypatch):
 
 
 def test_missing_required_provider_keys_skips_network(monkeypatch):
-    monkeypatch.setattr(connection_test, "get_secret", lambda provider, field: "" if field == "secret_key" else "some-key")
+    monkeypatch.setattr(
+        connection_test,
+        "get_secret",
+        lambda provider, field: "" if field == "secret_key" else "some-key",
+    )
     result = connection_test.test_connection("alpaca_sip")
     assert result["status"] == "not_configured"
     assert result["http_status"] is None
