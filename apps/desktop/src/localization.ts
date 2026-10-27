@@ -108,6 +108,15 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Validation started.": "校验已启动。",
+  "Validation could not start. See details below.": "无法启动校验，请查看下方详情。",
+  "Corporate event verification completed.": "公司行为校验已完成。",
+  "Corporate event verification failed. See details below.": "公司行为校验失败，请查看下方详情。",
+  "Index lookup failed. See details below.": "指数查询失败，请查看下方详情。",
+  "Index constituents imported.": "指数成分股已导入。",
+  "Index import incomplete. Review details below.": "指数导入不完整，请查看下方详情。",
+  "Index import failed. See details below.": "指数导入失败，请查看下方详情。",
+  "Action history could not be loaded. See details below.": "无法加载操作历史，请查看下方详情。",
   "Fetch & store": "获取并存储",
   "Fetch and store": "获取并存储",
   "Status": "状态",
