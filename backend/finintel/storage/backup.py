@@ -30,7 +30,7 @@ def _validated(path: Path, *, version: bool = True) -> dict[str, object]:
     if not path.is_file() or path.is_symlink():
         raise StorageError("SQLite backup is missing or unsafe")
     try:
-        with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=10) as conn:
+        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=10) as conn:
             if conn.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                 raise StorageError("SQLite backup failed integrity verification")
             actual = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -58,7 +58,7 @@ def _validated(path: Path, *, version: bool = True) -> dict[str, object]:
 
 
 def _copy_sqlite(source: Path, destination: Path) -> None:
-    with sqlite3.connect(source.as_uri() + "?mode=ro", uri=True, timeout=30) as incoming:
+    with sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True, timeout=30) as incoming:
         with sqlite3.connect(destination, timeout=30) as output:
             incoming.backup(output, pages=1000, sleep=0.05)
 
@@ -245,6 +245,7 @@ def restore_backup(identifier: str, mode: str, *, db: Path | None = None) -> dic
         info = _validated(source, version=False)
         if int(info["schema_version"]) > SCHEMA_VERSION or int(info["schema_version"]) == 0:
             raise StorageError("The selected backup has an unsupported schema")
+        path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="finintel-restore-", dir=path.parent) as work:
             workdir = Path(work)
             incoming = workdir / "incoming.sqlite3"
