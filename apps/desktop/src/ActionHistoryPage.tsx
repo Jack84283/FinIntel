@@ -1,5 +1,6 @@
 import { PageHeader } from "./PageHeader";
 import { useLocale } from "./localization";
+import { useNotify } from "./notifications";
 import { useEffect, useState } from "react";
 import { BarChart3, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +15,7 @@ import type { AcquisitionProvider } from "./market-acquisition-api";
 /** Read-only history of successful persisted imports. No events are fabricated. */
 export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?: MarketSelection) => void }) {
   const { t } = useLocale();
+  const notify = useNotify();
   const [items, setItems] = useState<ImportRecord[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
@@ -44,6 +46,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
       .catch((reason: unknown) => {
         if (cancelled) return;
         setError(reason instanceof Error ? reason.message : String(reason));
+        notify(t("Action history could not be loaded. See details below."), "error");
         setState("error");
       });
     return () => { cancelled = true; };
