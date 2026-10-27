@@ -21,7 +21,6 @@ _LOCK = threading.Lock()
 _BACKUP_ID = re.compile(
     r"^finintel-(?:auto|manual|pre-restore)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}[.]sqlite3$"
 )
-_RETENTION_DAYS = 7
 
 
 def _directory(path: Path) -> Path:
@@ -73,7 +72,7 @@ def _copy_sqlite(source: Path, destination: Path) -> None:
 
 
 def _snapshot(path: Path, reason: str) -> dict[str, object]:
-    if reason not in ("auto", "manual", "pre-restore"):
+    if reason not in ("manual", "pre-restore"):
         raise ValueError("Invalid database backup reason")
     if not path.is_file() or path.is_symlink():
         raise StorageError("No existing FinIntel database to back up")
@@ -137,29 +136,6 @@ def create_backup(*, db: Path | None = None, reason: str = "manual") -> dict[str
         raise StorageError("A database backup or restore is already running")
     try:
         return _snapshot(path, reason)
-    finally:
-        _LOCK.release()
-
-
-def daily_backup(*, db: Path | None = None) -> dict[str, object] | None:
-    """Idempotent daily startup snapshot. Keep the last seven automatic snapshots."""
-    path = db if db is not None else database_path()
-    if not path.is_file() or not _LOCK.acquire(blocking=False):
-        return None
-    try:
-        today = datetime.now(UTC).strftime("%Y%m%d")
-        existing = [
-            row
-            for row in list_backups(db=path)
-            if row["reason"] == "auto" and str(row["id"]).split("-")[2].startswith(today)
-        ]
-        if existing:
-            return None
-        result = _snapshot(path, "auto")
-        automatic = [row for row in list_backups(db=path) if row["reason"] == "auto"]
-        for old in automatic[_RETENTION_DAYS:]:
-            _resolve(path, str(old["id"])).unlink()
-        return result
     finally:
         _LOCK.release()
 
