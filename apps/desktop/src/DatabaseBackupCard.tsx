@@ -125,6 +125,9 @@ export function DatabaseBackupCard() {
                 <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => void save()}>
                   {t(busy ? "Working…" : "Backup now")}
                 </Button>
+                <Button type="button" size="sm" variant="secondary" disabled={busy || !preview || confirming} onClick={() => setConfirming(true)}>
+                  {t("Restore…")}
+                </Button>
               </div>
             </div>
             {items.length === 0 && <p className="text-xs text-muted-foreground">{t("No backups yet. Use Backup now to create one.")}</p>}
@@ -139,11 +142,7 @@ export function DatabaseBackupCard() {
                     </span>
                   ))}
                 </div>
-                {!confirming ? (
-                  <div className="flex justify-end">
-                    <Button size="sm" variant="secondary" type="button" disabled={busy} onClick={() => setConfirming(true)}>{t("Restore…")}</Button>
-                  </div>
-                ) : (
+                {confirming && (
                   <div role="dialog" aria-label={t("Confirm database restore")} className="space-y-3 rounded-md border border-warning p-3">
                     <p className="font-semibold">{t("Confirm database restore")}</p>
                     <p>{t("Merge adds missing data and accepts newer price observations. Replace overwrites the current database. Both create a recovery backup first.")}</p>
