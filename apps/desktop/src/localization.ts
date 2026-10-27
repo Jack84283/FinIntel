@@ -108,6 +108,9 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Full database integrity checks run before restoration.": "恢复前将执行完整的数据库完整性检查。",
+  "Inspecting selected backup…": "正在检查所选备份…",
+  "Backup inspection unavailable. Select another backup or retry Restore.": "无法检查备份。请选择其他备份或重试恢复。",
   "Database backup & restore": "数据库备份与恢复",
   "Create backups manually. FinIntel creates a recovery backup before database migration or restore.": "可手动创建数据库备份。FinIntel 会在数据库迁移或恢复前自动创建安全备份。",
   "Backup management requires the managed native desktop.": "数据库备份管理需要使用受管理的本机桌面应用。",
