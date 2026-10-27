@@ -494,6 +494,69 @@ async fn credential_test(provider: String) -> Result<serde_json::Value, String> 
         .map_err(|_| "Provider connection test returned malformed JSON.".to_string())
 }
 
+async fn backup_write(path: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() {
+        return Err("Database backups require the managed desktop.".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(600))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not create backup service client.".to_string())?;
+    let response = client
+        .post(format!("{}{}", backend_base(), path))
+        .header("x-finintel-process-token", backend_token())
+        .json(&body)
+        .send()
+        .await
+        .map_err(|_| "Local backup service unavailable.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Database backup operation failed (HTTP {}).", response.status()));
+    }
+    response.json::<serde_json::Value>().await
+        .map_err(|_| "Database backup service returned malformed JSON.".to_string())
+}
+
+#[tauri::command]
+async fn database_backup_list() -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() {
+        return Err("Database backups require the managed desktop.".to_string());
+    }
+    read_backend("/api/v1/settings/backups", &[]).await
+}
+
+#[tauri::command]
+async fn database_backup_create() -> Result<serde_json::Value, String> {
+    backup_write("/api/v1/settings/backups", serde_json::json!({})).await
+}
+
+#[tauri::command]
+async fn database_backup_preview(backup_id: String) -> Result<serde_json::Value, String> {
+    if backend_token().is_empty()
+        || backup_id.len() > 120
+        || !backup_id.starts_with("finintel-")
+        || !backup_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+    {
+        return Err("Invalid local database backup ID.".to_string());
+    }
+    read_backend(&format!("/api/v1/settings/backups/{backup_id}"), &[]).await
+}
+
+#[tauri::command]
+async fn database_backup_restore(backup_id: String, mode: String) -> Result<serde_json::Value, String> {
+    if backup_id.len() > 120
+        || !backup_id.starts_with("finintel-")
+        || !backup_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+        || !matches!(mode.as_str(), "merge" | "replace")
+    {
+        return Err("Invalid database restore choice.".to_string());
+    }
+    backup_write(
+        "/api/v1/settings/backups/restore",
+        serde_json::json!({"backup_id": backup_id, "mode": mode}),
+    ).await
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -537,6 +600,10 @@ fn main() {
             credential_set,
             credential_delete,
             credential_test,
+            database_backup_list,
+            database_backup_create,
+            database_backup_preview,
+            database_backup_restore,
             validation_status,
             validation_start,
             validation_corporate_reference,
