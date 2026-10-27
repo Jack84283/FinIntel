@@ -125,7 +125,7 @@ export function ProviderCredentialsCard() {
               </div>
             </div>
           ))}
-          <Button size="sm" type="button" variant="outline" disabled={busy} onClick={() => { void reload().catch(() => {}); }}>{t("Refresh")}</Button>
+          <Button size="sm" type="button" variant="outline" disabled={busy} onClick={() => { void reload().then(() => notify(t("Credential status refreshed."), "success")).catch(() => notify(t("Credential status could not be refreshed. See details below."), "error")); }}>{t("Refresh")}</Button>
         </>}
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       </CardContent>
