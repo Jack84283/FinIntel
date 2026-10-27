@@ -52,4 +52,3 @@ async def require_desktop_process_token(request: Request, call_next):
             status_code=403, content={"detail": "Desktop process authorization required"}
         )
     return await call_next(request)
-
