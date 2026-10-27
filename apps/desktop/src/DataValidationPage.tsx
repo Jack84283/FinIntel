@@ -1,5 +1,6 @@
 import { PageHeader } from "./PageHeader";
 import { useLocale } from "./localization";
+import { useNotify } from "./notifications";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +16,7 @@ const options: { id: ValidationCheck; label: string; detail: string }[] = [
 
 export function DataValidationPage() {
   const { t, language } = useLocale();
+  const notify = useNotify();
   const [selected, setSelected] = useState<ValidationCheck[]>(options.map((option) => option.id));
   const [job, setJob] = useState<ValidationJob>({ status: "idle" });
   const [error, setError] = useState("");
@@ -44,8 +46,10 @@ export function DataValidationPage() {
     setError("");
     try {
       setJob(await startValidation(selected));
+      notify(t("Validation started."), "success");
     } catch (cause) {
       setError(String(cause));
+      notify(t("Validation could not start. See details below."), "error");
     } finally {
       setBusy(false);
     }
@@ -109,8 +113,8 @@ export function DataValidationPage() {
             <Button disabled={referenceBusy} variant="secondary" onClick={() => {
               setReferenceBusy(true); setReferenceError(""); setReferenceReport(null);
               void verifyCorporateReference(referenceSymbol)
-                .then(setReferenceReport)
-                .catch((cause: unknown) => setReferenceError(String(cause)))
+                .then(value => { setReferenceReport(value); notify(t("Corporate event verification completed."), "success"); })
+                .catch((cause: unknown) => { setReferenceError(String(cause)); notify(t("Corporate event verification failed. See details below."), "error"); })
                 .finally(() => setReferenceBusy(false));
             }}>{referenceBusy ? t("Checking…") : t("Verify corporate events")}</Button>
           </div>
