@@ -33,9 +33,15 @@ def seed(path, symbol, close, retrieved):
             "observations,inserted,updated,unchanged,stale) "
             "VALUES (?,?,?,?,?,?,?,?,?,1,1,0,0,0)",
             (
-                series, retrieved, retrieved, symbol + retrieved,
+                series,
+                retrieved,
+                retrieved,
+                symbol + retrieved,
                 "https://www.alphavantage.co/query",
-                "https://www.alphavantage.co", None, "2026-10-20", "2026-10-20",
+                "https://www.alphavantage.co",
+                None,
+                "2026-10-20",
+                "2026-10-20",
             ),
         ).lastrowid
         conn.execute(
@@ -57,10 +63,12 @@ def seed(path, symbol, close, retrieved):
 
 def symbols(path):
     with sqlite3.connect(path) as db:
-        return {row[0]: row[1] for row in db.execute(
-            "SELECT s.symbol,p.close FROM series s "
-            "JOIN daily_prices p ON s.id=p.series_id"
-        )}
+        return {
+            row[0]: row[1]
+            for row in db.execute(
+                "SELECT s.symbol,p.close FROM series s JOIN daily_prices p ON s.id=p.series_id"
+            )
+        }
 
 
 def test_daily_snapshot_and_manual_backup(tmp_path):
