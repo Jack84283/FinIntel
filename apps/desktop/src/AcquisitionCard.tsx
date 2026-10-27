@@ -83,8 +83,9 @@ export function AcquisitionCard({
     // Keep the button clickable: explain missing credentials, ticker or
     // backend availability, but do not call any provider in these cases.
     if (blockReason) {
-      setError(blockReason);
-      notify(t("Cannot fetch market data. Review the requirement below."), "warning");
+      setError(t(blockReason));
+      // Show the same actionable validation message in the toast and inline.
+      notify(t(blockReason), "warning");
       return;
     }
     setPending(true);
