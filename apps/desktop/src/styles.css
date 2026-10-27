@@ -106,3 +106,28 @@
   }
   button:not(:disabled), [role="button"]:not([aria-disabled="true"]) { cursor: pointer; }
 }
+
+/* Notification colors use FinIntel's data-theme selector, not Tailwind's .dark class. */
+.finintel-toast {
+  background-color: var(--card);
+  border-color: var(--border);
+  color: var(--card-foreground);
+}
+.finintel-toast[data-toast-severity="info"] {
+  background-color: #2563eb;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+.finintel-toast[data-toast-severity="error"] {
+  background-color: #dc2626;
+  border-color: #b91c1c;
+  color: #ffffff;
+}
+:root:not([data-theme="light"]) .finintel-toast[data-toast-severity="info"] {
+  background-color: #1d4ed8;
+  border-color: #3b82f6;
+}
+:root:not([data-theme="light"]) .finintel-toast[data-toast-severity="error"] {
+  background-color: #b91c1c;
+  border-color: #ef4444;
+}
