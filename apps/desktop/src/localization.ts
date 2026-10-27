@@ -108,6 +108,7 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Download history": "下载历史数据",
   "local series": "条本地行情序列",
   "Could not load stored prices for": "无法加载已存储的行情：",
   "loaded sessions": "个已加载交易日",
