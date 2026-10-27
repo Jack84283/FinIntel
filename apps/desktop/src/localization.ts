@@ -108,6 +108,11 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Market instruments could not be loaded. See details below.": "无法加载市场证券列表，请查看下方详情。",
+  "Market prices could not be loaded. See details below.": "无法加载市场行情，请查看下方详情。",
+  "Correct the date range below.": "请修正下方日期范围。",
+  "Select a valid ticker to check indexes.": "请输入有效证券代码以查询指数。",
+  "Index constituents could not be loaded. See details below.": "无法加载指数成分股，请查看下方详情。",
   "Cannot fetch market data. Review the requirement below.": "无法获取市场数据，请查看下方提示。",
   "Constituents": "成分股",
   "ETF holdings proxy": "ETF 持仓代理数据",
