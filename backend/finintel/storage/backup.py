@@ -152,9 +152,7 @@ def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, obje
         with sqlite3.connect(backup.resolve().as_uri() + "?mode=ro", uri=True, timeout=10) as conn:
             version = int(conn.execute("PRAGMA user_version").fetchone()[0])
             tables = {
-                row[0] for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
+                row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
             if not {"instruments", "series", "ingestion_runs", "daily_prices"}.issubset(tables):
                 raise StorageError("Backup lacks required market data tables")
@@ -163,8 +161,12 @@ def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, obje
             counts = {
                 table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 for table in (
-                    "instruments", "series", "ingestion_runs", "symbol_catalog",
-                    "action_events", "index_memberships",
+                    "instruments",
+                    "series",
+                    "ingestion_runs",
+                    "symbol_catalog",
+                    "action_events",
+                    "index_memberships",
                 )
                 if table in tables
             }
