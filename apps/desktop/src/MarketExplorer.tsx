@@ -1,5 +1,6 @@
 import { PageHeader } from "./PageHeader";
 import { useLocale } from "./localization";
+import { useNotify } from "./notifications";
 import { useEffect, useMemo, useState, useId, type FormEvent } from "react";
 import { AlertCircle, BarChart3, Database, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +27,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
   onOpenAcquisition: () => void;
 }) {
   const { t } = useLocale();
+  const notify = useNotify();
   const [instruments, setInstruments] = useState<MarketInstrument[]>([]);
   const [indexState, setIndexState] = useState<LoadState>("loading");
   const [indexError, setIndexError] = useState("");
@@ -84,6 +86,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
         if (ignore) return;
         setIndexState("error");
         setIndexError(error instanceof Error ? error.message : String(error));
+        notify(t("Market instruments could not be loaded. See details below."), "error");
       });
     return () => { ignore = true; };
   }, [reload]);
@@ -111,6 +114,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
         if (ignore) return;
         setSeriesState("error");
         setSeriesError(error instanceof Error ? error.message : String(error));
+        notify(t("Market prices could not be loaded. See details below."), "error");
       });
     return () => { ignore = true; };
   }, [symbol, priceProvider, range, reload, indexState, period]);
@@ -173,6 +177,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
     event.preventDefault();
     if (draftStart && draftEnd && draftStart > draftEnd) {
       setValidationError(t("Start date must not exceed end date."));
+      notify(t("Correct the date range below."), "warning");
       return;
     }
     setValidationError("");
