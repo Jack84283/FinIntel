@@ -112,7 +112,7 @@ export function DataValidationPage() {
                 .then(setReferenceReport)
                 .catch((cause: unknown) => setReferenceError(String(cause)))
                 .finally(() => setReferenceBusy(false));
-            }}>{referenceBusy ? t("Checking…") : "Verify corporate events"}</Button>
+            }}>{referenceBusy ? t("Checking…") : t("Verify corporate events")}</Button>
           </div>
           {referenceError && <p role="alert" className="text-sm text-destructive">{referenceError}</p>}
           {referenceReport && <details open className="rounded-md border border-border p-3">
