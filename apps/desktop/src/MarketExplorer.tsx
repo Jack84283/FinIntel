@@ -1,5 +1,6 @@
 import { PageHeader } from "./PageHeader";
 import { useLocale } from "./localization";
+import { useNotify } from "./notifications";
 import { useEffect, useMemo, useState, useId, type FormEvent } from "react";
 import { AlertCircle, BarChart3, Database, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +27,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
   onOpenAcquisition: () => void;
 }) {
   const { t } = useLocale();
+  const notify = useNotify();
   const [instruments, setInstruments] = useState<MarketInstrument[]>([]);
   const [indexState, setIndexState] = useState<LoadState>("loading");
   const [indexError, setIndexError] = useState("");
@@ -172,7 +174,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
   const applyRange = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (draftStart && draftEnd && draftStart > draftEnd) {
-      setValidationError("Start date must not exceed end date.");
+      setValidationError(t("Start date must not exceed end date."));
       return;
     }
     setValidationError("");
