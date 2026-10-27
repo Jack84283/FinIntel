@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DatabaseBackup, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +15,8 @@ export function DatabaseBackupCard() {
   const [items, setItems] = useState<BackupEntry[]>([]);
   const [selected, setSelected] = useState("");
   const [preview, setPreview] = useState<BackupPreview | null>(null);
+  const [inspecting, setInspecting] = useState(false);
+  const inspectionSequence = useRef(0);
   const [confirming, setConfirming] = useState(false);
   const [replacePhrase, setReplacePhrase] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35,18 +37,40 @@ export function DatabaseBackupCard() {
     return () => { active = false; };
   }, [native]);
 
-  const selectBackup = async (identifier: string) => {
+  const inspect = async (identifier: string) => {
+    const requestId = ++inspectionSequence.current;
+    setInspecting(true);
+    setError("");
+    try {
+      const result = await previewDatabaseBackup(identifier);
+      if (requestId === inspectionSequence.current) setPreview(result);
+    } catch (reason) {
+      if (requestId === inspectionSequence.current) {
+        setPreview(null);
+        setError(String(reason));
+        notify(t("Backup inspection failed."), "error");
+      }
+    } finally {
+      if (requestId === inspectionSequence.current) setInspecting(false);
+    }
+  };
+
+  const selectBackup = (identifier: string) => {
+    ++inspectionSequence.current; // Ignore the result of any previous selection.
     setSelected(identifier);
     setPreview(null);
+    setInspecting(false);
     setConfirming(false);
+    setReplacePhrase("");
     setError("");
-    if (!identifier) return;
-    try {
-      setPreview(await previewDatabaseBackup(identifier));
-    } catch (reason) {
-      setError(String(reason));
-      notify(t("Backup inspection failed."), "error");
-    }
+    if (identifier) void inspect(identifier);
+  };
+
+  const openRestore = () => {
+    if (!selected || busy) return;
+    setConfirming(true);
+    // Retry a failed inspection while keeping Cancel available.
+    if (!preview && !inspecting) void inspect(selected);
   };
 
   const save = async () => {
@@ -72,7 +96,7 @@ export function DatabaseBackupCard() {
   };
 
   const restore = async (mode: RestoreMode) => {
-    if (!preview || (mode === "replace" && replacePhrase !== "REPLACE")) return;
+    if (!preview || preview.id !== selected || inspecting || (mode === "replace" && replacePhrase !== "REPLACE")) return;
     setBusy(true);
     setError("");
     setMessage("");
@@ -108,7 +132,7 @@ export function DatabaseBackupCard() {
                 id="available-backups"
                 value={selected}
                 disabled={busy}
-                onChange={event => { void selectBackup(event.target.value); }}
+                onChange={event => selectBackup(event.target.value)}
                 className="h-9 w-full min-w-0 rounded-md border border-input bg-background px-2 text-sm text-foreground"
               >
                 <option value="">{t("Choose a backup")}</option>
@@ -125,27 +149,31 @@ export function DatabaseBackupCard() {
                 <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => void save()}>
                   {t(busy ? "Working…" : "Backup now")}
                 </Button>
-                <Button type="button" size="sm" variant="secondary" disabled={busy || !preview || confirming} onClick={() => setConfirming(true)}>
+                <Button type="button" size="sm" variant="secondary" disabled={busy || !selected || confirming} onClick={openRestore}>
                   {t("Restore…")}
                 </Button>
               </div>
             </div>
             {items.length === 0 && <p className="text-xs text-muted-foreground">{t("No backups yet. Use Backup now to create one.")}</p>}
-            {preview && (
+            {(preview || confirming) && (
               <div className="space-y-2 rounded-md border border-border p-3 text-xs">
-                <p className="font-medium">{t("Backup preview")} · SQLite v{preview.schema_version}</p>
-                <p className="break-words text-muted-foreground">{preview.id}</p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {Object.entries(preview.counts).map(([key, value]) => (
-                    <span key={key} className="rounded border border-border px-2 py-1">
-                      {t(key.replaceAll("_", " "))}: <strong>{value.toLocaleString(language)}</strong>
-                    </span>
-                  ))}
-                </div>
+                {preview && <>
+                  <p className="font-medium">{t("Backup preview")} · SQLite v{preview.schema_version}</p>
+                  <p className="break-words text-muted-foreground">{preview.id}</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {Object.entries(preview.counts).map(([key, value]) => (
+                      <span key={key} className="rounded border border-border px-2 py-1">
+                        {t(key.replaceAll("_", " "))}: <strong>{value.toLocaleString(language)}</strong>
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-muted-foreground">{t("Full database integrity checks run before restoration.")}</p>
+                </>}
                 {confirming && (
                   <div role="dialog" aria-label={t("Confirm database restore")} className="space-y-3 rounded-md border border-warning p-3">
                     <p className="font-semibold">{t("Confirm database restore")}</p>
                     <p>{t("Merge adds missing data and accepts newer price observations. Replace overwrites the current database. Both create a recovery backup first.")}</p>
+                    {!preview && <p role="status" className="text-muted-foreground">{t(inspecting ? "Inspecting selected backup…" : "Backup inspection unavailable. Select another backup or retry Restore.")}</p>}
                     <label className="block space-y-1">
                       <span>{t("Type REPLACE to enable destructive replacement.")}</span>
                       <input type="text" value={replacePhrase} onChange={event => setReplacePhrase(event.target.value)}
@@ -153,8 +181,8 @@ export function DatabaseBackupCard() {
                     </label>
                     <div className="flex flex-wrap justify-end gap-2">
                       <Button size="sm" variant="outline" type="button" disabled={busy} onClick={() => { setConfirming(false); setReplacePhrase(""); }}>{t("Cancel")}</Button>
-                      <Button size="sm" variant="secondary" type="button" disabled={busy} onClick={() => { void restore("merge"); }}>{t("Merge")}</Button>
-                      <Button size="sm" variant="destructive" type="button" disabled={busy || replacePhrase !== "REPLACE"} onClick={() => { void restore("replace"); }}>{t("Replace")}</Button>
+                      <Button size="sm" variant="secondary" type="button" disabled={busy || inspecting || !preview} onClick={() => { void restore("merge"); }}>{t("Merge")}</Button>
+                      <Button size="sm" variant="destructive" type="button" disabled={busy || inspecting || !preview || replacePhrase !== "REPLACE"} onClick={() => { void restore("replace"); }}>{t("Replace")}</Button>
                     </div>
                   </div>
                 )}
