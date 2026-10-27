@@ -20,7 +20,11 @@ async fn read_backend(path: &str, params: &[(&str, String)]) -> Result<serde_jso
     // Fixed loopback host, strictly bounded routes and parameters.
     // No generic proxy, client-selected host or credentials in the webview.
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
+        .timeout(if path.starts_with("/api/v1/settings/backups/") {
+            Duration::from_secs(180)
+        } else {
+            Duration::from_secs(30)
+        })
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Could not initialize the local HTTP client.".to_string())?;
@@ -34,8 +38,26 @@ async fn read_backend(path: &str, params: &[(&str, String)]) -> Result<serde_jso
         .header("x-finintel-process-token", backend_token())
         .send()
         .await
-        .map_err(|_| "Could not reach the local Python backend.".to_string())?;
+        .map_err(|error| {
+            if error.is_timeout() {
+                "The local Python backend request timed out. Retry after the database operation finishes."
+                    .to_string()
+            } else if error.is_connect() && cfg!(debug_assertions) {
+                "Local Python backend is unreachable. Start FinIntel with npm run dev:desktop."
+                    .to_string()
+            } else if error.is_connect() {
+                "The managed Python backend is not running. Restart FinIntel.".to_string()
+            } else {
+                "The local Python backend request failed. Recheck the connection.".to_string()
+            }
+        })?;
 
+    if response.status() == reqwest::StatusCode::FORBIDDEN {
+        return Err(
+            "The Python backend requires matching desktop authorization. Close old FinIntel sessions and launch with npm run dev:desktop."
+                .to_string(),
+        );
+    }
     if !response.status().is_success() {
         return Err(format!("Local backend returned HTTP {}.", response.status()));
     }
