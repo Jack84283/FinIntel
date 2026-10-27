@@ -108,6 +108,8 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Constituents": "成分股",
+  "ETF holdings proxy": "ETF 持仓代理数据",
   "Validation started.": "校验已启动。",
   "Validation could not start. See details below.": "无法启动校验，请查看下方详情。",
   "Corporate event verification completed.": "公司行为校验已完成。",
