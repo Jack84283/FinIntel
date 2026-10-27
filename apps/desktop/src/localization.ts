@@ -108,6 +108,9 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Symbol directory synchronized successfully.": "证券目录同步成功。",
+  "Symbol synchronization failed. See details below.": "证券目录同步失败，请查看下方详情。",
+  "active stock/ETF symbols saved locally.": "个活跃股票／ETF 代码已保存至本地。",
   "Market instruments could not be loaded. See details below.": "无法加载市场证券列表，请查看下方详情。",
   "Market prices could not be loaded. See details below.": "无法加载市场行情，请查看下方详情。",
   "Correct the date range below.": "请修正下方日期范围。",
