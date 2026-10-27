@@ -347,7 +347,6 @@ const additionalChinese: Readonly<Record<string, string>> = {
   "Indexes": "所属指数",
   "Symbol": "证券代码",
   "Provider": "数据源",
-  "Status": "状态",
   "Details": "详情",
   "Import": "导入",
   "Success": "成功",
