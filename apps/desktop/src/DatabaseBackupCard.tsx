@@ -55,9 +55,14 @@ export function DatabaseBackupCard() {
     setMessage("");
     try {
       await createDatabaseBackup();
-      await refresh();
       setMessage(t("Database backup completed."));
       notify(t("Database backup completed."), "success");
+      try {
+        await refresh();
+      } catch (reason) {
+        setError(String(reason));
+        notify(t("Backup list could not be loaded."), "error");
+      }
     } catch (reason) {
       setError(String(reason));
       notify(t("Database backup failed."), "error");
@@ -97,18 +102,10 @@ export function DatabaseBackupCard() {
           <p className="text-xs text-muted-foreground">{t("Backup management requires the managed native desktop.")}</p>
         ) : (
           <>
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void refresh().catch(reason => { setError(String(reason)); notify(t("Backup list could not be loaded."), "error"); })}>
-                <RefreshCw aria-hidden="true" />{t("Refresh")}
-              </Button>
-              <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => void save()}>
-                {t(busy ? "Working…" : "Backup now")}
-              </Button>
-            </div>
-            <label className="block space-y-1 text-xs">
-              <span className="font-medium">{t("Available backups")}</span>
+            <div className="grid min-w-0 gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
+              <label htmlFor="available-backups" className="text-xs font-medium">{t("Available backups")}</label>
               <select
-                aria-label={t("Available backups")}
+                id="available-backups"
                 value={selected}
                 disabled={busy}
                 onChange={event => { void selectBackup(event.target.value); }}
@@ -121,7 +118,15 @@ export function DatabaseBackupCard() {
                   </option>
                 ))}
               </select>
-            </label>
+              <div className="flex flex-wrap justify-end gap-2 sm:col-start-2">
+                <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void refresh().catch(reason => { setError(String(reason)); notify(t("Backup list could not be loaded."), "error"); })}>
+                  <RefreshCw aria-hidden="true" />{t("Refresh")}
+                </Button>
+                <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => void save()}>
+                  {t(busy ? "Working…" : "Backup now")}
+                </Button>
+              </div>
+            </div>
             {items.length === 0 && <p className="text-xs text-muted-foreground">{t("No backups yet. Use Backup now to create one.")}</p>}
             {preview && (
               <div className="space-y-2 rounded-md border border-border p-3 text-xs">
