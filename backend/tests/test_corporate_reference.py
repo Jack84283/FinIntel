@@ -18,7 +18,7 @@ def test_tiingo_split_and_dividend_reference(monkeypatch, tmp_path):
             id INTEGER PRIMARY KEY, symbol TEXT, provider TEXT, adjustment TEXT
         );
         CREATE TABLE daily_prices (series_id INTEGER, session_date TEXT, close TEXT);
-        INSERT INTO series VALUES (1, 'AAPL', 'alpaca_sip', 'raw');
+        INSERT INTO series VALUES (1, 'AAPL', 'alpaca_sip', 'raw_unadjusted');
         INSERT INTO daily_prices VALUES (1, '2026-10-19', '200');
         INSERT INTO daily_prices VALUES (1, '2026-10-20', '100');
         """

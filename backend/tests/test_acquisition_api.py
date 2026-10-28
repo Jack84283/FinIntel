@@ -15,7 +15,7 @@ from finintel.market_data.provider import (
 from finintel.storage.db import list_imports, read_daily
 
 FIXTURE = Path(__file__).parent / "fixtures" / "alpha_vantage_daily_SYNTHETIC.json"
-SOURCE = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM"
+SOURCE = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM&outputsize=compact&datatype=json"
 API = "/api/v1/market-data/acquisition"
 HEADERS = {"x-finintel-client": "local-workstation"}
 JSON_HEADERS = {**HEADERS, "content-type": "application/json"}

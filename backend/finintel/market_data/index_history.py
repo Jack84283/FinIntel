@@ -15,7 +15,13 @@ from pathlib import Path
 
 import httpx
 
-from finintel.storage.db import StorageError, _read_connection, _write_connection, database_path
+from finintel.storage.db import (
+    StorageError,
+    _read_connection,
+    _write_connection,
+    database_path,
+    serialized_storage_write,
+)
 
 # FRED series identifiers are allowlisted, never supplied as arbitrary URLs.
 INDEX_SERIES = {
@@ -58,7 +64,7 @@ def parse_fred_csv(code: str, payload: bytes) -> list[tuple[str, str]]:
         rows: list[tuple[str, str]] = []
         seen: set[str] = set()
         for row in reader:
-            if len(rows) > MAX_ROWS or None in row:
+            if len(rows) >= MAX_ROWS or None in row:
                 raise IndexHistoryError("Index history CSV has malformed rows")
             observed = row.get("observation_date") or row.get("DATE")
             raw = row.get(series_id)
@@ -110,6 +116,7 @@ def fetch_fred_index(code: str, *, client: httpx.Client | None = None) -> list[t
             session.close()
 
 
+@serialized_storage_write
 def store_index_closes(
     code: str, observations: list[tuple[str, str]], *, db: Path | None = None
 ) -> dict[str, object]:

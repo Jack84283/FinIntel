@@ -221,7 +221,7 @@ export function AcquisitionCard({
               ? t("Tiingo requests raw daily OHLCV over the selected period. Coverage and access depend on your account and the instrument.")
               : provider === "alpaca_sip"
               ? t("Alpaca requests SIP daily OHLCV up to yesterday; free Basic accounts may access delayed historical SIP data. Access depends on your Alpaca account and feed entitlement. Each click calls the API.")
-              : "Alpha Vantage's free key returns only 100 sessions; full history requires premium access."}
+              : t("Alpha Vantage's free key returns only 100 sessions; full history requires premium access.")}
             {" "}{t("Raw prices are not split/dividend-adjusted. Provider quotas and licensing apply.")}
           </p>
         )}

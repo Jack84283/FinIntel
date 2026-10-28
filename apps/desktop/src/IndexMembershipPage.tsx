@@ -294,7 +294,7 @@ export function IndexMembershipPage() {
           <CardDescription>
             {snapshot?.snapshot_as_of
               ? t("Effective snapshot: ") + snapshot.snapshot_as_of + " · " + t("Source") + ": " + (snapshot.source ? snapshot.source.replace("ETF holdings proxy", t("ETF holdings proxy")) : t("Unknown"))
-              : "No constituent snapshot has been imported for this date."}
+              : t("No constituent snapshot has been imported for this date.")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -310,9 +310,8 @@ export function IndexMembershipPage() {
           {state === "error" && <p role="alert" className="text-sm text-destructive">{error}</p>}
           {state === "ready" && !snapshot?.snapshot_as_of && (
             <p className="py-6 text-sm text-muted-foreground">
-              No imported constituent list is available for {selectedMeta?.name ?? selected} on or before this date.
-              The index definitions alone do not provide stock memberships. Import a full, dated constituent CSV
-              from an authorized source using the instructions in docs/INDEX_MEMBERSHIP.md, then select Refresh.
+              {t("No imported constituent list is available for")} {selectedMeta?.name ?? selected} {t("on or before this date.")}
+              {" "}{t("The index definitions alone do not provide stock memberships. Import a full, dated constituent CSV from an authorized source using the instructions in docs/INDEX_MEMBERSHIP.md, then select Refresh.")}
             </p>
           )}
           {state === "ready" && snapshot?.snapshot_as_of && snapshot.total === 0 && (
@@ -350,7 +349,7 @@ export function IndexMembershipPage() {
           )}
           <p className="text-xs text-muted-foreground">
             {t("Imported snapshots are not live. A missing membership source is unknown, not proof of exclusion.")}
-            {t("Historical accuracy depends on the source and the snapshot dates.")}
+            {" "}{t("Historical accuracy depends on the source and the snapshot dates.")}
           </p>
         </CardContent>
       </Card>

@@ -18,7 +18,7 @@ from finintel.market_data.provider import parse_alpha_vantage_daily
 
 FIXTURE = Path(__file__).parent / "fixtures" / "alpha_vantage_daily_SYNTHETIC.json"
 RAW = FIXTURE.read_bytes()
-SOURCE = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM"
+SOURCE = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM&outputsize=compact&datatype=json"
 
 
 def mock_provider(handler, *, max_attempts=3, sleeper=lambda _: None):

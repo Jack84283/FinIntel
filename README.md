@@ -2,14 +2,14 @@
 
 Private, local-first financial intelligence workstation.
 
-> **Implementation stage:** Native shell, validated historical data, shadcn/Tailwind UI, SQLite and the Market Data Explorer are merged. GitHub PR #6 adds explicit in-app provider acquisition to SQLite.
+> **Implementation stage:** Native shell, validated historical data, shadcn/Tailwind UI, SQLite, provider acquisition, index history, membership snapshots, validation, credentials, and backup/restore are implemented. Packaged-installation acceptance and real provider-authentication testing remain open.
 
 ## Architecture
 
 - **Desktop:** Tauri 2 (Rust) + React / TypeScript / Vite.
-- **Backend:** FastAPI / Pydantic, run as a separate **development** process.
-- **Transport:** React invokes fixed allowlisted Tauri commands for health and local market-data reads; Rust calls Python bound on `127.0.0.1:8765`. Browser-only Vite development proxies `/api` to the same service.
-- **Data storage:** validated snapshot JSON is imported into the versioned local SQLite database (M1 storage milestone, GitHub PR #4). The Python sidecar lifecycle and authentication remain a later delivery phase.
+- **Backend:** FastAPI / Pydantic, run directly in development or as an app-owned Python sidecar in release builds.
+- **Transport:** React invokes fixed allowlisted Tauri commands for health and local market-data reads; Rust calls Python bound on loopback. Browser-only Vite development proxies `/api` to the same service.
+- **Data storage:** validated snapshot JSON is imported into the versioned local SQLite database. Release sidecars use a per-process token and an OS app-data database location.
 
 ## Prerequisites
 
@@ -36,7 +36,7 @@ Then start both the Python FastAPI service and native Tauri desktop with **one c
 npm run dev:desktop
 ```
 
-Development Tauri uses `apps/desktop/src-tauri/tauri.dev.conf.json` to disable the production `externalBin` requirement; the backend is run directly from `.venv` and no PyInstaller sidecar is needed in development. Production packaging still requires `python scripts/build_sidecar.py`.\n\nThe launcher starts the backend at `127.0.0.1:8765`, waits for its health endpoint, opens the Tauri desktop and terminates its owned processes when the desktop exits. It refuses to run when another process already owns the development port. Press Ctrl+C to stop the combined session.
+Development Tauri uses `apps/desktop/src-tauri/tauri.dev.conf.json` to disable the production `externalBin` requirement; the backend is run directly from `.venv` and no PyInstaller sidecar is needed in development. Production packaging requires PyInstaller (`python -m pip install pyinstaller`) followed by `python scripts/build_sidecar.py`. The launcher starts the backend at `127.0.0.1:8765`, waits for its health endpoint, opens the Tauri desktop and terminates its owned processes when the desktop exits. It refuses to run when another process already owns the development port. Press Ctrl+C to stop the combined session.
 
 For Windows, use `py -m venv .venv` if `python3` is unavailable. This is a development command and requires local Python, Node and Rust/Tauri toolchains. Release packages use the separately bundled Python sidecar instead and need no developer terminal.
 
@@ -77,7 +77,7 @@ npm run test
 npm run build
 ```
 
-CI runs these checks on Ubuntu, and a separate macOS job checks the Tauri Rust crate. Native macOS build/signing, automatic Python startup, encrypted local storage, market data ingest, and end-to-end UI checks are **not yet verified**.
+CI runs these checks on Ubuntu, and native jobs check the Tauri crate and sidecar build. Clean-machine installer launch, OS keyring integration, real provider authentication, and end-to-end UI checks still require acceptance on installed macOS, Windows, and Linux packages.
 
 ## Repository layout
 
@@ -87,7 +87,7 @@ backend/             FastAPI service with /api/v1/health
 contracts/           Health response schema
 scripts/             Developer utilities
 docs/                Architecture notes and phased scope
-.github/workflows/   Checks for frontend, backend and macOS Rust
+.github/workflows/   Checks for frontend, backend, native Rust and sidecar packaging
 ```
 
 ## Private project precautions
@@ -101,7 +101,7 @@ Project specifications are maintained in the FinIntel Google Drive: [ENG-0002 Im
 - **PR #2:** Alpha Vantage historical OHLCV adapter, integrity tests, privacy-safe provenance and a one-shot local snapshot CLI (see below).
 - **M1 storage milestone (GitHub PR #4):** SQLite migrations, idempotent persistence, snapshot ingestion history and read-only historical-data APIs.
 - **Next M1 dashboard milestone:** React chart/grid workspace backed by the stored data API.
-- **PR #5:** Bundle/manage the authenticated Python sidecar, offline/resume behavior and native packaging.
+- **Desktop integration:** Authenticated sidecar, OS credential-vault settings, backup/restore, and offline local workflows are implemented; packaged-installation acceptance remains the next gate.
 
 This repository uses an independent FinIntel interface inspired by financial workstation workflows; it does not include Bloomberg intellectual property or licensed datasets.
 
@@ -161,10 +161,12 @@ curl http://127.0.0.1:8765/api/v1/market-data/imports
 
 These are **historical**, as-traded, unadjusted price observations. The JSON
 API keeps prices as **decimal strings** to prevent precision loss; volume is
-an integer. Responses are bounded (daily: 1–1000 rows, default 250;
-import history: 1–100). A missing database yields an empty catalog and a 404
-for an unknown symbol. No API write endpoints, remote exposure, scheduled
-fetching, or browser-side financial data caching are provided.
+an integer. Responses are bounded (daily: 1–4000 rows, default 250; import
+history: 1–100). A missing database yields an empty catalog and a 404 for an
+unknown symbol. The storage API has no write endpoints; acquisition,
+validation, settings and membership writes are separate authenticated local
+workflows. There is no remote exposure, scheduled fetching, or browser-side
+financial data caching.
 
 The data survives backend restart. Reimporting the same file won't duplicate
 daily bars; new provider revisions replace changed values in a single SQLite
@@ -175,11 +177,11 @@ See [SQLite data storage design](docs/STORAGE.md) for schema, provenance,
 backups, security boundaries and verification. A dedicated market-data
 **frontend** is still a separate planned dashboard milestone.
 
-## Read-only Market Data Explorer (GitHub PR #5)
+## Read-only Market Data Explorer
 
 After importing historical prices into the SQLite database and starting the Python service,
-launch the Mac app with `npm run tauri:dev` and choose **Markets**. You can select a locally
-stored ticker, apply a session-date range, inspect the most recent 1,000 records,
+launch the desktop app with `npm run tauri:dev` and choose **Markets**. You can select a locally
+stored ticker, apply a session-date range, inspect the most recent 4,000 records,
 view a candlestick and volume chart based on the most recent 70 loaded sessions,
 sort and page through a history table, and review source/ingestion metadata.
 No provider API requests, file writes or synthetic prices occur on this screen.
@@ -191,7 +193,8 @@ For recently loaded data, the read-only history API now supports `latest=true` t
 return the newest bounded records in chronological order. Existing clients omitting
 this parameter retain the original oldest-first response. Source data remains
 historical, unadjusted, and **not** a real-time quote. Automatic fetching/refresh
-and packaged Python sidecar support are separate follow-up milestones.
+and live quotes remain outside the current scope; release builds use the packaged
+Python sidecar for local acquisition.
 
 ## Integrated market data acquisition — GitHub PR #6
 
@@ -234,8 +237,8 @@ The development write API accepts only loopback callers, JSON, a dedicated
 workstation header, and a constrained browser Origin. This mitigates basic
 cross-site browser requests but **does not provide authenticated remote
 access** or isolation from untrusted local processes. Do not expose the
-FastAPI development server to LAN or Internet. The secure multi-device
-gateway and native packaged Python sidecar remain future milestones.
+FastAPI development server to LAN or Internet. A secure multi-device gateway
+remains outside the current local-first scope.
 
 Acquisition is **manual only**, not a scheduler or a live quote. Invalid
 provider responses, quota notifications and import failures never replace

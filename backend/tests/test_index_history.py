@@ -1,6 +1,7 @@
 """Offline index-level history acceptance tests; never fetch live FRED during CI."""
 
 import sqlite3
+from datetime import date, timedelta
 
 import httpx
 import pytest
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from finintel.main import app
 from finintel.market_data.index_history import (
+    MAX_ROWS,
     IndexHistoryError,
     acquire_index_closes,
     fetch_fred_index,
@@ -50,6 +52,18 @@ def test_parse_close_only_fred_series():
 def test_rejects_bad_provider_content_before_write(payload):
     with pytest.raises(IndexHistoryError):
         parse_fred_csv("SP500", payload)
+
+
+def test_fred_row_limit_is_exact():
+    start = date(1950, 1, 1)
+    rows = [f"{start + timedelta(days=index)},{index + 1}" for index in range(MAX_ROWS)]
+    payload = ("observation_date,SP500\n" + "\n".join(rows) + "\n").encode()
+    assert len(parse_fred_csv("SP500", payload)) == MAX_ROWS
+
+    too_many = rows + [f"{start + timedelta(days=MAX_ROWS)},{MAX_ROWS + 1}"]
+    oversized = ("observation_date,SP500\n" + "\n".join(too_many) + "\n").encode()
+    with pytest.raises(IndexHistoryError):
+        parse_fred_csv("SP500", oversized)
 
 
 def test_mocked_source_fetch_uses_fixed_host_and_series():

@@ -42,14 +42,16 @@ data vendors and currencies needs future explicit business rules.
 ## API contracts — development use only
 - `GET /api/v1/market-data/instruments`: stored series and date coverage.
 - `GET /api/v1/market-data/{SYMBOL}/daily`: chronological prices.
-  Optional `start_date`, `end_date` (ISO dates), `limit` 1–1000.
+  Optional `start_date`, `end_date` (ISO dates), `limit` 1–4000.
   Prices encoded as strings, `has_more` for bounded pagination.
 - `GET /api/v1/market-data/imports`: recent provenance and import stats,
   `limit` 1–100.
 
-These routes are unauthenticated and MUST remain bound to 127.0.0.1 for
-development. They are not the PWA tablet API. Do not expose them to LAN or
-Internet. There are no write endpoints and no automatic migrations on GET.
+These routes are read-only and remain bound to loopback. In development they
+may be called without a process token; packaged sidecars require the token on
+every route. They are not the PWA tablet API. Do not expose them to LAN or
+Internet. There are no storage write endpoints and no automatic migrations on
+GET.
 A separate authenticated HTTPS gateway is required for M1.5 tablet access.
 
 ## Local workflow
@@ -73,10 +75,9 @@ gitignored. Schema and query acceptance tests run against temporary SQLite
 databases and a **synthetic**, non-investable IBM fixture.
 
 ## Deferred
-Multi-provider normalization, authentication/authorization, native backend
-packaging, continuous ingestion scheduling, corporate-action adjustments,
-multi-year pagination/cursors, encryption and market charts/grids remain
-explicit follow-up scope.
+Multi-provider normalization, continuous ingestion scheduling,
+corporate-action adjustments, multi-year pagination/cursors, encryption and
+cross-device access remain explicit follow-up scope.
 
 ## Provider-to-SQLite integrated write path (GitHub PR #6)
 

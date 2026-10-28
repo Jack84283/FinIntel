@@ -14,6 +14,7 @@ node_modules/
 dist/
 .vite/
 apps/desktop/src-tauri/target/
+apps/desktop/tsconfig.tsbuildinfo
 # local financial data
 *.db
 *.db-*
@@ -23,6 +24,11 @@ apps/desktop/src-tauri/target/
 data/raw/
 data/cache/
 data/private/
+data/*.json
+data/*.log
+data/*.lock
+data/*.pid
+data/*.bak
 downloads/
 *.parquet
 # editor / OS

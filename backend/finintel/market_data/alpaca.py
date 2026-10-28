@@ -67,10 +67,17 @@ def alpaca_configured() -> bool:
 
 
 def _start_date(period: str, end: date) -> date:
+    def subtract_years(years: int) -> date:
+        try:
+            return end.replace(year=end.year - years)
+        except ValueError:
+            # February 29 does not exist in a non-leap target year.
+            return end.replace(year=end.year - years, day=28)
+
     if period == "5y":
-        return end.replace(year=end.year - 5)
+        return subtract_years(5)
     if period == "10y":
-        return end.replace(year=end.year - 10)
+        return subtract_years(10)
     if period == "max":
         return date(2016, 1, 1)
     raise ProviderError("Alpaca history must be 5y, 10y, or max")

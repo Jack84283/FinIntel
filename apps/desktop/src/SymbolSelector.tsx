@@ -22,7 +22,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
   const [query, setQuery] = useState(value);
   const [kind, setKind] = useState<AssetFilter>("All");
   const [results, setResults] = useState<CatalogSymbol[]>([]);
-  const [catalogSource, setCatalogSource] = useState<"starter" | "alpha_vantage">("starter");
+  const [catalogSource, setCatalogSource] = useState<"starter" | "alpha_vantage" | "equibles_proxy">("starter");
   const [catalogTotal, setCatalogTotal] = useState(0);
   const [error, setError] = useState("");
   const [syncError, setSyncError] = useState("");
@@ -113,7 +113,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
           {t("Instrument")}
         </label>
         <span className="text-[11px] text-muted-foreground">
-          {catalogSource === "starter" ? t("Starter directory") : t("Local provider directory")}
+          {catalogSource === "starter" ? t("Starter directory") : catalogSource === "equibles_proxy" ? t("Equibles membership directory") : t("Local provider directory")}
           {catalogTotal > 0 ? " · " + catalogTotal.toLocaleString() + " symbols" : ""}
         </span>
       </div>

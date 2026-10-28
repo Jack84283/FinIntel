@@ -76,7 +76,8 @@ def verify_events(
             rows = conn.execute(
                 "SELECT d.session_date, d.close, s.provider, s.adjustment "
                 "FROM daily_prices d JOIN series s ON s.id=d.series_id "
-                "WHERE s.symbol=? AND s.provider='alpaca_sip' AND s.adjustment='raw' "
+                "WHERE s.symbol=? AND s.provider='alpaca_sip' "
+                "AND s.adjustment='raw_unadjusted' "
                 "ORDER BY d.session_date",
                 (ticker,),
             )

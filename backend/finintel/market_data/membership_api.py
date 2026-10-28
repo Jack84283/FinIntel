@@ -3,7 +3,7 @@
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
 
 from finintel.market_data.equibles import EquiblesError, acquire_index, configured
@@ -12,6 +12,7 @@ from finintel.market_data.membership import (
     list_indexes,
     symbol_index_memberships,
 )
+from finintel.settings.api import _require_managed
 from finintel.storage.db import StorageError
 
 router = APIRouter(prefix="/api/v1/market-data/indexes", tags=["index-membership"])
@@ -119,8 +120,9 @@ def equibles_status() -> dict:
 
 
 @router.post("/{code}/acquire")
-def acquire_constituents(code: IndexCode) -> dict:
+def acquire_constituents(code: IndexCode, request: Request) -> dict:
     """Explicit local-only write: fetch all Equibles pages, validate, and import."""
+    _require_managed(request)
     try:
         return acquire_index(code)
     except (EquiblesError, ValueError) as exc:

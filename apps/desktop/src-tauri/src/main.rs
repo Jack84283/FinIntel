@@ -1,15 +1,25 @@
+use std::sync::{atomic::{AtomicBool, AtomicU16, Ordering}, Mutex, OnceLock};
 use std::time::Duration;
-use std::sync::{Mutex, OnceLock};
 use tauri::Manager;
-use tauri_plugin_shell::{process::CommandChild, ShellExt};
+use tauri_plugin_shell::{process::{CommandChild, CommandEvent}, ShellExt};
 
-static BACKEND_PORT: OnceLock<u16> = OnceLock::new();
+static BACKEND_PORT: AtomicU16 = AtomicU16::new(8765);
 static BACKEND_TOKEN: OnceLock<String> = OnceLock::new();
 
-struct ManagedBackend(Mutex<Option<CommandChild>>);
+struct ManagedBackend {
+    child: Mutex<Option<CommandChild>>,
+    stopping: AtomicBool,
+}
 
 fn backend_base() -> String {
-    format!("http://127.0.0.1:{}", BACKEND_PORT.get().copied().unwrap_or(8765))
+    format!("http://127.0.0.1:{}", BACKEND_PORT.load(Ordering::Relaxed))
+}
+
+fn available_backend_port() -> std::io::Result<u16> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    listener
+        .local_addr()
+        .map(|address| address.port())
 }
 
 fn backend_token() -> &'static str {
@@ -653,25 +663,76 @@ fn main() {
                 }
                 return Ok(());
             }
-            let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
-            let port = listener.local_addr()?.port();
-            drop(listener);
+            let port = available_backend_port()?;
             let token = uuid::Uuid::new_v4().to_string();
             let app_data = app.path().app_data_dir()?;
             std::fs::create_dir_all(&app_data)?;
             let db_path = app_data.join("finintel.sqlite3");
-            BACKEND_PORT.set(port).map_err(|_| "Port already initialized")?;
+            BACKEND_PORT.store(port, Ordering::Relaxed);
             BACKEND_TOKEN.set(token.clone()).map_err(|_| "Token already initialized")?;
-            let (mut receiver, child) = app.shell()
+            let (receiver, child) = app.shell()
                 .sidecar("finintel-backend")?
                 .env("FININTEL_BACKEND_PORT", port.to_string())
-                .env("FININTEL_PROCESS_TOKEN", token)
+                .env("FININTEL_PROCESS_TOKEN", token.clone())
                 .env("FININTEL_DB_PATH", db_path.to_string_lossy().into_owned())
                 .spawn()?;
-            tauri::async_runtime::spawn(async move {
-                while receiver.recv().await.is_some() {}
+            app.manage(ManagedBackend {
+                child: Mutex::new(Some(child)),
+                stopping: AtomicBool::new(false),
             });
-            app.manage(ManagedBackend(Mutex::new(Some(child))));
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut receiver = receiver;
+                loop {
+                    loop {
+                        match receiver.recv().await {
+                            Some(CommandEvent::Terminated(_)) | None => break,
+                            Some(_) => {}
+                        }
+                    }
+                    let should_stop = handle
+                        .try_state::<ManagedBackend>()
+                        .map(|state| state.stopping.load(Ordering::Acquire))
+                        .unwrap_or(true);
+                    if should_stop { break; }
+
+                    let mut restarted = false;
+                    for _ in 0..3 {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        let should_stop = handle
+                            .try_state::<ManagedBackend>()
+                            .map(|state| state.stopping.load(Ordering::Acquire))
+                            .unwrap_or(true);
+                        if should_stop { break; }
+                        let Ok(next_port) = available_backend_port() else { continue; };
+                        BACKEND_PORT.store(next_port, Ordering::Relaxed);
+                        let spawned = handle.shell()
+                            .sidecar("finintel-backend")
+                            .and_then(|command| command
+                                .env("FININTEL_BACKEND_PORT", next_port.to_string())
+                                .env("FININTEL_PROCESS_TOKEN", token.clone())
+                                .env("FININTEL_DB_PATH", db_path.to_string_lossy().into_owned())
+                                .spawn());
+                        if let Ok((next_receiver, next_child)) = spawned {
+                            let Some(state) = handle.try_state::<ManagedBackend>() else {
+                                let _ = next_child.kill();
+                                break;
+                            };
+                            if state.stopping.load(Ordering::Acquire) {
+                                let _ = next_child.kill();
+                                break;
+                            }
+                            if let Ok(mut guard) = state.child.lock() {
+                                *guard = Some(next_child);
+                            }
+                            receiver = next_receiver;
+                            restarted = true;
+                            break;
+                        }
+                    }
+                    if !restarted { break; }
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -709,7 +770,8 @@ fn main() {
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
                 if let Some(owned) = app.try_state::<ManagedBackend>() {
-                    if let Ok(mut guard) = owned.0.lock() {
+                    owned.stopping.store(true, Ordering::Release);
+                    if let Ok(mut guard) = owned.child.lock() {
                         if let Some(child) = guard.take() {
                             let _ = child.kill();
                         }

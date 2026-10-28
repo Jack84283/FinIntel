@@ -4,7 +4,7 @@ import threading
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from finintel.market_data.corporate_reference import verify_events
@@ -12,6 +12,7 @@ from finintel.market_data.diagnostics import diagnostics
 from finintel.market_data.performance import benchmark
 from finintel.market_data.provider import ProviderError
 from finintel.market_data.validation import validate
+from finintel.settings.api import _require_managed
 from finintel.storage.db import database_path
 
 router = APIRouter(prefix="/api/v1/validation", tags=["data-validation"])
@@ -111,7 +112,8 @@ def _run(job_id: str, checks: list[str]) -> None:
 
 
 @router.post("/run")
-def start_validation(request: StartRequest) -> dict:
+def start_validation(request: StartRequest, http_request: Request) -> dict:
+    _require_managed(http_request)
     if len(set(request.checks)) != len(request.checks) or any(
         check not in CHECKS for check in request.checks
     ):
@@ -149,8 +151,9 @@ class CorporateReferenceRequest(BaseModel):
 
 
 @router.post("/corporate-reference")
-def verify_corporate_reference(request: CorporateReferenceRequest) -> dict:
+def verify_corporate_reference(request: CorporateReferenceRequest, http_request: Request) -> dict:
     """Explicit provider verification; not triggered by ordinary local scans."""
+    _require_managed(http_request)
     try:
         return verify_events(database_path(), request.symbol)
     except (ProviderError, ValueError, FileNotFoundError) as exc:

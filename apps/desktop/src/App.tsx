@@ -56,8 +56,8 @@ export default function App() {
     setScreen("market");
   };
 
-  const checkHealth = useCallback(async (signal?: { cancelled: boolean }) => {
-    setConnection({ kind: "loading" });
+  const checkHealth = useCallback(async (signal?: { cancelled: boolean }, background = false) => {
+    if (!background) setConnection({ kind: "loading" });
     try {
       const health = await fetchBackendHealth();
       if (!signal?.cancelled) setConnection({ kind: "connected", health });
@@ -71,7 +71,8 @@ export default function App() {
   useEffect(() => {
     const signal = { cancelled: false };
     void checkHealth(signal);
-    return () => { signal.cancelled = true; };
+    const timer = window.setInterval(() => { void checkHealth(signal, true); }, 5000);
+    return () => { signal.cancelled = true; window.clearInterval(timer); };
   }, [checkHealth]);
 
   return (

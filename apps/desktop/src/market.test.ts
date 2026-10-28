@@ -25,6 +25,17 @@ describe("historical market API contracts", () => {
     expect(data.observations[0].open).toBe("100.10");
   });
 
+  it("accepts finite Decimal exponent notation from SQLite text values", () => {
+    const data = parseDaily({
+      ...observed,
+      observations: [{
+        session_date: "2026-10-19", open: "1E+3", high: "1.1E+3",
+        low: "9E+2", close: "1.03E+3", volume: 100,
+      }],
+    });
+    expect(data.observations[0].close).toBe("1.03E+3");
+  });
+
   it("rejects invalid history, symbols, and oversized results", () => {
     expect(() => parseDaily(null)).toThrow();
     expect(() => parseDaily({ ...observed, observations: [...observed.observations].reverse() })).toThrow();

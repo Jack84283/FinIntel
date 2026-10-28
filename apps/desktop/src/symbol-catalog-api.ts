@@ -13,7 +13,7 @@ export interface CatalogSymbol {
 }
 
 export interface SymbolSearchResponse {
-  source: "starter" | "alpha_vantage";
+  source: "starter" | "alpha_vantage" | "equibles_proxy";
   total: number;
   updated_at: string | null;
   results: CatalogSymbol[];
@@ -36,7 +36,7 @@ function object(value: unknown): Record<string, unknown> {
 export function parseSymbolSearch(value: unknown): SymbolSearchResponse {
   const item = object(value);
   if (
-    (item.source !== "starter" && item.source !== "alpha_vantage") ||
+    (item.source !== "starter" && item.source !== "alpha_vantage" && item.source !== "equibles_proxy") ||
     !Number.isSafeInteger(item.total) || (item.total as number) < 0 ||
     (item.updated_at !== null && typeof item.updated_at !== "string") ||
     !Array.isArray(item.results) || item.results.length > 100

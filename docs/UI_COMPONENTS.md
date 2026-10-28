@@ -1,6 +1,6 @@
 # FinIntel UI foundation — shadcn/ui + Tailwind CSS v4
 
-The Mac desktop window (Tauri 2) and future iPad/Android PWA share React/TypeScript UI components.
+The desktop window (Tauri 2) and future iPad/Android PWA share React/TypeScript UI components.
 
 ## Stack and ownership
 

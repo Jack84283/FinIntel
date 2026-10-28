@@ -53,4 +53,11 @@ describe("local Stock / ETF directory contracts", () => {
     })).toThrow();
     expect(() => parseCatalogSync({ status: "synced", total: 0 })).toThrow();
   });
+
+  it("accepts a catalog enriched by an Equibles membership snapshot", () => {
+    expect(parseSymbolSearch({
+      source: "equibles_proxy", updated_at: "2026-10-23T00:00:00Z", total: 1,
+      results: [{ symbol: "ZXEQ", name: "Equibles Example", asset_type: "Stock", exchange: "" }],
+    }).source).toBe("equibles_proxy");
+  });
 });

@@ -15,7 +15,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from finintel.storage.db import SCHEMA_VERSION, StorageError, _write_connection, database_path
+from finintel.storage.db import (
+    SCHEMA_VERSION,
+    StorageError,
+    _write_connection,
+    database_path,
+    serialized_storage_write,
+)
 
 _LOCK = threading.Lock()
 _BACKUP_ID = re.compile(
@@ -131,6 +137,7 @@ def list_backups(*, db: Path | None = None) -> list[dict[str, object]]:
     )
 
 
+@serialized_storage_write
 def create_backup(*, db: Path | None = None, reason: str = "manual") -> dict[str, object]:
     path = db if db is not None else database_path()
     if not _LOCK.acquire(blocking=False):
@@ -263,6 +270,7 @@ def _merge(staging: Path, source: Path) -> None:
             dest.execute("DETACH DATABASE incoming")
 
 
+@serialized_storage_write
 def restore_backup(identifier: str, mode: str, *, db: Path | None = None) -> dict[str, object]:
     """Cancel is a frontend-only no-op. Merge and replace are explicit writes."""
     if mode not in ("merge", "replace"):

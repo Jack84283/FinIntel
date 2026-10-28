@@ -7,6 +7,13 @@ from fastapi.testclient import TestClient
 from finintel.main import app
 from finintel.market_data import validation_api
 
+TOKEN = "t" * 32
+
+
+def managed_client(monkeypatch):
+    monkeypatch.setenv("FININTEL_PROCESS_TOKEN", TOKEN)
+    return TestClient(app, headers={"x-finintel-process-token": TOKEN})
+
 
 def test_validation_start_and_result(monkeypatch, tmp_path):
     db = tmp_path / "local.sqlite3"
@@ -15,7 +22,7 @@ def test_validation_start_and_result(monkeypatch, tmp_path):
     monkeypatch.setattr(validation_api, "validate", lambda path: {"price_rows": 2, "issues": {}})
     with validation_api._lock:
         validation_api._job = None
-    client = TestClient(app)
+    client = managed_client(monkeypatch)
     invalid = client.post("/api/v1/validation/run", json={"checks": ["invalid"]})
     assert invalid.status_code == 422
     started = client.post("/api/v1/validation/run", json={"checks": ["integrity"]})
@@ -31,7 +38,9 @@ def test_validation_start_and_result(monkeypatch, tmp_path):
 
 def test_validation_requires_local_db(monkeypatch, tmp_path):
     monkeypatch.setattr(validation_api, "database_path", lambda: tmp_path / "missing.sqlite3")
-    response = TestClient(app).post("/api/v1/validation/run", json={"checks": ["coverage"]})
+    response = managed_client(monkeypatch).post(
+        "/api/v1/validation/run", json={"checks": ["coverage"]}
+    )
     assert response.status_code == 503
 
 
@@ -42,7 +51,7 @@ def test_reference_action_explicit(monkeypatch, tmp_path):
     monkeypatch.setattr(
         validation_api, "verify_events", lambda path, symbol: {"symbol": symbol, "events": []}
     )
-    client = TestClient(app)
+    client = managed_client(monkeypatch)
     assert (
         client.post("/api/v1/validation/corporate-reference", json={"symbol": "SPY"}).status_code
         == 200
@@ -90,7 +99,7 @@ def test_all_five_checks_run_and_return_expected_sections(monkeypatch, tmp_path)
     )
     with validation_api._lock:
         validation_api._job = None
-    client = TestClient(app)
+    client = managed_client(monkeypatch)
     started = client.post("/api/v1/validation/run", json={"checks": list(validation_api.CHECKS)})
     assert started.status_code == 200
     for _ in range(100):

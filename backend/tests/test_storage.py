@@ -18,7 +18,7 @@ from finintel.storage.db import (
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "alpha_vantage_daily_SYNTHETIC.json"
-SOURCE = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM"
+SOURCE = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM&outputsize=compact&datatype=json"
 
 
 def snapshot_at(tmp_path, *, shift_days=0, changes=None, filename="snapshot.json"):

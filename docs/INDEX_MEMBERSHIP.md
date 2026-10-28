@@ -16,7 +16,7 @@ of the index merely because it tracks that benchmark.
 
 No membership records are fabricated or bundled in the public repository.
 FinIntel only displays constituents after a dated snapshot from an
-**independently verified and authorized** source is imported on the local Mac.
+**independently verified and authorized** source is imported on the local workstation.
 
 ## Equibles API acquisition (experimental)
 

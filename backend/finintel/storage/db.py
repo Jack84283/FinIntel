@@ -7,8 +7,10 @@ the database and cannot modify it. PR #3/M1 data persistence (GitHub PR #4).
 import hashlib
 import os
 import sqlite3
+import threading
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from functools import wraps
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -163,6 +165,20 @@ ON index_daily_closes(index_code, provider, session_date DESC);
 
 class StorageError(Exception):
     """Safe failure message for local CLI or API consumers."""
+
+
+STORAGE_WRITE_LOCK = threading.RLock()
+
+
+def serialized_storage_write(function):
+    """Serialize writes and database replacement within this backend process."""
+
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with STORAGE_WRITE_LOCK:
+            return function(*args, **kwargs)
+
+    return wrapped
 
 
 def database_path() -> Path:
@@ -402,13 +418,24 @@ def _safe_source(batch: HistoricalBatch) -> None:
         or url.path != "/query"
         or url.username
         or url.password
-        or not set(params) <= {"function", "symbol", "outputsize", "datatype"}
+        or set(params) != {"function", "symbol", "outputsize", "datatype"}
         or params.get("function") != ["TIME_SERIES_DAILY"]
         or params.get("symbol") != [batch.symbol]
+        or params.get("outputsize") not in (["compact"], ["full"])
+        or params.get("datatype") != ["json"]
     ):
         raise StorageError("Snapshot source metadata is not an approved sanitized provider URL")
     terms = urlsplit(batch.provider_terms_url)
-    if terms.scheme != "https" or terms.hostname != "www.alphavantage.co":
+    if (
+        terms.scheme != "https"
+        or terms.hostname != "www.alphavantage.co"
+        or terms.port is not None
+        or terms.path != "/terms_of_service/"
+        or terms.query
+        or terms.fragment
+        or terms.username
+        or terms.password
+    ):
         raise StorageError("Snapshot license metadata is not from the approved provider")
 
 
@@ -430,6 +457,7 @@ def load_snapshot(path: Path) -> tuple[HistoricalBatch, str]:
         raise StorageError("Snapshot is unreadable or failed historical-data validation") from exc
 
 
+@serialized_storage_write
 def import_snapshot(snapshot: Path, *, db: Path | None = None) -> dict[str, object]:
     """Upsert OHLCV atomically with an immutable import record for provenance.
 
@@ -751,6 +779,7 @@ def search_import_history(
         conn.close()
 
 
+@serialized_storage_write
 def search_symbols(
     *,
     query: str = "",
@@ -841,6 +870,7 @@ def lookup_symbol_type(symbol: str, *, db: Path | None = None) -> str | None:
         conn.close()
 
 
+@serialized_storage_write
 def replace_symbol_catalog(
     records: list[dict[str, str]], *, db: Path | None = None
 ) -> dict[str, object]:
@@ -872,6 +902,7 @@ def replace_symbol_catalog(
         conn.close()
 
 
+@serialized_storage_write
 def append_action_event(
     *,
     symbol: str,
