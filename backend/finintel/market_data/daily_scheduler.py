@@ -12,7 +12,7 @@ import sqlite3
 import contextlib
 import sys
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -67,6 +67,26 @@ def instruments(provider: str) -> list[str]:
         con.close()
 
 
+def latest_sessions(provider: str) -> dict[str, date]:
+    """Read maximum stored trading session per symbol in one indexed query."""
+    db = database_path()
+    if not db.is_file() or db.is_symlink():
+        return {}
+    con = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        return {
+            symbol: date.fromisoformat(day)
+            for symbol, day in con.execute(
+                "SELECT s.symbol, MAX(p.session_date) FROM series s "
+                "JOIN daily_prices p ON p.series_id=s.id "
+                "WHERE s.provider=? AND s.frequency='1d' "
+                "AND s.adjustment='raw_unadjusted' GROUP BY s.symbol", (provider,)
+            )
+        }
+    finally:
+        con.close()
+
+
 def run_cycle(*, provider: str, state_path: Path, max_symbols: int = 0,
               delay_seconds: float = 0, indexes_only: bool = False) -> dict:
     state = status(state_path)
@@ -92,6 +112,7 @@ def run_cycle(*, provider: str, state_path: Path, max_symbols: int = 0,
         symbols = instruments(provider)
         if max_symbols:
             symbols = symbols[:max_symbols]
+        checkpoints = latest_sessions(provider)
         checkpoint["total_equities"] = len(symbols)
         for idx, symbol in enumerate(symbols):
             if idx and delay_seconds:
@@ -99,9 +120,13 @@ def run_cycle(*, provider: str, state_path: Path, max_symbols: int = 0,
             checkpoint["current_symbol"] = symbol
             save(state_path, checkpoint)
             try:
-                # Reuses validated, transactional ingestion. The short overlap
-                # optimization is a follow-up; existing adapters may fetch more.
-                result = acquire_and_store(symbol, provider=provider, period="5y")
+                # Reconcile overlapping sessions to capture late revisions and holidays.
+                last = checkpoints.get(symbol)
+                start = last - timedelta(days=8) if last else None
+                result = acquire_and_store(
+                    symbol, provider=provider, period="5y",
+                    start_date=start if provider != "alpha_vantage" else None,
+                )
                 checkpoint["equities"][symbol] = {
                     "status": "stored", "inserted": result["inserted"],
                     "updated": result["updated"], "last_session": result["last_session"],
