@@ -11,6 +11,7 @@ import { fetchMarketDaily, fetchMarketInstrumentDirectory } from "./market-api";
 import { searchAcquirableSymbols } from "./symbol-catalog-api";
 import type { MarketSelection } from "./DataAcquisitionPage";
 import { MarketCharts } from "./market-chart";
+import { TechnicalIndicatorsCard } from "./TechnicalIndicatorsCard";
 import { MarketDatePicker } from "./components/MarketDatePicker";
 import { yearsAgo, type HistoryPeriod } from "./history-range";
 import { sortableBars, type DailySeries, type MarketInstrument } from "./market";
@@ -367,6 +368,8 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                   {t("Display is limited to 4,000 latest records. Use date filters to examine older stored sessions.")}
                 </p>
               )}
+
+              <TechnicalIndicatorsCard bars={bars} />
 
               <Card>
                 <CardHeader>
