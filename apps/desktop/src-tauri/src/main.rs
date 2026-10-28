@@ -579,6 +579,50 @@ async fn database_backup_restore(backup_id: String, mode: String) -> Result<serd
     ).await
 }
 
+
+fn valid_index_history_code(code: &str) -> bool {
+    matches!(code, "SP500" | "DJIA" | "NASDAQCOM" | "NDX" | "VIX")
+}
+
+#[tauri::command]
+async fn index_history_catalog() -> Result<serde_json::Value, String> {
+    read_backend("/api/v1/market-data/index-history", &[]).await
+}
+
+#[tauri::command]
+async fn index_history_daily(code: String, limit: u16) -> Result<serde_json::Value, String> {
+    if !valid_index_history_code(&code) || !(1..=10000).contains(&limit) {
+        return Err("Invalid index history query.".to_string());
+    }
+    read_backend(
+        &format!("/api/v1/market-data/index-history/{code}/daily"),
+        &[("limit", limit.to_string())],
+    )
+    .await
+}
+
+#[tauri::command]
+async fn index_history_acquire(code: String) -> Result<serde_json::Value, String> {
+    if !valid_index_history_code(&code) || backend_token().is_empty() {
+        return Err("Index acquisition requires a managed desktop and valid index.".to_string());
+    }
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Unable to initialize the index history client.".to_string())?
+        .post(format!("{}/api/v1/market-data/index-history/{code}/acquire", backend_base()))
+        .header("x-finintel-process-token", backend_token())
+        .send()
+        .await
+        .map_err(|_| "The index history backend is unavailable.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Index history download failed (HTTP {}).", response.status()));
+    }
+    response.json::<serde_json::Value>().await
+        .map_err(|_| "Index history backend returned invalid JSON.".to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -639,6 +683,9 @@ fn main() {
             market_symbols,
             market_sync_symbols,
             index_acquire,
+            index_history_catalog,
+            index_history_daily,
+            index_history_acquire,
             index_catalog,
             index_constituents,
             index_stock_memberships
