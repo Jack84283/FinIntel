@@ -46,7 +46,7 @@ def test_starter_symbols_readable_without_database_or_key(tmp_path, monkeypatch)
     assert etfs.json()["results"][0]["symbol"] == "SPY"
     assert path.exists()  # The catalog is durably seeded on first search.
     with sqlite3.connect(path) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0] >= 73
         assert (
             conn.execute("SELECT asset_type FROM symbol_catalog WHERE symbol='^GSPC'").fetchone()[0]
@@ -63,7 +63,7 @@ def test_migrate_v1_prices_without_data_loss(tmp_path, monkeypatch):
     assert search_symbols(db=db)["source"] == "starter"
     assert replace_symbol_catalog(parse_listing_csv(LISTING), db=db)["total"] == 12
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0] == 12
         assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 0
 
@@ -85,11 +85,12 @@ def test_upgrading_populated_v1_preserves_imported_prices(tmp_path, monkeypatch)
         conn.execute("DROP TABLE symbol_catalog")
         conn.execute("DROP TABLE action_events")
         conn.execute("DROP TABLE index_memberships")
+        conn.execute("DROP TABLE index_daily_closes")
         conn.execute("PRAGMA user_version = 1")
     assert search_symbols(db=db)["source"] == "starter"
     assert replace_symbol_catalog(parse_listing_csv(LISTING), db=db)["total"] == 12
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("SELECT * FROM daily_prices").fetchall() == before_prices
         assert conn.execute("SELECT * FROM ingestion_runs").fetchall() == before_runs
         assert conn.execute("SELECT * FROM series").fetchall() == before_series
@@ -236,7 +237,7 @@ def test_migration_of_provider_synced_v2_preserves_listing_and_index_types(tmp_p
         == "Mutual Fund"
     )
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("SELECT COUNT(*) FROM symbol_catalog").fetchone()[0] == 11
 
 

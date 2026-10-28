@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import HistoricalBatch
 from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -145,6 +145,22 @@ CREATE INDEX index_membership_snapshot ON index_memberships(index_code, as_of DE
 """
 
 
+# Store index levels separately from equity OHLCV. Index levels have no volume.
+SCHEMA_V7 = """
+CREATE TABLE index_daily_closes (
+    index_code TEXT NOT NULL,
+    provider TEXT NOT NULL CHECK(provider IN ('fred')),
+    session_date TEXT NOT NULL,
+    close TEXT NOT NULL,
+    retrieved_at TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    PRIMARY KEY (index_code, provider, session_date)
+);
+CREATE INDEX index_daily_closes_by_date
+ON index_daily_closes(index_code, provider, session_date DESC);
+"""
+
+
 class StorageError(Exception):
     """Safe failure message for local CLI or API consumers."""
 
@@ -158,7 +174,7 @@ def _ensure_version(conn: sqlite3.Connection, *, allow_missing: bool) -> bool:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == 0 and allow_missing:
         return False
-    if version not in (1, 2, 3, 4, 5, SCHEMA_VERSION):
+    if version not in (1, 2, 3, 4, 5, 6, SCHEMA_VERSION):
         raise StorageError(
             "SQLite schema version is unsupported; expected version "
             + str(SCHEMA_VERSION)
@@ -253,10 +269,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.executescript(
                 "BEGIN IMMEDIATE;\n" + SCHEMA_V6 + "\nPRAGMA user_version = 6;\nCOMMIT;"
             )
+            version = 6
         except sqlite3.Error as exc:
             if conn.in_transaction:
                 conn.rollback()
             raise StorageError("Unable to migrate index membership schema to v6") from exc
+    if version == 6:
+        try:
+            conn.executescript(
+                "BEGIN IMMEDIATE;\n" + SCHEMA_V7 + "\nPRAGMA user_version = 7;\nCOMMIT;"
+            )
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to initialize index-level historical storage v7") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:

@@ -3,6 +3,7 @@ import { useLocale } from "./localization";
 import { useState } from "react";
 import { BarChart3, CheckCircle2, Database, History, ShieldCheck } from "lucide-react";
 import { AcquisitionCard } from "./AcquisitionCard";
+import { IndexHistoryCard } from "./IndexHistoryCard";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ export function DataAcquisitionPage({
 
       <div className="grid min-w-0 items-start gap-2 2xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-2">
+          <IndexHistoryCard />
           <AcquisitionCard
             selectedSymbol=""
             onAcquired={(symbol, provider) => {
