@@ -1,5 +1,7 @@
 """Offline Alpaca error classification for large, unattended historical backfills."""
 
+from datetime import date
+
 import httpx
 import pytest
 
@@ -67,3 +69,11 @@ def test_alpaca_wrong_symbol_remains_invalid_payload(credentials):
         pytest.raises(ProviderPayloadInvalid),
     ):
         alpaca.AlpacaDailyProvider(client=client).fetch_daily("AAPL")
+
+
+@pytest.mark.parametrize(
+    ("period", "expected"),
+    [("5y", date(2023, 2, 28)), ("10y", date(2018, 2, 28))],
+)
+def test_alpaca_leap_day_history_start_is_safe(period, expected):
+    assert alpaca._start_date(period, date(2028, 2, 29)) == expected

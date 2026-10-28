@@ -14,7 +14,7 @@ def fixture_batch() -> HistoricalBatch:
     return parse_alpha_vantage_daily(
         FIXTURE.read_bytes(),
         symbol="IBM",
-        source_url="https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM",
+        source_url="https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM&outputsize=compact&datatype=json",
     )
 
 

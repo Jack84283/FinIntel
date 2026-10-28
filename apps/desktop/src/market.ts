@@ -74,7 +74,7 @@ function count(value: unknown): number {
 
 function decimal(value: unknown): string {
   const v = text(value);
-  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(v) || !Number.isFinite(Number(v)) || Number(v) <= 0) {
+  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(v) || !Number.isFinite(Number(v)) || Number(v) <= 0) {
     throw new Error("Market-data response contains an invalid historical price.");
   }
   return v;

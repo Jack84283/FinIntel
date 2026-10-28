@@ -5,7 +5,6 @@ Successful imports are skipped through the shared local SQLite catalog.
 """
 
 import argparse
-import fcntl
 import json
 import os
 import sqlite3
@@ -27,6 +26,11 @@ from finintel.market_data.provider import (
 )
 from finintel.market_data.tiingo import tiingo_configured
 from finintel.storage.db import StorageError, database_path
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 
 def _day() -> str:
@@ -66,6 +70,25 @@ def _sleep_until_next_utc_day() -> None:
     time.sleep(max(1, (tomorrow - now).total_seconds() + 30))
 
 
+def _acquire_checkpoint_lock(handle) -> bool:
+    """Acquire a non-blocking advisory lock on macOS, Linux, or Windows."""
+    if os.name == "nt":
+        handle.seek(0)
+        handle.write("0")
+        handle.flush()
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
+
+
 def run(
     *,
     provider: str,
@@ -90,9 +113,7 @@ def run(
     state_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = state_path.with_suffix(state_path.suffix + ".lock")
     with lock_path.open("a+", encoding="utf-8") as lock:
-        try:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+        if not _acquire_checkpoint_lock(lock):
             print("Another historical backfill is already using this checkpoint.", file=sys.stderr)
             return 2
         consecutive_provider_errors = 0

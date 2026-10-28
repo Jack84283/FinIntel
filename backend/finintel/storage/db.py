@@ -7,8 +7,10 @@ the database and cannot modify it. PR #3/M1 data persistence (GitHub PR #4).
 import hashlib
 import os
 import sqlite3
+import threading
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from functools import wraps
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -163,6 +165,20 @@ ON index_daily_closes(index_code, provider, session_date DESC);
 
 class StorageError(Exception):
     """Safe failure message for local CLI or API consumers."""
+
+
+STORAGE_WRITE_LOCK = threading.RLock()
+
+
+def serialized_storage_write(function):
+    """Serialize writes and database replacement within this backend process."""
+
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with STORAGE_WRITE_LOCK:
+            return function(*args, **kwargs)
+
+    return wrapped
 
 
 def database_path() -> Path:
@@ -323,10 +339,37 @@ def _read_connection(path: Path) -> sqlite3.Connection | None:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA query_only = ON")
         _ensure_version(conn, allow_missing=False)
+        # Keep all queries made through this connection on one committed snapshot.
+        conn.execute("BEGIN")
         return conn
     except (sqlite3.Error, StorageError) as exc:
         conn.close()
         raise StorageError("Local database is unavailable or needs migration") from exc
+
+
+def _database_version(path: Path) -> int:
+    """Read only the schema marker without taking the process write lock."""
+    if not path.is_file():
+        return 0
+    if path.is_symlink():
+        raise StorageError("Refusing to read a symlink database path")
+    try:
+        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5) as conn:
+            return int(conn.execute("PRAGMA user_version").fetchone()[0])
+    except sqlite3.Error as exc:
+        raise StorageError("Could not inspect the local database schema") from exc
+
+
+@serialized_storage_write
+def _initialize_symbol_catalog(path: Path) -> None:
+    """Create or migrate the catalog only when a read cannot use it directly."""
+    conn = _write_connection(path)
+    conn.close()
+
+
+def _ensure_symbol_catalog(path: Path) -> None:
+    if _database_version(path) < SCHEMA_VERSION:
+        _initialize_symbol_catalog(path)
 
 
 def _safe_source(batch: HistoricalBatch) -> None:
@@ -405,10 +448,21 @@ def _safe_source(batch: HistoricalBatch) -> None:
         or not set(params) <= {"function", "symbol", "outputsize", "datatype"}
         or params.get("function") != ["TIME_SERIES_DAILY"]
         or params.get("symbol") != [batch.symbol]
+        or ("outputsize" in params and params.get("outputsize") not in (["compact"], ["full"]))
+        or ("datatype" in params and params.get("datatype") != ["json"])
     ):
         raise StorageError("Snapshot source metadata is not an approved sanitized provider URL")
     terms = urlsplit(batch.provider_terms_url)
-    if terms.scheme != "https" or terms.hostname != "www.alphavantage.co":
+    if (
+        terms.scheme != "https"
+        or terms.hostname != "www.alphavantage.co"
+        or terms.port is not None
+        or terms.path not in ("", "/", "/terms_of_service/")
+        or terms.query
+        or terms.fragment
+        or terms.username
+        or terms.password
+    ):
         raise StorageError("Snapshot license metadata is not from the approved provider")
 
 
@@ -430,6 +484,7 @@ def load_snapshot(path: Path) -> tuple[HistoricalBatch, str]:
         raise StorageError("Snapshot is unreadable or failed historical-data validation") from exc
 
 
+@serialized_storage_write
 def import_snapshot(snapshot: Path, *, db: Path | None = None) -> dict[str, object]:
     """Upsert OHLCV atomically with an immutable import record for provenance.
 
@@ -766,10 +821,9 @@ def search_symbols(
     if len(query) > 80:
         raise ValueError("Search query is too long")
     path = db if db is not None else database_path()
-    # Catalog access is the one intentional initializing GET: user explicitly
-    # requested persistent offline symbol master data, even before price fetch.
-    write_conn = _write_connection(path)
-    write_conn.close()
+    # First-run creation and legacy-schema migration are short serialized writes.
+    # Normal catalog reads remain independent of backups, restores and other writers.
+    _ensure_symbol_catalog(path)
     conn = _read_connection(path)
     if conn is None:
         raise StorageError("Could not open the newly initialized symbol catalog")
@@ -841,6 +895,7 @@ def lookup_symbol_type(symbol: str, *, db: Path | None = None) -> str | None:
         conn.close()
 
 
+@serialized_storage_write
 def replace_symbol_catalog(
     records: list[dict[str, str]], *, db: Path | None = None
 ) -> dict[str, object]:
@@ -872,6 +927,7 @@ def replace_symbol_catalog(
         conn.close()
 
 
+@serialized_storage_write
 def append_action_event(
     *,
     symbol: str,

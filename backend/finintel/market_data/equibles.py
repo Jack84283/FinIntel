@@ -4,7 +4,7 @@ import json
 from datetime import date
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from finintel.market_data.membership import INDEX_NAMES, load_membership
 from finintel.settings.credentials import get_secret
@@ -16,6 +16,14 @@ INDEX_SLUGS = {
     "RUT": "russell-2000",
 }
 PAGE_SIZE = 500
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = build_opener(_RejectRedirects)
 
 
 class EquiblesError(ValueError):
@@ -38,7 +46,9 @@ def _fetch(code: str, offset: int) -> dict:
     )
     req = Request(url, headers={"Authorization": "Bearer " + key, "Accept": "application/json"})
     try:
-        with urlopen(req, timeout=30) as response:
+        # The endpoint is allowlisted and credentials must never be sent to a
+        # redirected host. Reject redirects instead of following them.
+        with _OPENER.open(req, timeout=30) as response:
             raw = response.read(2_000_001)
             if len(raw) > 2_000_000:
                 raise EquiblesError("Equibles response exceeds the allowed size.")

@@ -120,7 +120,7 @@ export function DataValidationPage() {
           </div>
           {referenceError && <p role="alert" className="text-sm text-destructive">{referenceError}</p>}
           {referenceReport && <details open className="rounded-md border border-border p-3">
-            <summary className="cursor-pointer text-sm font-medium">Reference events ({String(referenceReport.event_count ?? 0)})</summary>
+            <summary className="cursor-pointer text-sm font-medium">{t("Reference events")} ({String(referenceReport.event_count ?? 0)})</summary>
             <pre className="mt-2 max-h-[360px] overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(referenceReport, null, 2)}</pre>
           </details>}
         </CardContent>

@@ -415,7 +415,7 @@ export function MarketExplorer({ initialSelection, onOpenAcquisition }: {
                     {visibleRows.length === 0 && <p className="p-8 text-center text-sm text-muted-foreground">{t("No observations in this date range.")}</p>}
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-xs text-muted-foreground" aria-live="polite">Page {page + 1} of {pageCount}</p>
+                    <p className="text-xs text-muted-foreground" aria-live="polite">{t("Page")} {page + 1} {t("of")} {pageCount}</p>
                     <div className="flex gap-2">
                       <Button size="sm" variant="secondary" disabled={page <= 0} onClick={() => setPage((value) => Math.max(0, value - 1))}>{t("Previous")}</Button>
                       <Button size="sm" variant="secondary" disabled={page >= pageCount - 1} onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))}>{t("Next")}</Button>

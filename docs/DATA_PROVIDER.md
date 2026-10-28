@@ -63,12 +63,14 @@ fetch must leave the existing last-known-good snapshot untouched.
 The synthetic IBM fixture in backend/tests/fixtures exercises the API's JSON
 shape but contains **invented test values**, not real historical market observations.
 
-## Separation from future releases
+## Historical delivery map and remaining scope
 
 PR #2: provider adapter, validation, CLI and local staging JSON.
 PR #3: versioned SQLite migrations, ingestion history, idempotence and data APIs.
 PR #4: charts and grids driven by persisted data.
-PR #5: signed native Python sidecar and lifecycle/security integration.
+PR #5: signed native Python sidecar and lifecycle/security integration (the
+current branch implements the unsigned local packaging/lifecycle foundation;
+signing and installed-package acceptance remain open).
 M1.5: authenticated HTTPS gateway for the cross-device tablet PWA.
 
 This document does not claim any third-party dataset is public domain or freely

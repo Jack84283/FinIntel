@@ -11,7 +11,13 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from finintel.market_data.provider import SYMBOL_PATTERN
-from finintel.storage.db import StorageError, _read_connection, _write_connection, database_path
+from finintel.storage.db import (
+    StorageError,
+    _read_connection,
+    _write_connection,
+    database_path,
+    serialized_storage_write,
+)
 
 INDEX_NAMES = {
     "SP500": "S&P 500",
@@ -31,6 +37,7 @@ def _as_of(value: str | None) -> str:
     return parsed.isoformat()
 
 
+@serialized_storage_write
 def load_membership(
     index_code: str,
     as_of: str,
