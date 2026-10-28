@@ -58,7 +58,9 @@ export function IndexHistoryCard() {
         success += 1;
       } catch (reason) {
         failures.push(code + ": " + String(reason));
-        if (!all) break;
+        // A busy or unavailable backend affects the entire batch; stop instead
+        // of sending four more requests that will all fail with HTTP 409.
+        if (!all || /HTTP 409|timed out|backend.*(unreachable|unavailable)/i.test(String(reason))) break;
       }
     }
     try {
