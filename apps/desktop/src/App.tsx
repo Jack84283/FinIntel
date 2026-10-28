@@ -1,7 +1,7 @@
 import { PageHeader } from "./PageHeader";
 import { currentLanguage, translate, type TranslationKey } from "./localization";
 import type { AppLanguage } from "./workspace-preferences";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, BarChart3, BrainCircuit, BriefcaseBusiness, CircleCheck, CircleOff, Clock3, Database, Download, History, ShieldCheck, RefreshCw, Settings, ListFilter } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,12 +9,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchBackendHealth } from "./api";
 import { MarketExplorer } from "./MarketExplorer";
+import { createHealthPoller, type HealthConnection } from "./health-poller";
 import { PreferencesPage } from "./PreferencesPage";
 import { ActionHistoryPage } from "./ActionHistoryPage";
 import { DataValidationPage } from "./DataValidationPage";
 import { IndexMembershipPage } from "./IndexMembershipPage";
 import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
-import type { BackendHealth } from "./health";
 
 type Screen = "overview" | "market" | "intelligence" | "data-acquisition" | "data-validation" | "index-membership" | "action-history" | "portfolio" | "settings";
 const groups = [
@@ -39,41 +39,29 @@ const placeholders: Partial<Record<Screen, { title: string; description: string 
   intelligence: { title: "Intelligence", description: "Proprietary models, local AI, and market trend analysis will appear here." },
   portfolio: { title: "Portfolio", description: "Holdings, performance, allocation, and risk exposure will appear here." },
 };
-type Connection =
-  | { kind: "loading" }
-  | { kind: "connected"; health: BackendHealth }
-  | { kind: "disconnected"; message: string };
-
 export default function App() {
   const [screen, setScreen] = useState<Screen>("overview");
   const [language, setLanguage] = useState<AppLanguage>(currentLanguage);
   const t = (key: string) => translate(language, key);
   const [marketSelection, setMarketSelection] = useState<MarketSelection | null>(null);
-  const [connection, setConnection] = useState<Connection>({ kind: "loading" });
+  const [connection, setConnection] = useState<HealthConnection>({ kind: "loading" });
+  const poller = useRef<ReturnType<typeof createHealthPoller> | null>(null);
 
   const openMarkets = (selection?: MarketSelection) => {
     setMarketSelection(selection ?? null);
     setScreen("market");
   };
 
-  const checkHealth = useCallback(async (signal?: { cancelled: boolean }, background = false) => {
-    if (!background) setConnection({ kind: "loading" });
-    try {
-      const health = await fetchBackendHealth();
-      if (!signal?.cancelled) setConnection({ kind: "connected", health });
-    } catch (error: unknown) {
-      if (!signal?.cancelled) {
-        setConnection({ kind: "disconnected", message: error instanceof Error ? error.message : String(error) });
-      }
-    }
-  }, []);
+  const checkHealth = useCallback(() => { void poller.current?.checkNow(); }, []);
 
   useEffect(() => {
-    const signal = { cancelled: false };
-    void checkHealth(signal);
-    const timer = window.setInterval(() => { void checkHealth(signal, true); }, 5000);
-    return () => { signal.cancelled = true; window.clearInterval(timer); };
-  }, [checkHealth]);
+    const current = createHealthPoller(fetchBackendHealth, setConnection);
+    poller.current = current;
+    return () => {
+      current.dispose();
+      if (poller.current === current) poller.current = null;
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-background text-foreground lg:grid lg:grid-cols-[208px_minmax(0,1fr)]">

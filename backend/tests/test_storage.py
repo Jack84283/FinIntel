@@ -19,6 +19,7 @@ from finintel.storage.db import (
 
 FIXTURE = Path(__file__).parent / "fixtures" / "alpha_vantage_daily_SYNTHETIC.json"
 SOURCE = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM&outputsize=compact&datatype=json"
+LEGACY_SOURCE = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM"
 
 
 def snapshot_at(tmp_path, *, shift_days=0, changes=None, filename="snapshot.json"):
@@ -157,6 +158,36 @@ def test_snapshot_source_requires_sanitized_url(tmp_path):
     with pytest.raises(StorageError, match="sanitized"):
         import_snapshot(snapshot, db=db)
     assert not db.exists()
+
+
+def test_legacy_snapshot_source_metadata_remains_importable(tmp_path):
+    snapshot = snapshot_at(tmp_path)
+    data = json.loads(snapshot.read_text())
+    data["source_url"] = LEGACY_SOURCE
+    data["provider_terms_url"] = "https://www.alphavantage.co"
+    snapshot.write_text(json.dumps(data))
+
+    result = import_snapshot(snapshot, db=tmp_path / "legacy.sqlite3")
+
+    assert result["inserted"] == 3
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    [
+        "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM&foo=bar",
+        "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM&outputsize=invalid",
+    ],
+)
+def test_legacy_compatibility_does_not_allow_unapproved_metadata(tmp_path, source_url):
+    snapshot = snapshot_at(tmp_path)
+    data = json.loads(snapshot.read_text())
+    data["source_url"] = source_url
+    snapshot.write_text(json.dumps(data))
+
+    with pytest.raises(StorageError, match="approved sanitized"):
+        import_snapshot(snapshot, db=tmp_path / "invalid.sqlite3")
+    assert not (tmp_path / "invalid.sqlite3").exists()
 
 
 def test_import_does_not_write_float_prices(tmp_path):

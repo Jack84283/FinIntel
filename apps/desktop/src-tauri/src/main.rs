@@ -22,6 +22,48 @@ fn available_backend_port() -> std::io::Result<u16> {
         .map(|address| address.port())
 }
 
+async fn wait_for_backend(
+    port: u16,
+    token: &str,
+    attempts: usize,
+    retry_delay: Duration,
+) -> bool {
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_millis(750))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    else {
+        return false;
+    };
+    let attempts = attempts.max(1);
+    for attempt in 0..attempts {
+        let response = client
+            .get(format!("http://127.0.0.1:{port}/api/v1/health"))
+            .header("x-finintel-process-token", token)
+            .send()
+            .await;
+        if let Ok(response) = response {
+            if response.status().is_success() {
+                if let Ok(payload) = response.json::<serde_json::Value>().await {
+                    let healthy = payload.get("status").and_then(serde_json::Value::as_str)
+                        == Some("ok")
+                        && payload.get("service").and_then(serde_json::Value::as_str)
+                            == Some("finintel-backend")
+                        && payload.get("version").and_then(serde_json::Value::as_str)
+                            .is_some_and(|version| !version.is_empty());
+                    if healthy {
+                        return true;
+                    }
+                }
+            }
+        }
+        if attempt + 1 < attempts {
+            tokio::time::sleep(retry_delay).await;
+        }
+    }
+    false
+}
+
 fn backend_token() -> &'static str {
     BACKEND_TOKEN.get().map(String::as_str).unwrap_or("")
 }
@@ -668,7 +710,6 @@ fn main() {
             let app_data = app.path().app_data_dir()?;
             std::fs::create_dir_all(&app_data)?;
             let db_path = app_data.join("finintel.sqlite3");
-            BACKEND_PORT.store(port, Ordering::Relaxed);
             BACKEND_TOKEN.set(token.clone()).map_err(|_| "Token already initialized")?;
             let (receiver, child) = app.shell()
                 .sidecar("finintel-backend")?
@@ -676,6 +717,16 @@ fn main() {
                 .env("FININTEL_PROCESS_TOKEN", token.clone())
                 .env("FININTEL_DB_PATH", db_path.to_string_lossy().into_owned())
                 .spawn()?;
+            if !tauri::async_runtime::block_on(wait_for_backend(
+                port,
+                &token,
+                20,
+                Duration::from_millis(250),
+            )) {
+                let _ = child.kill();
+                return Err("Managed Python backend did not become healthy.".into());
+            }
+            BACKEND_PORT.store(port, Ordering::Release);
             app.manage(ManagedBackend {
                 child: Mutex::new(Some(child)),
                 stopping: AtomicBool::new(false),
@@ -705,7 +756,6 @@ fn main() {
                             .unwrap_or(true);
                         if should_stop { break; }
                         let Ok(next_port) = available_backend_port() else { continue; };
-                        BACKEND_PORT.store(next_port, Ordering::Relaxed);
                         let spawned = handle.shell()
                             .sidecar("finintel-backend")
                             .and_then(|command| command
@@ -714,6 +764,17 @@ fn main() {
                                 .env("FININTEL_DB_PATH", db_path.to_string_lossy().into_owned())
                                 .spawn());
                         if let Ok((next_receiver, next_child)) = spawned {
+                            if !wait_for_backend(
+                                next_port,
+                                &token,
+                                10,
+                                Duration::from_millis(250),
+                            )
+                            .await
+                            {
+                                let _ = next_child.kill();
+                                continue;
+                            }
                             let Some(state) = handle.try_state::<ManagedBackend>() else {
                                 let _ = next_child.kill();
                                 break;
@@ -725,12 +786,17 @@ fn main() {
                             if let Ok(mut guard) = state.child.lock() {
                                 *guard = Some(next_child);
                             }
+                            BACKEND_PORT.store(next_port, Ordering::Release);
                             receiver = next_receiver;
                             restarted = true;
                             break;
                         }
                     }
-                    if !restarted { break; }
+                    if !restarted {
+                        eprintln!("Managed Python backend restart attempts exhausted.");
+                        BACKEND_PORT.store(0, Ordering::Release);
+                        break;
+                    }
                 }
             });
             Ok(())
@@ -779,4 +845,79 @@ fn main() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wait_for_backend;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::Duration;
+
+    fn response(status: u16, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    fn health_server(statuses: Vec<u16>) -> (u16, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test health server");
+        let port = listener.local_addr().expect("test server address").port();
+        let thread = thread::spawn(move || {
+            for status in statuses {
+                let Ok((mut stream, _)) = listener.accept() else { return; };
+                let mut request = [0_u8; 2048];
+                let _ = stream.read(&mut request);
+                let body = if status == 200 {
+                    r#"{"status":"ok","service":"finintel-backend","version":"test"}"#
+                } else {
+                    r#"{"status":"starting"}"#
+                };
+                let _ = stream.write_all(response(status, body).as_bytes());
+            }
+        });
+        (port, thread)
+    }
+
+    #[test]
+    fn restart_health_check_accepts_a_ready_sidecar() {
+        let (port, server) = health_server(vec![200]);
+        let ready = tauri::async_runtime::block_on(wait_for_backend(
+            port,
+            "test-token",
+            1,
+            Duration::ZERO,
+        ));
+        assert!(ready);
+        server.join().expect("health server thread");
+    }
+
+    #[test]
+    fn restart_health_check_rejects_a_failed_spawn_port() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("reserve test port");
+        let port = listener.local_addr().expect("reserved port").port();
+        drop(listener);
+        let ready = tauri::async_runtime::block_on(wait_for_backend(
+            port,
+            "test-token",
+            2,
+            Duration::ZERO,
+        ));
+        assert!(!ready);
+    }
+
+    #[test]
+    fn restart_health_check_recovers_after_an_initial_failure() {
+        let (port, server) = health_server(vec![503, 200]);
+        let ready = tauri::async_runtime::block_on(wait_for_backend(
+            port,
+            "test-token",
+            2,
+            Duration::ZERO,
+        ));
+        assert!(ready);
+        server.join().expect("health server thread");
+    }
 }
