@@ -606,8 +606,10 @@ async fn index_history_acquire(code: String) -> Result<serde_json::Value, String
     if !valid_index_history_code(&code) || backend_token().is_empty() {
         return Err("Index acquisition requires a managed desktop and valid index.".to_string());
     }
+    // First write may perform a verified backup of the large local database
+    // before the v6 -> v7 migration. Do not abandon that write after 120s.
     let response = reqwest::Client::builder()
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_secs(900))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Unable to initialize the index history client.".to_string())?
@@ -615,12 +617,24 @@ async fn index_history_acquire(code: String) -> Result<serde_json::Value, String
         .header("x-finintel-process-token", backend_token())
         .send()
         .await
-        .map_err(|_| "The index history backend is unavailable.".to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("Index history download failed (HTTP {}).", response.status()));
+        .map_err(|error| {
+            if error.is_timeout() {
+                "Index acquisition timed out. The backend may still be finishing a database backup or migration; check its status before retrying.".to_string()
+            } else if error.is_connect() {
+                "Index history backend is unreachable. Restart FinIntel with npm run dev:desktop and verify the Python backend is running.".to_string()
+            } else {
+                format!("Index history request failed: {error}")
+            }
+        })?;
+    let status = response.status();
+    let payload = response.json::<serde_json::Value>().await
+        .map_err(|_| "Index history backend returned invalid JSON.".to_string())?;
+    if !status.is_success() {
+        let detail = payload.get("detail").and_then(serde_json::Value::as_str)
+            .unwrap_or("Index history request failed.");
+        return Err(format!("HTTP {}: {detail}", status.as_u16()));
     }
-    response.json::<serde_json::Value>().await
-        .map_err(|_| "Index history backend returned invalid JSON.".to_string())
+    Ok(payload)
 }
 
 fn main() {
