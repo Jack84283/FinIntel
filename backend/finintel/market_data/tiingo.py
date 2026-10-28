@@ -62,7 +62,7 @@ class TiingoDailyProvider:
             raise ProviderError("Configure FININTEL_TIINGO_API_KEY in the Python backend")
         self._client = client
 
-    def fetch_daily(self, symbol: str, *, period: str = "10y") -> HistoricalBatch:
+    def fetch_daily(self, symbol: str, *, period: str = "10y", start_date: date | None = None) -> HistoricalBatch:
         ticker = symbol.upper().strip()
         if not SYMBOL_PATTERN.fullmatch(ticker):
             raise ProviderError("Invalid stock/ETF ticker")
@@ -76,6 +76,10 @@ class TiingoDailyProvider:
                 start = end.replace(year=end.year - int(period[:-1]), day=28)
         else:
             raise ProviderError("Unsupported Tiingo historical range")
+        if start_date is not None:
+            start = start_date
+        if start > end:
+            raise ProviderError("Tiingo history range is invalid")
         url = BASE + "/" + quote(ticker, safe="") + "/prices"
         params = {"startDate": start.isoformat(), "endDate": end.isoformat()}
         if self._client is None:
