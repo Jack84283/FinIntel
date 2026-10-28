@@ -55,6 +55,7 @@ def _validated(path: Path, *, version: bool = True) -> dict[str, object]:
                     "symbol_catalog",
                     "action_events",
                     "index_memberships",
+                    "index_daily_closes",
                 )
                 if table in tables
             }
@@ -234,6 +235,16 @@ def _merge(staging: Path, source: Path) -> None:
                 dest.execute(
                     "INSERT OR IGNORE INTO index_memberships "
                     "SELECT * FROM incoming.index_memberships"
+                )
+                dest.execute(
+                    "INSERT INTO index_daily_closes("
+                    "index_code,provider,session_date,close,retrieved_at,source_url) "
+                    "SELECT index_code,provider,session_date,close,retrieved_at,source_url "
+                    "FROM incoming.index_daily_closes WHERE 1 "
+                    "ON CONFLICT(index_code,provider,session_date) DO UPDATE SET "
+                    "close=excluded.close,retrieved_at=excluded.retrieved_at,"
+                    "source_url=excluded.source_url "
+                    "WHERE excluded.retrieved_at > index_daily_closes.retrieved_at"
                 )
                 dest.execute(
                     "INSERT INTO action_events("
