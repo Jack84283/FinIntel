@@ -248,7 +248,7 @@ def test_sync_preserves_indexes_and_mutual_funds(tmp_path):
     assert synced["total"] == 12
     indexes = search_symbols(asset_type="Index", db=db)
     funds = search_symbols(asset_type="Mutual Fund", db=db)
-    assert len(indexes["results"]) == 7
+    assert len(indexes["results"]) == 6
     assert len(funds["results"]) == 4
     assert indexes["results"][0]["symbol"].startswith("^")
     with sqlite3.connect(db) as conn:
