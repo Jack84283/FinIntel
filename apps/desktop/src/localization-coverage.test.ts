@@ -6,6 +6,7 @@ import { translate } from "./localization";
 const screens = [
   "App.tsx", "AcquisitionCard.tsx", "ActionHistoryPage.tsx", "DataAcquisitionPage.tsx",
   "DatabaseBackupCard.tsx",
+  "TechnicalIndicatorsCard.tsx",
   "DataValidationPage.tsx", "IndexMembershipPage.tsx", "MarketExplorer.tsx",
   "PreferencesPage.tsx", "ProviderCredentialsCard.tsx", "SymbolSelector.tsx",
   "components/MarketDatePicker.tsx",
