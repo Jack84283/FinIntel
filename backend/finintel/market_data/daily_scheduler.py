@@ -9,7 +9,6 @@ import argparse
 import json
 import os
 import sqlite3
-import contextlib
 import sys
 import time
 from datetime import UTC, date, datetime, timedelta
