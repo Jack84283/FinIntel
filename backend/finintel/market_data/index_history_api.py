@@ -1,4 +1,5 @@
 """Read-only index level APIs and an explicitly authorized FRED acquisition."""
+
 import threading
 from typing import Literal
 
