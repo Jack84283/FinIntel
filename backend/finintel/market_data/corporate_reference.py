@@ -4,7 +4,6 @@ Never initiated by an ordinary Data Validation scan. Reference requests require
 an operator action and a locally configured provider token.
 """
 
-import os
 import sqlite3
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -14,6 +13,7 @@ from urllib.parse import quote
 import httpx
 
 from finintel.market_data.provider import SYMBOL_PATTERN, ProviderError
+from finintel.settings.credentials import get_secret
 
 
 def verify_events(
@@ -25,7 +25,7 @@ def verify_events(
     ticker = symbol.strip().upper()
     if not SYMBOL_PATTERN.fullmatch(ticker):
         raise ValueError("Invalid equity ticker symbol.")
-    token = os.environ.get("FININTEL_TIINGO_API_KEY", "").strip()
+    token = get_secret("tiingo", "api_key").strip()
     if not token:
         raise ProviderError("Configure FININTEL_TIINGO_API_KEY to verify corporate actions.")
     if not db.is_file():

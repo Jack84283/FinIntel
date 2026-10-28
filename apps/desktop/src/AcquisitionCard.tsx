@@ -1,3 +1,5 @@
+import { useLocale } from "./localization";
+import { useNotify } from "./notifications";
 import { useEffect, useState, type FormEvent } from "react";
 import { ArrowDownToLine, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +17,8 @@ export function AcquisitionCard({
   selectedSymbol: string;
   onAcquired: (symbol: string, provider: AcquisitionProvider) => void;
 }) {
+  const { t } = useLocale();
+  const notify = useNotify();
   const [symbol, setSymbol] = useState(selectedSymbol);
   const [selectedType, setSelectedType] = useState<AssetType | null>(null);
   const [outputsize, setOutputsize] = useState<OutputSize>("compact");
@@ -46,7 +50,8 @@ export function AcquisitionCard({
       .catch((err: unknown) => {
         if (cancelled) return;
         setStatus(null);
-        setStatusError(err instanceof Error ? err.message : "Local backend unavailable");
+        setStatusError(err instanceof Error ? err.message : t("Local backend unavailable"));
+        notify(t("Provider status could not be loaded. See details below."), "error");
       });
     return () => { cancelled = true; };
   }, [statusTick]);
@@ -78,7 +83,9 @@ export function AcquisitionCard({
     // Keep the button clickable: explain missing credentials, ticker or
     // backend availability, but do not call any provider in these cases.
     if (blockReason) {
-      setError(blockReason);
+      setError(t(blockReason));
+      // Show the same actionable validation message in the toast and inline.
+      notify(t(blockReason), "warning");
       return;
     }
     setPending(true);
@@ -86,8 +93,10 @@ export function AcquisitionCard({
       const imported = await acquireMarketDaily(symbol, outputsize, provider, alpacaPeriod);
       setResult(imported);
       onAcquired(imported.symbol, provider);
+      notify(t("Historical download completed."), "success");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
+      notify(t("Historical download failed. See details below."), "error");
     } finally {
       setPending(false);
     }
@@ -98,11 +107,11 @@ export function AcquisitionCard({
       <CardHeader className="min-w-0 gap-y-3 sm:px-6">
         <div className="col-span-2 flex min-w-0 flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
-            <CardTitle><span id="acquisition-title" className="flex items-center gap-2"><ArrowDownToLine aria-hidden="true" className="size-4 shrink-0" /> Manual historical download</span></CardTitle>
-            <CardDescription>Choose an instrument, set the data source and history window, then fetch validated daily prices.</CardDescription>
+            <CardTitle><span id="acquisition-title" className="flex items-center gap-2"><ArrowDownToLine aria-hidden="true" className="size-4 shrink-0" /> {t("Manual historical download")}</span></CardTitle>
+            <CardDescription>{t("Choose an instrument, set the data source and history window, then fetch validated daily prices.")}</CardDescription>
           </div>
           <Badge variant={configured ? "success" : "outline"}>
-            {statusError ? "Backend unavailable" : status === null ? "Checking provider" : configured ? "Provider configured" : "API key needed"}
+            {statusError ? t("Backend unavailable") : status === null ? t("Checking provider") : configured ? t("Provider configured") : t("API key needed")}
           </Badge>
         </div>
       </CardHeader>
@@ -110,8 +119,8 @@ export function AcquisitionCard({
         <form onSubmit={(event) => void acquire(event)} className="min-w-0 space-y-4">
           <div className="min-w-0 rounded-lg border border-border bg-background/40 p-3 sm:p-4">
             <div className="mb-3 space-y-1">
-              <p className="text-sm font-semibold">1. Select instrument</p>
-              <p className="text-xs leading-5 text-muted-foreground">Search your local catalog, filter by type, or enter a ticker manually.</p>
+              <p className="text-sm font-semibold">{t("1. Select instrument")}</p>
+              <p className="text-xs leading-5 text-muted-foreground">{t("Search your local catalog, filter by type, or enter a ticker manually.")}</p>
             </div>
             <SymbolSelector
               value={symbol}
@@ -127,14 +136,14 @@ export function AcquisitionCard({
           </div>
           <div className="min-w-0 rounded-lg border border-border bg-background/40 p-4 sm:p-5">
             <div className="mb-4 space-y-1">
-              <p className="text-sm font-semibold">2. Configure download</p>
-              <p className="text-xs leading-5 text-muted-foreground">Select your provider and how much history to retrieve.</p>
+              <p className="text-sm font-semibold">{t("2. Configure download")}</p>
+              <p className="text-xs leading-5 text-muted-foreground">{t("Select your provider and how much history to retrieve.")}</p>
             </div>
             <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="grid min-w-0 gap-2 text-xs text-muted-foreground">
-            Data source
+            {t("Data source")}
             <select
-              aria-label="Historical market data provider"
+              aria-label={t("Historical market data provider")}
               value={provider}
               onChange={(event) => {
                 setProvider(event.target.value as AcquisitionProvider);
@@ -145,35 +154,35 @@ export function AcquisitionCard({
               disabled={pending}
               className="h-10 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <option value="tiingo">Tiingo · long-term daily history</option>
-              <option value="alpaca_sip">Alpaca · SIP daily (free delayed)</option>
-              <option value="alpha_vantage">Alpha Vantage · daily</option>
+              <option value="tiingo">{t("Tiingo · long-term daily history")}</option>
+              <option value="alpaca_sip">{t("Alpaca · SIP daily (free delayed)")}</option>
+              <option value="alpha_vantage">{t("Alpha Vantage · daily")}</option>
             </select>
           </label>
           <label className="grid min-w-0 gap-2 text-xs text-muted-foreground">
-            Download history
+            {t("Download history")}
             {provider !== "alpha_vantage" ? (
               <select
-                aria-label="Historical data length"
+                aria-label={t("Historical data length")}
                 value={alpacaPeriod}
                 onChange={(event) => setAlpacaPeriod(event.target.value as AlpacaPeriod)}
                 disabled={pending}
                 className="h-10 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <option value="5y">Last 5 years</option>
-                <option value="10y">Last 10 years</option>
-                <option value="max">Maximum available history</option>
+                <option value="5y">{t("Last 5 years")}</option>
+                <option value="10y">{t("Last 10 years")}</option>
+                <option value="max">{t("Maximum available history")}</option>
               </select>
             ) : (
               <select
-                aria-label="Alpha Vantage history size"
+                aria-label={t("Alpha Vantage history size")}
                 value={outputsize}
                 onChange={(event) => setOutputsize(event.target.value as OutputSize)}
                 disabled={pending}
                 className="h-9 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <option value="compact">Latest 100 sessions (free)</option>
-                <option value="full">Full history (premium)</option>
+                <option value="compact">{t("Latest 100 sessions (free)")}</option>
+                <option value="full">{t("Full history (premium)")}</option>
               </select>
             )}
           </label>
@@ -182,7 +191,7 @@ export function AcquisitionCard({
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
           <Button type="submit" disabled={pending} size="sm">
             {pending ? <RefreshCw aria-hidden="true" className="animate-spin" /> : <ArrowDownToLine aria-hidden="true" />}
-            {pending ? "Fetching…" : "Fetch & store"}
+            {pending ? t("Fetching…") : t("Fetch & store")}
           </Button>
           <Button
             type="button"
@@ -192,50 +201,40 @@ export function AcquisitionCard({
             disabled={pending || status === null && !statusError}
           >
             <RefreshCw aria-hidden="true" />
-            Recheck provider
+            {t("Recheck provider")}
           </Button>
           </div>
         </form>
         {(selectedType === "Index" || selectedType === "Mutual Fund") && (
           <p role="status" className="text-xs text-muted-foreground">
-            {selectedType} instruments are reference entries only. Select a Stock or ETF to fetch daily prices from {provider === "tiingo" ? "Tiingo" : provider === "alpaca_sip" ? "Alpaca" : "Alpha Vantage"}.
+            {t(selectedType)} {t("instruments are reference entries only. Select a Stock or ETF to fetch daily prices from")} {provider === "tiingo" ? "Tiingo" : provider === "alpaca_sip" ? "Alpaca" : "Alpha Vantage"}.
           </p>
         )}
         {!symbol.trim() && (
           <p role="status" className="text-xs text-muted-foreground">
-            Select a stock or ETF symbol above, or enter a ticker manually.
+            {t("Select a stock or ETF symbol above, or enter a ticker manually.")}
           </p>
         )}
         {configured && (
           <p className="text-xs text-muted-foreground">
             {provider === "tiingo"
-              ? "Tiingo requests raw daily OHLCV over the selected period. Coverage and access depend on your account and the instrument."
+              ? t("Tiingo requests raw daily OHLCV over the selected period. Coverage and access depend on your account and the instrument.")
               : provider === "alpaca_sip"
-              ? "Alpaca requests SIP daily OHLCV up to yesterday; free Basic accounts may access delayed historical SIP data. Access depends on your Alpaca account and feed entitlement. Each click calls the API."
+              ? t("Alpaca requests SIP daily OHLCV up to yesterday; free Basic accounts may access delayed historical SIP data. Access depends on your Alpaca account and feed entitlement. Each click calls the API.")
               : "Alpha Vantage's free key returns only 100 sessions; full history requires premium access."}
-            {" "}Raw prices are not split/dividend-adjusted. Provider quotas and licensing apply.
+            {" "}{t("Raw prices are not split/dividend-adjusted. Provider quotas and licensing apply.")}
           </p>
         )}
         {status && !configured && (
           <p role="status" className="text-xs text-muted-foreground">
-            {provider === "tiingo"
-              ? "To use Tiingo, set FININTEL_TIINGO_API_KEY in the Python backend environment."
-              : provider === "alpaca_sip"
-              ? "To use Alpaca, set FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY in the Python backend environment."
-              : "To use Alpha Vantage, set FININTEL_ALPHA_VANTAGE_API_KEY in the Python backend environment."}
-            {" "}Restart the backend, then select Recheck provider. Credentials never enter the UI.
-            {provider === "alpaca_sip" && status.key_configured
-              ? " Alpha Vantage is already configured; select it above to fetch now."
-              : provider === "alpha_vantage" && status.alpaca_configured
-                ? " Alpaca is already configured; select it above to fetch now."
-                : ""}
+            {t("Configure this provider in Preferences → Data provider API keys. Browser-only development still supports environment credentials.")}
           </p>
         )}
         {statusError && <p role="alert" className="text-xs text-destructive">{statusError}</p>}
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
         {result && (
           <p role="status" aria-live="polite" className="text-xs text-positive">
-            Stored {result.symbol}: {result.observations} observations ({result.inserted} new, {result.updated} revised, {result.unchanged} unchanged, {result.stale} older). Through {result.last_session}. Local charts refreshed.
+            {t("Stored")} {result.symbol}: {result.observations} {t("observations")} ({result.inserted} {t("new")}, {result.updated} {t("revised")}, {result.unchanged} {t("unchanged")}, {result.stale} {t("older")}). {t("Through")} {result.last_session}. {t("Local charts refreshed.")}
           </p>
         )}
       </CardContent>

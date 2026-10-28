@@ -5,7 +5,6 @@ transactional importer. The JSON is removed after import: SQLite is the durable
 store, and the CLI remains available for users who want permanent JSON exports.
 """
 
-import os
 import tempfile
 from pathlib import Path
 
@@ -17,12 +16,13 @@ from finintel.market_data.provider import (
     ProviderError,
 )
 from finintel.market_data.tiingo import TiingoDailyProvider, tiingo_configured
+from finintel.settings.credentials import get_secret
 from finintel.storage.db import import_snapshot
 
 
 def key_configured() -> bool:
     """Expose only whether a provider key is present, never its actual value."""
-    return bool(os.environ.get("FININTEL_ALPHA_VANTAGE_API_KEY", "").strip())
+    return bool(get_secret("alpha_vantage", "api_key").strip())
 
 
 def acquire_and_store(

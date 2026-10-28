@@ -1,13 +1,13 @@
 """Equibles index constituents acquisition. Explicit user-triggered network access only."""
 
 import json
-import os
 from datetime import date
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from finintel.market_data.membership import INDEX_NAMES, load_membership
+from finintel.settings.credentials import get_secret
 
 INDEX_SLUGS = {
     "SP500": "sp-500",
@@ -23,11 +23,11 @@ class EquiblesError(ValueError):
 
 
 def configured() -> bool:
-    return bool(os.environ.get("FININTEL_EQUIBLES_API_KEY", "").strip())
+    return bool(get_secret("equibles", "api_key").strip())
 
 
 def _fetch(code: str, offset: int) -> dict:
-    key = os.environ.get("FININTEL_EQUIBLES_API_KEY", "").strip()
+    key = get_secret("equibles", "api_key").strip()
     if not key:
         raise EquiblesError("Configure FININTEL_EQUIBLES_API_KEY in the backend environment.")
     url = (

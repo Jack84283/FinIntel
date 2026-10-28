@@ -271,6 +271,13 @@ def _write_connection(path: Path) -> sqlite3.Connection:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 10000")
+        current_version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if 1 <= current_version < SCHEMA_VERSION:
+            # Migrations are destructive for older membership/catalog layouts.
+            # Keep the original recoverable before modifying any schema.
+            from finintel.storage.backup import _snapshot
+
+            _snapshot(path, "pre-restore")
         _migrate(conn)
         return conn
     except (sqlite3.Error, StorageError):

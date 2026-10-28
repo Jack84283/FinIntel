@@ -164,4 +164,5 @@ def test_equibles_stock_catalog_source_serializes(tmp_path, monkeypatch):
     with TestClient(app) as client:
         response = client.get("/api/v1/market-data/symbols?q=ZXEQ")
     assert response.status_code == 200
-    assert response.json()["results"][0]["source"] == "equibles_proxy"
+    assert response.json()["source"] == "equibles_proxy"
+    assert response.json()["results"][0]["symbol"] == "ZXEQ"

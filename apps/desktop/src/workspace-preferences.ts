@@ -1,9 +1,11 @@
 /** Lightweight, device-local UI preferences. No network or account storage. */
 export type ColorTheme = "dark" | "light";
+export type AppLanguage = "en" | "zh-CN";
 
 export interface WorkspacePreferences {
   theme: ColorTheme;
   reduceMotion: boolean;
+  language: AppLanguage;
 }
 
 const STORAGE_KEY = "finintel.workspace-preferences.v1";
@@ -11,6 +13,7 @@ const STORAGE_KEY = "finintel.workspace-preferences.v1";
 export const DEFAULT_PREFERENCES: WorkspacePreferences = {
   theme: "dark",
   reduceMotion: false,
+  language: "en",
 };
 
 export function readWorkspacePreferences(): WorkspacePreferences {
@@ -23,6 +26,7 @@ export function readWorkspacePreferences(): WorkspacePreferences {
     return {
       theme: settings.theme === "light" ? "light" : "dark",
       reduceMotion: settings.reduceMotion === true,
+      language: settings.language === "zh-CN" ? "zh-CN" : "en",
     };
   } catch {
     return { ...DEFAULT_PREFERENCES };
@@ -31,14 +35,19 @@ export function readWorkspacePreferences(): WorkspacePreferences {
 
 export function applyWorkspacePreferences(settings: WorkspacePreferences): void {
   document.documentElement.dataset.theme = settings.theme;
+  document.documentElement.lang = settings.language;
   document.documentElement.dataset.reduceMotion = String(settings.reduceMotion);
 }
 
 export function saveWorkspacePreferences(settings: WorkspacePreferences): void {
+  const previousLanguage = readWorkspacePreferences().language;
   applyWorkspacePreferences(settings);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   } catch {
     // The current session stays usable even when local storage is unavailable.
+  }
+  if (settings.language !== previousLanguage) {
+    window.dispatchEvent(new Event("finintel:language-changed"));
   }
 }

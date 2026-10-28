@@ -27,7 +27,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
-    "icon": []
+    "targets": "all",
+    "icon": [],
+    "externalBin": [
+      "binaries/finintel-backend"
+    ]
   }
 }

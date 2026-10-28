@@ -1,3 +1,5 @@
+import { useLocale } from "./localization";
+import { useNotify } from "./notifications";
 import { useEffect, useId, useState } from "react";
 import { Check, RefreshCw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +17,8 @@ const MAX_SUGGESTIONS = 8;
 
 /** Debounced local-only typeahead; never loads the complete symbol directory. */
 export function SymbolSelector({ value, onChange, keyConfigured, disabled }: SymbolSelectorProps) {
+  const { t } = useLocale();
+  const notify = useNotify();
   const [query, setQuery] = useState(value);
   const [kind, setKind] = useState<AssetFilter>("All");
   const [results, setResults] = useState<CatalogSymbol[]>([]);
@@ -58,7 +62,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
           if (ignore) return;
           setResults([]);
           setSearching(false);
-          setError(reason instanceof Error ? reason.message : "Local symbol search unavailable");
+          setError(reason instanceof Error ? reason.message : t("Local symbol search unavailable"));
         });
     }, 180);
     return () => {
@@ -90,10 +94,12 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
     setNotice("");
     try {
       const updated = await syncSymbols();
-      setNotice(updated.total.toLocaleString() + " active stock/ETF symbols saved locally.");
+      setNotice(updated.total.toLocaleString() + " " + t("active stock/ETF symbols saved locally."));
+      notify(t("Symbol directory synchronized successfully."), "success");
       setRevision((old) => old + 1);
     } catch (reason: unknown) {
       setSyncError(reason instanceof Error ? reason.message : String(reason));
+      notify(t("Symbol synchronization failed. See details below."), "error");
     } finally {
       setSyncing(false);
     }
@@ -104,10 +110,10 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
     <div className="min-w-0 w-full space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <label htmlFor={listId + "-input"} className="text-xs font-medium text-muted-foreground">
-          Instrument
+          {t("Instrument")}
         </label>
         <span className="text-[11px] text-muted-foreground">
-          {catalogSource === "starter" ? "Starter directory" : "Local provider directory"}
+          {catalogSource === "starter" ? t("Starter directory") : t("Local provider directory")}
           {catalogTotal > 0 ? " · " + catalogTotal.toLocaleString() + " symbols" : ""}
         </span>
       </div>
@@ -122,7 +128,7 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
             aria-expanded={showSuggestions}
             aria-activedescendant={showSuggestions && active >= 0 ? listId + "-option-" + active : undefined}
             type="search"
-            placeholder="Search ticker or company, e.g. AAPL or Apple"
+            placeholder={t("Search ticker or company, e.g. AAPL or Apple")}
             autoComplete="off"
             spellCheck={false}
             className="h-10 w-full min-w-0 rounded-md border border-input bg-muted pl-9 pr-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -157,11 +163,11 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
             <div
               id={listId + "-list"}
               role="listbox"
-              aria-label="Matching instruments"
+              aria-label={t("Matching instruments")}
               className="absolute inset-x-0 top-full z-30 mt-1 max-h-72 overflow-y-auto rounded-md border border-border bg-card p-1 shadow-lg"
             >
               {searching ? (
-                <p className="px-3 py-2 text-xs text-muted-foreground">Searching local instruments…</p>
+                <p className="px-3 py-2 text-xs text-muted-foreground">{t("Searching local instruments…")}</p>
               ) : results.length ? (
                 results.map((item, index) => (
                   <button
@@ -182,40 +188,40 @@ export function SymbolSelector({ value, onChange, keyConfigured, disabled }: Sym
                 ))
               ) : (
                 <p className="px-3 py-2 text-xs text-muted-foreground">
-                  No catalog match. You can still enter a valid ticker manually.
+                  {t("No catalog match. You can still enter a valid ticker manually.")}
                 </p>
               )}
             </div>
           )}
         </div>
         <select
-          aria-label="Filter by asset type"
+          aria-label={t("Filter by asset type")}
           value={kind}
           onChange={(event) => setKind(event.target.value as AssetFilter)}
           className="h-10 w-full min-w-0 rounded-md border border-input bg-muted px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           disabled={disabled || syncing}
         >
-          <option value="All">All stocks and ETFs</option>
-          <option value="Stock">Stocks</option>
-          <option value="ETF">ETFs</option>
+          <option value="All">{t("All stocks and ETFs")}</option>
+          <option value="Stock">{t("Stocks")}</option>
+          <option value="ETF">{t("ETFs")}</option>
         </select>
       </div>
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
         <p className="text-xs leading-5 text-muted-foreground">
-          Type a symbol or company name to see suggestions. Select a match, or enter an exact ticker.
+          {t("Type a symbol or company name to see suggestions. Select a match, or enter an exact ticker.")}
         </p>
         <Button type="button" size="sm" variant="secondary" onClick={() => void performSync()} disabled={disabled || syncing || !keyConfigured}>
           <RefreshCw aria-hidden="true" className={syncing ? "animate-spin" : ""} />
-          {syncing ? "Syncing…" : "Sync symbols"}
+          {syncing ? t("Syncing…") : t("Sync symbols")}
         </Button>
       </div>
       {catalogSource === "starter" && (
-        <p className="text-[11px] text-muted-foreground">Sync adds active US stocks and ETFs. Index and mutual fund entries require separate price adapters.</p>
+        <p className="text-[11px] text-muted-foreground">{t("Sync adds active US stocks and ETFs. Index and mutual fund entries require separate price adapters.")}</p>
       )}
       {notice && <p role="status" className="text-xs text-positive">{notice}</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-      {syncError && <p role="alert" className="text-xs text-destructive">Symbol sync failed: {syncError}. Existing directory retained.</p>}
-      {!keyConfigured && <p className="text-[11px] text-muted-foreground">Sync requires an Alpha Vantage backend key. Existing local symbols remain searchable.</p>}
+      {syncError && <p role="alert" className="text-xs text-destructive">{t("Symbol sync failed:")} {syncError}. {t("Existing directory retained.")}</p>}
+      {!keyConfigured && <p className="text-[11px] text-muted-foreground">{t("Sync requires an Alpha Vantage backend key. Existing local symbols remain searchable.")}</p>}
     </div>
   );
 }

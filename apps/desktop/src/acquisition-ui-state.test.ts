@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { translate } from "./localization";
 import { acquisitionBlockReason, preferredAcquisitionProvider } from "./acquisition-ui-state";
 import type { AcquisitionStatus } from "./market-acquisition-api";
 
@@ -27,6 +30,19 @@ describe("acquisition button eligibility", () => {
       symbol: "AAPL", selectedType: "Stock", provider: "alpha_vantage",
       status, statusError: "",
     })).toBeNull();
+  });
+
+  it("provides the exact missing-symbol message used for warning toast and inline error", () => {
+    const reason = acquisitionBlockReason({
+      symbol: "", selectedType: null, provider: "alpha_vantage",
+      status, statusError: "",
+    });
+    expect(reason).toBe("Select a stock or ETF symbol before fetching market data.");
+    expect(translate("zh-CN", reason!)).toBe("获取市场数据前，请先选择股票或 ETF 代码。");
+    const card = readFileSync(join(import.meta.dirname, "AcquisitionCard.tsx"), "utf8");
+    expect(card).toContain('notify(t(blockReason), "warning")');
+    expect(card).toContain('setError(t(blockReason))');
+    expect(card).toContain('type="submit"');
   });
 
   it("explains missing provider credentials rather than silently disabling", () => {

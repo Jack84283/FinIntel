@@ -1,26 +1,63 @@
 use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use tauri::Manager;
+use tauri_plugin_shell::{process::CommandChild, ShellExt};
 
-const BACKEND: &str = "http://127.0.0.1:8765";
+static BACKEND_PORT: OnceLock<u16> = OnceLock::new();
+static BACKEND_TOKEN: OnceLock<String> = OnceLock::new();
+
+struct ManagedBackend(Mutex<Option<CommandChild>>);
+
+fn backend_base() -> String {
+    format!("http://127.0.0.1:{}", BACKEND_PORT.get().copied().unwrap_or(8765))
+}
+
+fn backend_token() -> &'static str {
+    BACKEND_TOKEN.get().map(String::as_str).unwrap_or("")
+}
 
 async fn read_backend(path: &str, params: &[(&str, String)]) -> Result<serde_json::Value, String> {
     // Fixed loopback host, strictly bounded routes and parameters.
     // No generic proxy, client-selected host or credentials in the webview.
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
+        .timeout(if path.starts_with("/api/v1/settings/backups/") {
+            Duration::from_secs(180)
+        } else {
+            Duration::from_secs(30)
+        })
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Could not initialize the local HTTP client.".to_string())?;
-    let mut url = reqwest::Url::parse(&format!("{BACKEND}{path}"))
+    let mut url = reqwest::Url::parse(&format!("{}{path}", backend_base()))
         .map_err(|_| "Invalid local backend route.".to_string())?;
     if !params.is_empty() {
         url.query_pairs_mut().extend_pairs(params.iter().map(|(k, v)| (*k, v.as_str())));
     }
     let response = client
         .get(url)
+        .header("x-finintel-process-token", backend_token())
         .send()
         .await
-        .map_err(|_| "Could not reach the local Python backend.".to_string())?;
+        .map_err(|error| {
+            if error.is_timeout() {
+                "The local Python backend request timed out. Retry after the database operation finishes."
+                    .to_string()
+            } else if error.is_connect() && cfg!(debug_assertions) {
+                "Local Python backend is unreachable. Start FinIntel with npm run dev:desktop."
+                    .to_string()
+            } else if error.is_connect() {
+                "The managed Python backend is not running. Restart FinIntel.".to_string()
+            } else {
+                "The local Python backend request failed. Recheck the connection.".to_string()
+            }
+        })?;
 
+    if response.status() == reqwest::StatusCode::FORBIDDEN {
+        return Err(
+            "The Python backend requires matching desktop authorization. Close old FinIntel sessions and launch with npm run dev:desktop."
+                .to_string(),
+        );
+    }
     if !response.status().is_success() {
         return Err(format!("Local backend returned HTTP {}.", response.status()));
     }
@@ -62,7 +99,8 @@ async fn market_acquire_daily(
         .build()
         .map_err(|_| "Could not initialize the local HTTP client.".to_string())?;
     let response = client
-        .post(format!("{BACKEND}/api/v1/market-data/acquisition"))
+        .post(format!("{}/api/v1/market-data/acquisition", backend_base()))
+        .header("x-finintel-process-token", backend_token())
         .header("x-finintel-client", "local-workstation")
         .json(&serde_json::json!({
             "symbol": symbol.to_ascii_uppercase(),
@@ -118,7 +156,8 @@ async fn market_sync_symbols() -> Result<serde_json::Value, String> {
         .build()
         .map_err(|_| "Could not initialize local HTTP client.".to_string())?;
     let response = client
-        .post(format!("{BACKEND}/api/v1/market-data/symbols/sync"))
+        .post(format!("{}/api/v1/market-data/symbols/sync", backend_base()))
+        .header("x-finintel-process-token", backend_token())
         .header("x-finintel-client", "local-workstation")
         .send()
         .await
@@ -258,7 +297,8 @@ async fn validation_start(checks: Vec<String>) -> Result<serde_json::Value, Stri
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Could not initialize local HTTP client.".to_string())?;
-    let response = client.post(format!("{BACKEND}/api/v1/validation/run"))
+    let response = client.post(format!("{}/api/v1/validation/run", backend_base()))
+        .header("x-finintel-process-token", backend_token())
         .json(&serde_json::json!({"checks": checks}))
         .send().await
         .map_err(|_| "Could not reach local validation backend.".to_string())?;
@@ -282,7 +322,8 @@ async fn validation_corporate_reference(symbol: String) -> Result<serde_json::Va
         .build()
         .map_err(|_| "Could not initialize local HTTP client.".to_string())?;
     let response = client
-        .post(format!("{BACKEND}/api/v1/validation/corporate-reference"))
+        .post(format!("{}/api/v1/validation/corporate-reference", backend_base()))
+        .header("x-finintel-process-token", backend_token())
         .json(&serde_json::json!({"symbol": symbol}))
         .send().await
         .map_err(|_| "Could not reach local validation backend.".to_string())?;
@@ -307,7 +348,8 @@ async fn index_acquire(code: String) -> Result<serde_json::Value, String> {
         .build()
         .map_err(|_| "Could not initialize local HTTP client.".to_string())?;
     let response = client
-        .post(format!("{BACKEND}/api/v1/market-data/indexes/{code}/acquire"))
+        .post(format!("{}/api/v1/market-data/indexes/{code}/acquire", backend_base()))
+        .header("x-finintel-process-token", backend_token())
         .header("x-finintel-client", "local-workstation")
         .send()
         .await
@@ -381,10 +423,209 @@ async fn index_stock_memberships(
     ).await
 }
 
+fn valid_credential_path(provider: &str, field: &str) -> bool {
+    matches!(
+        (provider, field),
+        ("alpha_vantage", "api_key")
+            | ("alpaca_sip", "key_id")
+            | ("alpaca_sip", "secret_key")
+            | ("tiingo", "api_key")
+            | ("equibles", "api_key")
+    )
+}
+
+#[tauri::command]
+async fn credential_status() -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() {
+        return Err("Provider credential Settings require the managed desktop build.".to_string());
+    }
+    read_backend("/api/v1/settings/providers", &[]).await
+}
+
+#[tauri::command]
+async fn credential_set(
+    provider: String, field: String, secret: String
+) -> Result<serde_json::Value, String> {
+    if !valid_credential_path(&provider, &field) || secret.is_empty()
+        || secret.len() > 4096 || secret.chars().any(char::is_control)
+        || backend_token().is_empty()
+    {
+        return Err("Invalid secure provider credential request.".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize secure credential client.".to_string())?;
+    let response = client
+        .put(format!("{}/api/v1/settings/providers/{provider}/{field}", backend_base()))
+        .header("x-finintel-process-token", backend_token())
+        .json(&serde_json::json!({ "value": secret }))
+        .send().await
+        .map_err(|_| "Secure provider settings service unavailable.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Credential save unsuccessful (HTTP {}).", response.status()));
+    }
+    Ok(serde_json::json!({"configured": true}))
+}
+
+#[tauri::command]
+async fn credential_delete(
+    provider: String, field: String
+) -> Result<serde_json::Value, String> {
+    if !valid_credential_path(&provider, &field) || backend_token().is_empty() {
+        return Err("Invalid native credential request.".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize secure credential client.".to_string())?;
+    let response = client
+        .delete(format!("{}/api/v1/settings/providers/{provider}/{field}", backend_base()))
+        .header("x-finintel-process-token", backend_token())
+        .send().await
+        .map_err(|_| "Secure provider settings service unavailable.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Credential deletion unsuccessful (HTTP {}).", response.status()));
+    }
+    Ok(serde_json::json!({"configured": false}))
+}
+
+#[tauri::command]
+async fn credential_test(provider: String) -> Result<serde_json::Value, String> {
+    if !matches!(provider.as_str(), "alpha_vantage" | "alpaca_sip" | "tiingo" | "equibles")
+        || backend_token().is_empty()
+    {
+        return Err("Invalid provider connection test request.".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(16))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize connection test client.".to_string())?;
+    let response = client
+        .post(format!("{}/api/v1/settings/providers/{provider}/test", backend_base()))
+        .header("x-finintel-process-token", backend_token())
+        .send().await
+        .map_err(|_| "Local connection test service unavailable.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Provider test could not run (HTTP {}).", response.status()));
+    }
+    response.json::<serde_json::Value>().await
+        .map_err(|_| "Provider connection test returned malformed JSON.".to_string())
+}
+
+async fn backup_write(path: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() {
+        return Err("Database backups require the managed desktop.".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(600))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not create backup service client.".to_string())?;
+    let response = client
+        .post(format!("{}{}", backend_base(), path))
+        .header("x-finintel-process-token", backend_token())
+        .json(&body)
+        .send()
+        .await
+        .map_err(|_| "Local backup service unavailable.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Database backup operation failed (HTTP {}).", response.status()));
+    }
+    response.json::<serde_json::Value>().await
+        .map_err(|_| "Database backup service returned malformed JSON.".to_string())
+}
+
+#[tauri::command]
+async fn database_backup_list() -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() {
+        return Err("Database backups require the managed desktop.".to_string());
+    }
+    read_backend("/api/v1/settings/backups", &[]).await
+}
+
+#[tauri::command]
+async fn database_backup_create() -> Result<serde_json::Value, String> {
+    backup_write("/api/v1/settings/backups", serde_json::json!({})).await
+}
+
+#[tauri::command]
+async fn database_backup_preview(backup_id: String) -> Result<serde_json::Value, String> {
+    if backend_token().is_empty()
+        || backup_id.len() > 120
+        || !backup_id.starts_with("finintel-")
+        || !backup_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+    {
+        return Err("Invalid local database backup ID.".to_string());
+    }
+    read_backend(&format!("/api/v1/settings/backups/{backup_id}"), &[]).await
+}
+
+#[tauri::command]
+async fn database_backup_restore(backup_id: String, mode: String) -> Result<serde_json::Value, String> {
+    if backup_id.len() > 120
+        || !backup_id.starts_with("finintel-")
+        || !backup_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+        || !matches!(mode.as_str(), "merge" | "replace")
+    {
+        return Err("Invalid database restore choice.".to_string());
+    }
+    backup_write(
+        "/api/v1/settings/backups/restore",
+        serde_json::json!({"backup_id": backup_id, "mode": mode}),
+    ).await
+}
+
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .setup(|app| {
+            // Native development can keep using the standard developer backend.
+            // Production bundles launch an app-owned backend with a private port.
+            if cfg!(debug_assertions) {
+                // Combined developer launcher starts Python and provides a shared random token.
+                // Plain `tauri dev` without that launcher retains read-only legacy mode.
+                if let Ok(token) = std::env::var("FININTEL_PROCESS_TOKEN") {
+                    if token.len() >= 32 {
+                        BACKEND_TOKEN.set(token).map_err(|_| "Token already initialized")?;
+                    }
+                }
+                return Ok(());
+            }
+            let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+            let port = listener.local_addr()?.port();
+            drop(listener);
+            let token = uuid::Uuid::new_v4().to_string();
+            let app_data = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&app_data)?;
+            let db_path = app_data.join("finintel.sqlite3");
+            BACKEND_PORT.set(port).map_err(|_| "Port already initialized")?;
+            BACKEND_TOKEN.set(token.clone()).map_err(|_| "Token already initialized")?;
+            let (mut receiver, child) = app.shell()
+                .sidecar("finintel-backend")?
+                .env("FININTEL_BACKEND_PORT", port.to_string())
+                .env("FININTEL_PROCESS_TOKEN", token)
+                .env("FININTEL_DB_PATH", db_path.to_string_lossy().into_owned())
+                .spawn()?;
+            tauri::async_runtime::spawn(async move {
+                while receiver.recv().await.is_some() {}
+            });
+            app.manage(ManagedBackend(Mutex::new(Some(child))));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             backend_health,
+            credential_status,
+            credential_set,
+            credential_delete,
+            credential_test,
+            database_backup_list,
+            database_backup_create,
+            database_backup_preview,
+            database_backup_restore,
             validation_status,
             validation_start,
             validation_corporate_reference,
@@ -402,6 +643,17 @@ fn main() {
             index_constituents,
             index_stock_memberships
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run FinIntel");
+        .build(tauri::generate_context!())
+        .expect("failed to build FinIntel")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(owned) = app.try_state::<ManagedBackend>() {
+                    if let Ok(mut guard) = owned.0.lock() {
+                        if let Some(child) = guard.take() {
+                            let _ = child.kill();
+                        }
+                    }
+                }
+            }
+        });
 }

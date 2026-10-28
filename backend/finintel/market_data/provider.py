@@ -5,7 +5,6 @@ The request URL contains the key; the public source URL and errors never do.
 """
 
 import json
-import os
 import re
 import time
 from collections.abc import Callable
@@ -18,6 +17,7 @@ import httpx
 from pydantic import ValidationError
 
 from finintel.market_data.models import DailyOHLCV, HistoricalBatch
+from finintel.settings.credentials import get_secret
 
 API_ENDPOINT = "https://www.alphavantage.co/query"
 TERMS_URL = "https://www.alphavantage.co/terms_of_service/"
@@ -163,7 +163,7 @@ class AlphaVantageDailyProvider:
         max_attempts: int = 3,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
-        self._api_key = (api_key or os.environ.get("FININTEL_ALPHA_VANTAGE_API_KEY", "")).strip()
+        self._api_key = (api_key or get_secret("alpha_vantage", "api_key")).strip()
         if not self._api_key:
             raise ProviderError(
                 "Set FININTEL_ALPHA_VANTAGE_API_KEY in the local environment "

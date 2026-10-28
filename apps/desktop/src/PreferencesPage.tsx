@@ -1,10 +1,13 @@
 import { PageHeader } from "./PageHeader";
+import { ProviderCredentialsCard } from "./ProviderCredentialsCard";
+import { DatabaseBackupCard } from "./DatabaseBackupCard";
+import { translate } from "./localization";
 import { useState } from "react";
 import { Activity, ArrowUpRight, Check, Database, HardDrive, LockKeyhole, Monitor, Moon, RefreshCw, ShieldCheck, Sun } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { readWorkspacePreferences, saveWorkspacePreferences, type ColorTheme, type WorkspacePreferences } from "./workspace-preferences";
+import { readWorkspacePreferences, saveWorkspacePreferences, type ColorTheme, type AppLanguage, type WorkspacePreferences } from "./workspace-preferences";
 
 type BackendState =
   | { kind: "loading" }
@@ -15,6 +18,7 @@ interface PreferencesPageProps {
   backend: BackendState;
   onRecheckBackend: () => void;
   onOpenAcquisition: () => void;
+  onLanguageChange: (language: AppLanguage) => void;
 }
 
 function SettingRow({ title, detail, children }: {
@@ -53,92 +57,103 @@ function ThemeOption({ theme, selected, onSelect, label, icon: Icon }: {
   );
 }
 
-export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition }: PreferencesPageProps) {
+export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition, onLanguageChange }: PreferencesPageProps) {
   const [preferences, setPreferences] = useState<WorkspacePreferences>(readWorkspacePreferences);
 
   const updatePreferences = (changes: Partial<WorkspacePreferences>) => {
     const next = { ...preferences, ...changes };
     setPreferences(next);
     saveWorkspacePreferences(next);
+    if (changes.language) onLanguageChange(changes.language);
   };
+
+  const t = (key: Parameters<typeof translate>[1]) => translate(preferences.language, key);
 
   return (
     <section aria-labelledby="preferences-title" className="min-w-0 space-y-2">
-      <PageHeader id="preferences-title" breadcrumb="FinIntel / Preferences" title="Preferences" subtitle="Personalize the workspace and review local data settings. Changes to appearance stay on this device." actions={<Badge variant="outline" className="shrink-0">Device-local</Badge>} />
+      <PageHeader id="preferences-title" breadcrumb={t("FinIntel / Preferences")} title={t("Preferences")} subtitle={t("Personalize the workspace and review local data settings. Changes to appearance stay on this device.")} actions={<Badge variant="outline" className="shrink-0">{t("Device-local")}</Badge>} />
 
       <div className="grid min-w-0 items-start gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
         <div className="flex min-w-0 flex-col gap-2">
           <Card className="min-w-0">
             <CardHeader className="min-w-0 gap-y-2">
-              <CardTitle>Appearance</CardTitle>
-              <CardDescription>Keep the interface readable and comfortable at any window size.</CardDescription>
+              <CardTitle>{t("Appearance")}</CardTitle>
+              <CardDescription>{t("Keep the interface readable and comfortable at any window size.")}</CardDescription>
             </CardHeader>
             <CardContent className="min-w-0">
               <div className="border-b border-border pb-6">
-                <p className="mb-1 text-sm font-medium">Color theme</p>
-                <p className="mb-4 text-xs leading-5 text-muted-foreground">Switch between high-contrast dark and light surfaces.</p>
+                <p className="mb-1 text-sm font-medium">{t("Color theme")}</p>
+                <p className="mb-4 text-xs leading-5 text-muted-foreground">{t("Switch between high-contrast dark and light surfaces.")}</p>
                 <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-                  <ThemeOption theme="dark" label="Dark" icon={Moon} selected={preferences.theme === "dark"} onSelect={(theme) => updatePreferences({ theme })} />
-                  <ThemeOption theme="light" label="Light" icon={Sun} selected={preferences.theme === "light"} onSelect={(theme) => updatePreferences({ theme })} />
+                  <ThemeOption theme="dark" label={t("Dark")} icon={Moon} selected={preferences.theme === "dark"} onSelect={(theme) => updatePreferences({ theme })} />
+                  <ThemeOption theme="light" label={t("Light")} icon={Sun} selected={preferences.theme === "light"} onSelect={(theme) => updatePreferences({ theme })} />
                 </div>
               </div>
-              <SettingRow title="Reduce motion" detail="Minimize interface animations and transitions. Your operating system's reduced-motion preference is also respected.">
+              <SettingRow title={t("Language")} detail={t("Select the interface language.")}>
+                <div role="group" aria-label={t("Language")} className="flex gap-2">
+                  <Button type="button" size="sm" variant={preferences.language === "en" ? "secondary" : "outline"} aria-pressed={preferences.language === "en"} onClick={() => updatePreferences({ language: "en" })}>English</Button>
+                  <Button type="button" size="sm" variant={preferences.language === "zh-CN" ? "secondary" : "outline"} aria-pressed={preferences.language === "zh-CN"} onClick={() => updatePreferences({ language: "zh-CN" })}>简体中文</Button>
+                </div>
+              </SettingRow>
+              <SettingRow title={t("Reduce motion")} detail={t("Minimize interface animations and transitions. Your operating system's reduced-motion preference is also respected.")}>
                 <Button type="button" size="sm" variant={preferences.reduceMotion ? "secondary" : "outline"} aria-pressed={preferences.reduceMotion} onClick={() => updatePreferences({ reduceMotion: !preferences.reduceMotion })}>
-                  {preferences.reduceMotion ? "Enabled" : "Disabled"}
+                  {preferences.reduceMotion ? t("Enabled") : t("Disabled")}
                 </Button>
               </SettingRow>
             </CardContent>
           </Card>
 
+          <ProviderCredentialsCard />
+          <DatabaseBackupCard />
           <Card className="min-w-0">
             <CardHeader className="min-w-0 gap-y-2">
-              <CardTitle>Historical market data</CardTitle>
-              <CardDescription>Review acquisition defaults without interrupting a running backfill.</CardDescription>
+              <CardTitle>{t("Historical market data")}</CardTitle>
+              <CardDescription>{t("Review acquisition defaults without interrupting a running backfill.")}</CardDescription>
             </CardHeader>
             <CardContent className="min-w-0 divide-y divide-border">
-              <SettingRow title="Background historical window" detail="The local backfill script currently defaults to ten years of available daily data.">
-                <Badge variant="secondary">10 years</Badge>
+              <SettingRow title={t("Background historical window")} detail={t("The local backfill script currently defaults to ten years of available daily data.")}>
+                <Badge variant="secondary">{t("10 years")}</Badge>
               </SettingRow>
-              <SettingRow title="Storage format" detail="Daily OHLCV bars are validated and stored in the local SQLite database.">
+              <SettingRow title={t("Storage format")} detail={t("Daily OHLCV bars are validated and stored in the local SQLite database.")}>
                 <Badge variant="outline">SQLite</Badge>
               </SettingRow>
-              <SettingRow title="Acquisition controls" detail="Select instruments and data providers, or inspect an active import in Data Acquisition.">
+              <SettingRow title={t("Acquisition controls")} detail={t("Select instruments and data providers, or inspect an active import in Data Acquisition.")}>
                 <Button type="button" variant="secondary" size="sm" onClick={onOpenAcquisition}>
-                  Open Data Acquisition <ArrowUpRight aria-hidden="true" />
+                  {t("Open Data Acquisition")} <ArrowUpRight aria-hidden="true" />
                 </Button>
               </SettingRow>
             </CardContent>
           </Card>
         </div>
 
-        <aside className="flex min-w-0 flex-col gap-2" aria-label="Workspace information">
+        <aside className="flex min-w-0 flex-col gap-2" aria-label={t("Workspace information")}>
           <Card className="min-w-0">
             <CardHeader className="flex min-w-0 flex-col items-start gap-2">
-              <div className="flex min-w-0 items-center gap-2"><Activity aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">Local backend</CardTitle></div>
-              <CardDescription>Connection to FinIntel's local Python service.</CardDescription>
+              <div className="flex min-w-0 items-center gap-2"><Activity aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">{t("Local backend")}</CardTitle></div>
+              <CardDescription>{t("Connection to FinIntel's local Python service.")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${backend.kind === "connected" ? "bg-positive" : backend.kind === "loading" ? "bg-warning" : "bg-destructive"}`} />
                 <span role="status" aria-live="polite" className="min-w-0 break-words text-sm font-medium">
-                  {backend.kind === "connected" ? `Connected · v${backend.version}` : backend.kind === "loading" ? "Checking connection…" : "Not connected"}
+                  {backend.kind === "connected" ? `${t("Connected")} · v${backend.version}` : backend.kind === "loading" ? t("Checking connection…") : t("Not connected")}
                 </span>
               </div>
               <Button type="button" variant="outline" size="sm" disabled={backend.kind === "loading"} onClick={onRecheckBackend}>
-                <RefreshCw aria-hidden="true" /> Recheck
+                <RefreshCw aria-hidden="true" /> {t("Recheck")}
               </Button>
             </CardContent>
           </Card>
           <Card className="min-w-0">
             <CardHeader className="flex min-w-0 flex-col items-start gap-2">
-              <div className="flex min-w-0 items-center gap-2"><LockKeyhole aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">Privacy & storage</CardTitle></div>
-              <CardDescription>Built for a private, local-first financial workspace.</CardDescription>
+              <div className="flex min-w-0 items-center gap-2"><LockKeyhole aria-hidden="true" className="size-4 text-muted-foreground" /><CardTitle className="leading-5">{t("Privacy & storage")}</CardTitle></div>
+              <CardDescription>{t("Built for a private, local-first financial workspace.")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <div className="flex min-w-0 gap-3"><HardDrive aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Historical prices and research data are stored locally.</p></div>
-              <div className="flex min-w-0 gap-3"><ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Provider credentials remain in your backend environment, not in these preferences.</p></div>
-              <div className="flex min-w-0 gap-3"><Monitor aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Appearance preferences are saved only on this device.</p></div>
-              <div className="flex min-w-0 gap-3"><Database aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">Changing the theme or motion preference does not modify market history.</p></div>
+              <div className="flex min-w-0 gap-3"><HardDrive aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">{t("Historical prices and research data are stored locally.")}</p></div>
+              <div className="flex min-w-0 gap-3"><ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">{t("Provider credentials are managed in the secure settings card on this page.")}</p></div>
+              <div className="flex min-w-0 gap-3"><Monitor aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">{t("Appearance preferences are saved only on this device.")}</p></div>
+              <div className="flex min-w-0 gap-3"><Database aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><p className="min-w-0 leading-6">{t("Changing the theme or motion preference does not modify market history.")}</p></div>
             </CardContent>
           </Card>
         </aside>

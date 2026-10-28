@@ -98,9 +98,13 @@ def load_membership(
             )
         return len(tickers)
     except sqlite3.IntegrityError as exc:
-        raise ValueError("Index import violates a local database constraint; check symbols and catalog types") from exc
+        raise ValueError(
+            "Index import violates a local database constraint; check symbols and catalog types"
+        ) from exc
     except sqlite3.Error as exc:
-        raise StorageError("Index import failed while writing the local database; no complete snapshot was saved") from exc
+        raise StorageError(
+            "Index import failed while writing the local database; no complete snapshot was saved"
+        ) from exc
     finally:
         conn.close()
 
