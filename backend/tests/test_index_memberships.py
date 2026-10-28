@@ -94,6 +94,7 @@ def test_v5_migration_preserves_old_index_snapshots(tmp_path):
     conn = _write_connection(db)
     conn.executescript(
         """
+        DROP TABLE index_daily_closes;
         DROP TABLE index_memberships;
         CREATE TABLE index_memberships (
             index_code TEXT NOT NULL CHECK(index_code IN ('SP500','DJIA')),
@@ -107,7 +108,7 @@ def test_v5_migration_preserves_old_index_snapshots(tmp_path):
     conn.close()
     load_membership("NDX", "2026-10-02", "added", ["AAPL"], db=db)
     with sqlite3.connect(db) as check:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 7
         assert check.execute("SELECT COUNT(*) FROM index_memberships").fetchone()[0] == 2
     assert {x["index_code"] for x in memberships("AAPL", db=db)} == {"SP500", "NDX"}
 
