@@ -1,4 +1,5 @@
 """Read-only monitoring endpoint for the local daily worker."""
+
 from fastapi import APIRouter
 
 from finintel.market_data.daily_scheduler import status

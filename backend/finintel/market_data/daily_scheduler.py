@@ -3,22 +3,26 @@
 A missed schedule is caught up at the next wake/start. Monitoring state is stored
 outside the price database to avoid interfering with backup and restore.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import os
 import sqlite3
-import sys
 import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from finintel.market_data.acquisition import acquire_and_store
-from finintel.market_data.index_history import INDEX_SERIES, acquire_index_closes
+from finintel.market_data.index_history import (
+    INDEX_SERIES,
+    IndexHistoryError,
+    acquire_index_closes,
+)
 from finintel.market_data.provider import ProviderError, ProviderRateLimited
-from finintel.storage.db import database_path
+from finintel.storage.db import StorageError, database_path
 
 ET = ZoneInfo("America/New_York")
 STATE = Path("data/daily-acquisition.json")
@@ -58,10 +62,14 @@ def instruments(provider: str) -> list[str]:
         return []
     con = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
     try:
-        return [r[0] for r in con.execute(
-            "SELECT DISTINCT symbol FROM series WHERE provider=? AND frequency='1d' "
-            "AND adjustment='raw_unadjusted' ORDER BY symbol", (provider,)
-        )]
+        return [
+            r[0]
+            for r in con.execute(
+                "SELECT DISTINCT symbol FROM series WHERE provider=? AND frequency='1d' "
+                "AND adjustment='raw_unadjusted' ORDER BY symbol",
+                (provider,),
+            )
+        ]
     finally:
         con.close()
 
@@ -79,31 +87,45 @@ def latest_sessions(provider: str) -> dict[str, date]:
                 "SELECT s.symbol, MAX(p.session_date) FROM series s "
                 "JOIN daily_prices p ON p.series_id=s.id "
                 "WHERE s.provider=? AND s.frequency='1d' "
-                "AND s.adjustment='raw_unadjusted' GROUP BY s.symbol", (provider,)
+                "AND s.adjustment='raw_unadjusted' GROUP BY s.symbol",
+                (provider,),
             )
         }
     finally:
         con.close()
 
 
-def run_cycle(*, provider: str, state_path: Path, max_symbols: int = 0,
-              delay_seconds: float = 0, indexes_only: bool = False) -> dict:
+def run_cycle(
+    *,
+    provider: str,
+    state_path: Path,
+    max_symbols: int = 0,
+    delay_seconds: float = 0,
+    indexes_only: bool = False,
+) -> dict:
     state = status(state_path)
     checkpoint = {
-        "status": "running", "started_at": now_utc().isoformat(),
-        "provider": provider, "indexes": {}, "equities": {},
-        "completed": 0, "failed": 0, "last_completed_date": state.get("last_completed_date"),
+        "status": "running",
+        "started_at": now_utc().isoformat(),
+        "provider": provider,
+        "indexes": {},
+        "equities": {},
+        "completed": 0,
+        "failed": 0,
+        "last_completed_date": state.get("last_completed_date"),
     }
     save(state_path, checkpoint)
     for code in INDEX_SERIES:
         try:
             result = acquire_index_closes(code)
             checkpoint["indexes"][code] = {
-                "status": "stored", "inserted": result["inserted"],
-                "updated": result["updated"], "last_session": result["last_session"]
+                "status": "stored",
+                "inserted": result["inserted"],
+                "updated": result["updated"],
+                "last_session": result["last_session"],
             }
             checkpoint["completed"] += 1
-        except Exception as exc:
+        except (IndexHistoryError, OSError, StorageError) as exc:
             checkpoint["indexes"][code] = {"status": "failed", "error_type": type(exc).__name__}
             checkpoint["failed"] += 1
         save(state_path, checkpoint)
@@ -123,12 +145,16 @@ def run_cycle(*, provider: str, state_path: Path, max_symbols: int = 0,
                 last = checkpoints.get(symbol)
                 start = last - timedelta(days=8) if last else None
                 result = acquire_and_store(
-                    symbol, provider=provider, period="5y",
+                    symbol,
+                    provider=provider,
+                    period="5y",
                     start_date=start if provider != "alpha_vantage" else None,
                 )
                 checkpoint["equities"][symbol] = {
-                    "status": "stored", "inserted": result["inserted"],
-                    "updated": result["updated"], "last_session": result["last_session"],
+                    "status": "stored",
+                    "inserted": result["inserted"],
+                    "updated": result["updated"],
+                    "last_session": result["last_session"],
                 }
                 checkpoint["completed"] += 1
             except ProviderRateLimited:
@@ -138,7 +164,8 @@ def run_cycle(*, provider: str, state_path: Path, max_symbols: int = 0,
                 return checkpoint
             except (ProviderError, OSError, ValueError) as exc:
                 checkpoint["equities"][symbol] = {
-                    "status": "failed", "error_type": type(exc).__name__
+                    "status": "failed",
+                    "error_type": type(exc).__name__,
                 }
                 checkpoint["failed"] += 1
             save(state_path, checkpoint)
@@ -153,8 +180,9 @@ def run_cycle(*, provider: str, state_path: Path, max_symbols: int = 0,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="FinIntel local daily refresh worker")
-    parser.add_argument("--provider", choices=("alpaca_sip", "tiingo", "alpha_vantage"),
-                        default="alpaca_sip")
+    parser.add_argument(
+        "--provider", choices=("alpaca_sip", "tiingo", "alpha_vantage"), default="alpaca_sip"
+    )
     parser.add_argument("--state-path", type=Path, default=STATE)
     parser.add_argument("--max-symbols", type=int, default=0)
     parser.add_argument("--delay-seconds", type=float, default=1)
@@ -168,10 +196,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(status(args.state_path)))
         return 0
     if args.once:
-        result = run_cycle(provider=args.provider, state_path=args.state_path,
-                           max_symbols=args.max_symbols,
-                           delay_seconds=args.delay_seconds,
-                           indexes_only=args.indexes_only)
+        result = run_cycle(
+            provider=args.provider,
+            state_path=args.state_path,
+            max_symbols=args.max_symbols,
+            delay_seconds=args.delay_seconds,
+            indexes_only=args.indexes_only,
+        )
         print(json.dumps({k: v for k, v in result.items() if k != "equities"}))
         return int(result["status"] != "complete")
     # Dedicated, local process: idempotent for completed date; catch up on restart.
@@ -187,9 +218,13 @@ def main(argv: list[str] | None = None) -> int:
             except ValueError:
                 pass
         if eligible and previous.get("last_completed_date") != eligible and not recent:
-            run_cycle(provider=args.provider, state_path=args.state_path,
-                      max_symbols=args.max_symbols,
-                      delay_seconds=args.delay_seconds, indexes_only=args.indexes_only)
+            run_cycle(
+                provider=args.provider,
+                state_path=args.state_path,
+                max_symbols=args.max_symbols,
+                delay_seconds=args.delay_seconds,
+                indexes_only=args.indexes_only,
+            )
         time.sleep(300)
 
 

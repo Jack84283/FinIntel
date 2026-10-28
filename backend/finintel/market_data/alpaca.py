@@ -154,7 +154,9 @@ class AlpacaDailyProvider:
             )
         self._client = client
 
-    def fetch_daily(self, symbol: str, *, period: str = "10y", start_date: date | None = None) -> HistoricalBatch:
+    def fetch_daily(
+        self, symbol: str, *, period: str = "10y", start_date: date | None = None
+    ) -> HistoricalBatch:
         ticker = symbol.strip().upper()
         if not SYMBOL_PATTERN.fullmatch(ticker):
             raise ProviderError("Invalid stock or ETF symbol")

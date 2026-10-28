@@ -1,4 +1,5 @@
 """No-network tests for Eastern-time scheduling and monitoring."""
+
 from datetime import UTC, datetime
 
 from finintel.market_data.daily_scheduler import due_date, save, status

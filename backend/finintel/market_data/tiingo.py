@@ -62,7 +62,9 @@ class TiingoDailyProvider:
             raise ProviderError("Configure FININTEL_TIINGO_API_KEY in the Python backend")
         self._client = client
 
-    def fetch_daily(self, symbol: str, *, period: str = "10y", start_date: date | None = None) -> HistoricalBatch:
+    def fetch_daily(
+        self, symbol: str, *, period: str = "10y", start_date: date | None = None
+    ) -> HistoricalBatch:
         ticker = symbol.upper().strip()
         if not SYMBOL_PATTERN.fullmatch(ticker):
             raise ProviderError("Invalid stock/ETF ticker")
