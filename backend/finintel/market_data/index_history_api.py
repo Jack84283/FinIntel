@@ -6,7 +6,10 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
 
 from finintel.market_data.index_history import (
-    IndexHistoryError, acquire_index_closes, index_catalog, read_index_closes,
+    IndexHistoryError,
+    acquire_index_closes,
+    index_catalog,
+    read_index_closes,
 )
 from finintel.settings.api import _require_managed
 from finintel.storage.db import StorageError
