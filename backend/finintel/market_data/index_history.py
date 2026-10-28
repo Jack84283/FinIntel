@@ -3,6 +3,7 @@
 FRED distributes S&P/Dow daily close series with a limited history window.
 Each record retains the original FRED series URL for local provenance.
 """
+
 from __future__ import annotations
 
 import csv
@@ -95,7 +96,8 @@ def fetch_fred_index(code: str, *, client: httpx.Client | None = None) -> list[t
     session = client or httpx.Client(timeout=30, follow_redirects=False)
     try:
         response = session.get(
-            FRED_CSV, params={"id": INDEX_SERIES[code][1]},
+            FRED_CSV,
+            params={"id": INDEX_SERIES[code][1]},
             headers={"Accept": "text/csv"},
         )
         if response.status_code != 200:
@@ -116,8 +118,12 @@ def store_index_closes(
     if not observations or len(observations) > MAX_ROWS:
         raise IndexHistoryError("Invalid number of index observations")
     # Same strict validation for live downloads and programmatic imports.
-    raw = ("observation_date," + INDEX_SERIES[code][1] + "\n" +
-           "".join(day + "," + level + "\n" for day, level in observations))
+    raw = (
+        "observation_date,"
+        + INDEX_SERIES[code][1]
+        + "\n"
+        + "".join(day + "," + level + "\n" for day, level in observations)
+    )
     values = parse_fred_csv(code, raw.encode("utf-8"))
     path = db if db is not None else database_path()
     conn = _write_connection(path)
@@ -166,8 +172,9 @@ def store_index_closes(
         conn.close()
 
 
-def acquire_index_closes(code: str, *, db: Path | None = None,
-                         client: httpx.Client | None = None) -> dict[str, object]:
+def acquire_index_closes(
+    code: str, *, db: Path | None = None, client: httpx.Client | None = None
+) -> dict[str, object]:
     # Explicit user action only. No periodic downloads.
     return store_index_closes(code, fetch_fred_index(code, client=client), db=db)
 
@@ -186,8 +193,11 @@ def index_catalog(*, db: Path | None = None) -> list[dict[str, object]]:
                 stored[row["index_code"]] = dict(row)
         return [
             {
-                "code": code, "name": name, "fred_series": series,
-                "provider": "fred", "source_url": index_source_url(code),
+                "code": code,
+                "name": name,
+                "fred_series": series,
+                "provider": "fred",
+                "source_url": index_source_url(code),
                 "sessions": int(stored[code]["sessions"]) if code in stored else 0,
                 "first_session": stored[code]["first_session"] if code in stored else None,
                 "last_session": stored[code]["last_session"] if code in stored else None,
@@ -200,9 +210,7 @@ def index_catalog(*, db: Path | None = None) -> list[dict[str, object]]:
             conn.close()
 
 
-def read_index_closes(
-    code: str, *, limit: int = 4000, db: Path | None = None
-) -> dict[str, object]:
+def read_index_closes(code: str, *, limit: int = 4000, db: Path | None = None) -> dict[str, object]:
     if code not in INDEX_SERIES:
         raise IndexHistoryError("Unsupported index code")
     if not 1 <= limit <= 10000:
@@ -220,9 +228,12 @@ def read_index_closes(
             else []
         )
         return {
-            "code": code, "name": INDEX_SERIES[code][0],
-            "data_kind": "daily_close_only", "unit": "index_points",
-            "provider": "fred", "source_url": index_source_url(code),
+            "code": code,
+            "name": INDEX_SERIES[code][0],
+            "data_kind": "daily_close_only",
+            "unit": "index_points",
+            "provider": "fred",
+            "source_url": index_source_url(code),
             "has_more": len(rows) > limit,
             "observations": [dict(row) for row in reversed(rows[:limit])],
         }
