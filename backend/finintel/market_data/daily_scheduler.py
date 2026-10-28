@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import sqlite3
+import contextlib
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -153,7 +154,15 @@ def main(argv: list[str] | None = None) -> int:
     while True:
         eligible = due_date(now_utc())
         previous = status(args.state_path)
-        if eligible and previous.get("last_completed_date") != eligible:
+        last_attempt = previous.get("started_at", "")
+        # Failed runs retry no more than hourly, preventing a tight request loop.
+        recent = False
+        if last_attempt:
+            try:
+                recent = (now_utc() - datetime.fromisoformat(last_attempt)).total_seconds() < 3600
+            except ValueError:
+                pass
+        if eligible and previous.get("last_completed_date") != eligible and not recent:
             run_cycle(provider=args.provider, state_path=args.state_path,
                       max_symbols=args.max_symbols,
                       delay_seconds=args.delay_seconds, indexes_only=args.indexes_only)
