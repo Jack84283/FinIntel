@@ -108,6 +108,21 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Index history acquisition": "指数历史数据采集",
+  "Fetch and store real daily closing levels for major U.S. indexes, separately from stock OHLCV and index constituents.": "获取并存储美国主要指数的每日实际收盘点位；与股票 OHLCV 和指数成分股数据分开。",
+  "Market index": "市场指数",
+  "Fetch selected index": "下载所选指数",
+  "Fetch all five indexes": "下载全部五个指数",
+  "Stored sessions": "已存储交易日",
+  "Latest close": "最新收盘点位",
+  "Session change": "交易日涨跌幅",
+  "Coverage": "覆盖范围",
+  "FRED · daily close only · index points, not trade volume": "FRED · 仅每日收盘值 · 指数点位，非成交量",
+  "U.S. index history from FRED may be limited to 10 years. Provider licenses and terms apply. Downloads occur only when requested.": "FRED 的部分美国指数历史仅覆盖约十年。请遵守数据许可和使用条款。仅在手动请求后下载。",
+  "Fetching index history…": "正在下载指数历史数据…",
+  "Reading locally stored index history…": "正在读取本地指数历史数据…",
+  "Index history download completed.": "指数历史数据下载完成。",
+  "Some index history downloads failed.": "部分指数历史数据下载失败。",
   "Full database integrity checks run before restoration.": "恢复前将执行完整的数据库完整性检查。",
   "Inspecting selected backup…": "正在检查所选备份…",
   "Backup inspection unavailable. Select another backup or retry Restore.": "无法检查备份。请选择其他备份或重试恢复。",
