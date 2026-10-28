@@ -154,7 +154,9 @@ class AlpacaDailyProvider:
             )
         self._client = client
 
-    def fetch_daily(self, symbol: str, *, period: str = "10y") -> HistoricalBatch:
+    def fetch_daily(
+        self, symbol: str, *, period: str = "10y", start_date: date | None = None
+    ) -> HistoricalBatch:
         ticker = symbol.strip().upper()
         if not SYMBOL_PATTERN.fullmatch(ticker):
             raise ProviderError("Invalid stock or ETF symbol")
@@ -163,7 +165,7 @@ class AlpacaDailyProvider:
         # after UTC midnight. Use the day before yesterday for a safe margin.
         end = datetime.now(UTC).date() - timedelta(days=2)
         try:
-            start = _start_date(period, end)
+            start = start_date or _start_date(period, end)
         except ValueError:
             start = end.replace(year=end.year - (5 if period == "5y" else 10))
         if start > end:

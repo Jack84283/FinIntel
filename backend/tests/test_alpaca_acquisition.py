@@ -125,8 +125,8 @@ def test_alpaca_and_alpha_prices_coexist_and_are_queryable(tmp_path, monkeypatch
         batch = AlpacaDailyProvider(client=client).fetch_daily("IBM")
 
     class FakeProvider:
-        def fetch_daily(self, symbol, *, period="10y"):
-            assert symbol == "IBM" and period == "5y"
+        def fetch_daily(self, symbol, *, period="10y", start_date=None):
+            assert symbol == "IBM" and period == "5y" and start_date is None
             return batch
 
     monkeypatch.setattr("finintel.market_data.acquisition.AlpacaDailyProvider", FakeProvider)
