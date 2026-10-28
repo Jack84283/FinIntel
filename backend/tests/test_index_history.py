@@ -1,4 +1,5 @@
 """Offline index-level history acceptance tests; never fetch live FRED during CI."""
+
 import sqlite3
 
 import httpx
@@ -129,12 +130,13 @@ def test_api_requires_desktop_auth_and_retains_read_only_get(tmp_path, monkeypat
     monkeypatch.setenv("FININTEL_PROCESS_TOKEN", "a" * 32)
     with TestClient(app) as client:
         without = client.post("/api/v1/market-data/index-history/SP500/acquire")
-        catalog = client.get("/api/v1/market-data/index-history", headers={
-            "x-finintel-process-token": "a" * 32
-        })
-        empty = client.get("/api/v1/market-data/index-history/SP500/daily", headers={
-            "x-finintel-process-token": "a" * 32
-        })
+        catalog = client.get(
+            "/api/v1/market-data/index-history", headers={"x-finintel-process-token": "a" * 32}
+        )
+        empty = client.get(
+            "/api/v1/market-data/index-history/SP500/daily",
+            headers={"x-finintel-process-token": "a" * 32},
+        )
     assert without.status_code == 403
     assert catalog.status_code == 200
     assert catalog.json()[0]["code"] == "SP500"
