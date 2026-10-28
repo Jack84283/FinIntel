@@ -24,11 +24,20 @@ apps/desktop/tsconfig.tsbuildinfo
 data/raw/
 data/cache/
 data/private/
+data/backups/
+data/checkpoints/
 data/*.json
+data/**/*.json
 data/*.log
+data/**/*.log
 data/*.lock
+data/**/*.lock
 data/*.pid
+data/**/*.pid
 data/*.bak
+data/**/*.bak
+data/**/*.tmp
+data/**/*.partial
 downloads/
 *.parquet
 # editor / OS

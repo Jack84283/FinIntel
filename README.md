@@ -94,6 +94,13 @@ docs/                Architecture notes and phased scope
 
 The repository was **public** when bootstrapped. Do not commit proprietary models, keys, portfolio information, downloaded private financial data or personal datasets until visibility and access have been reviewed. The .gitignore excludes local databases, generated downloads, credentials and build output; it is not a substitute for access control.
 
+Before switching branches, pulling, merging, rebasing, or applying repository
+cleanup, preserve ignored local databases, backups, snapshots, logs and
+backfill checkpoints outside the checkout with the procedure in
+[Local data preservation](docs/LOCAL_DATA_PRESERVATION.md). The procedure
+creates a hash manifest, uses SQLite's backup API for the active database, and
+refuses to overwrite divergent files during restore.
+
 Project specifications are maintained in the FinIntel Google Drive: [ENG-0002 Implementation Roadmap](https://docs.google.com/document/d/1D44Vs_Lmgn3hKRqw-8xYermLjhZ5aS6PlRmvUDeGxLY/edit).
 
 ## Next implementation milestones
