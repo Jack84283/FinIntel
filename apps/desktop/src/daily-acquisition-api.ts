@@ -12,6 +12,7 @@ export interface DailySettings {
   overlap_days: number;
   retry_attempts: number;
   retry_backoff_seconds: number;
+  catch_up_limit: number;
   updated_at: string | null;
 }
 
@@ -19,7 +20,7 @@ export interface DailyItem {
   kind: "equity" | "index";
   code: string;
   provider: string | null;
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  status: "pending" | "running" | "completed" | "incomplete" | "failed" | "cancelled";
   attempts: number;
   started_at: string | null;
   finished_at: string | null;
@@ -47,6 +48,7 @@ export interface DailyJob {
   total_instruments: number;
   completed_instruments: number;
   failed_instruments: number;
+  incomplete_instruments: number;
   pending_instruments: number;
   successful_imports: number;
   inserted: number;
@@ -65,6 +67,7 @@ export interface DailyStatus extends DailyJob {
   timezone: string;
   primary_provider: DailyProvider;
   secondary_provider: DailyProvider | null;
+  catch_up_limit: number;
   last_execution_time: string | null;
   last_successful_execution: string | null;
   next_scheduled_execution: string;
@@ -117,6 +120,7 @@ function job(value: unknown): DailyJob {
     total_instruments: count(item.total_instruments),
     completed_instruments: count(item.completed_instruments),
     failed_instruments: count(item.failed_instruments),
+    incomplete_instruments: count(item.incomplete_instruments),
     pending_instruments: count(item.pending_instruments),
     successful_imports: count(item.successful_imports),
     inserted: count(item.inserted),
@@ -135,7 +139,9 @@ export function parseDailyStatus(value: unknown): DailyStatus {
   const base = job(item);
   const next = item.next_scheduled_execution;
   if (typeof item.enabled !== "boolean" || typeof item.scheduled_execution_time !== "string" ||
-      typeof item.timezone !== "string" || typeof next !== "string") {
+      typeof item.timezone !== "string" || typeof next !== "string" ||
+      typeof item.catch_up_limit !== "number" || !Number.isSafeInteger(item.catch_up_limit) ||
+      item.catch_up_limit < 1 || item.catch_up_limit > 30) {
     throw new Error("Invalid daily acquisition status.");
   }
   return {
@@ -147,6 +153,7 @@ export function parseDailyStatus(value: unknown): DailyStatus {
     secondary_provider: DAILY_PROVIDERS.includes(item.secondary_provider as DailyProvider)
       ? item.secondary_provider as DailyProvider
       : null,
+    catch_up_limit: item.catch_up_limit,
     last_execution_time: optionalString(item.last_execution_time),
     last_successful_execution: optionalString(item.last_successful_execution),
     next_scheduled_execution: next,
@@ -161,12 +168,14 @@ export function parseDailySettings(value: unknown): DailySettings {
   const overlapDays = item.overlap_days;
   const retryAttempts = item.retry_attempts;
   const retryBackoffSeconds = item.retry_backoff_seconds;
+  const catchUpLimit = item.catch_up_limit;
   if (typeof item.enabled !== "boolean" || typeof item.schedule_time !== "string" ||
       typeof item.timezone !== "string" || !DAILY_PROVIDERS.includes(item.primary_provider as DailyProvider) ||
       (item.secondary_provider !== null && !DAILY_PROVIDERS.includes(item.secondary_provider as DailyProvider)) ||
       typeof overlapDays !== "number" || !Number.isSafeInteger(overlapDays) || overlapDays < 0 ||
       typeof retryAttempts !== "number" || !Number.isSafeInteger(retryAttempts) || retryAttempts < 1 ||
       typeof retryBackoffSeconds !== "number" || retryBackoffSeconds < 0 ||
+      typeof catchUpLimit !== "number" || !Number.isSafeInteger(catchUpLimit) || catchUpLimit < 1 ||
       (item.updated_at !== null && typeof item.updated_at !== "string")) {
     throw new Error("Invalid daily acquisition settings.");
   }
@@ -179,6 +188,7 @@ export function parseDailySettings(value: unknown): DailySettings {
     overlap_days: overlapDays,
     retry_attempts: retryAttempts,
     retry_backoff_seconds: retryBackoffSeconds,
+    catch_up_limit: catchUpLimit,
     updated_at: item.updated_at as string | null,
   };
 }
@@ -214,7 +224,10 @@ export async function fetchDailySettings(): Promise<DailySettings> {
 }
 
 export async function saveDailySettings(patch: Partial<DailySettings>): Promise<DailySettings> {
-  return parseDailySettings(await write("/api/v1/daily-acquisition/settings", "daily_acquisition_save_settings", "PUT", patch));
+  const result = isTauri()
+    ? await invoke<unknown>("daily_acquisition_save_settings", { settings: patch })
+    : await write("/api/v1/daily-acquisition/settings", "daily_acquisition_save_settings", "PUT", patch);
+  return parseDailySettings(result);
 }
 
 export async function runDailyAcquisition(): Promise<DailyJob> {

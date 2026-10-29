@@ -25,18 +25,24 @@ import pandas as pd
 from finintel.market_data.acquisition import acquire_and_store
 from finintel.market_data.daily_acquisition_store import (
     PROVIDERS,
+    LeaseLostError,
     append_provider_error,
     cancel_job,
     claim_job,
     create_job,
     finish_job,
     get_active_job,
+    get_automatic_job,
     get_job,
     get_settings,
     heartbeat,
     job_control,
+    latest_completed_automatic_session,
+    list_automatic_jobs,
+    merge_job_items,
     record_item,
     release_lock,
+    requeue_job,
     resumable_job,
     retry_failed_job,
     set_current_instrument,
@@ -56,6 +62,7 @@ ET = ZoneInfo("America/New_York")
 STATE = Path("data/daily-acquisition.json")
 RETRYABLE_ERRORS = (ProviderRateLimited, ProviderUnavailable, OSError)
 _CALENDAR = xcals.get_calendar("XNYS")
+LEASE_SECONDS = 120
 
 
 def now_utc() -> datetime:
@@ -84,9 +91,11 @@ def trading_sessions(start: date, end: date) -> list[date]:
 
 
 def next_trading_day(day: date) -> date:
-    sessions = _CALENDAR.sessions_in_range(
-        pd.Timestamp(day + timedelta(days=1)), pd.Timestamp(day + timedelta(days=370))
-    )
+    start = day + timedelta(days=1)
+    end = min(day + timedelta(days=370), _CALENDAR.last_session.date())
+    if start > end:
+        raise RuntimeError("NYSE calendar did not provide a future trading session")
+    sessions = _CALENDAR.sessions_in_range(pd.Timestamp(start), pd.Timestamp(end))
     if len(sessions) == 0:
         raise RuntimeError("NYSE calendar did not provide a future trading session")
     return sessions[0].date()
@@ -120,10 +129,17 @@ def next_scheduled_execution(
     )
 
 
-def expected_missing_sessions(start: date | None, end: date | None) -> int:
+def expected_missing_sessions(
+    start: date | None,
+    end: date | None,
+    stored_sessions: set[date] | None = None,
+) -> int:
     if start is None or end is None or start >= end:
         return 0
-    return max(0, len(trading_sessions(start + timedelta(days=1), end)))
+    expected = set(trading_sessions(start + timedelta(days=1), end))
+    if stored_sessions is not None:
+        expected.difference_update(stored_sessions)
+    return len(expected)
 
 
 def status(path: Path = STATE) -> dict:
@@ -182,8 +198,153 @@ def latest_sessions(provider: str) -> dict[str, date]:
         con.close()
 
 
+def stored_sessions(
+    symbol: str,
+    provider: str,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+) -> set[date]:
+    """Return only the stored session-date column for one provider series."""
+    db = database_path()
+    if not db.is_file() or db.is_symlink():
+        return set()
+    clauses = [
+        "s.symbol=?",
+        "s.provider=?",
+        "s.frequency='1d'",
+        "s.adjustment='raw_unadjusted'",
+    ]
+    parameters: list[object] = [symbol, provider]
+    if start is not None:
+        clauses.append("p.session_date>=?")
+        parameters.append(start.isoformat())
+    if end is not None:
+        clauses.append("p.session_date<=?")
+        parameters.append(end.isoformat())
+    con = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        return {
+            date.fromisoformat(row[0])
+            for row in con.execute(
+                "SELECT p.session_date FROM series s JOIN daily_prices p ON p.series_id=s.id "
+                f"WHERE {' AND '.join(clauses)}",
+                parameters,
+            )
+        }
+    finally:
+        con.close()
+
+
+def missing_sessions_for_instrument(
+    symbol: str,
+    provider: str,
+    *,
+    end_date: date | None = None,
+) -> set[date]:
+    """Find calendar sessions missing from the observed provider series.
+
+    The first observed provider session is treated as the listing boundary. This
+    avoids inventing gaps before an instrument listed, while still detecting
+    holes between observations and through the latest requested session.
+    """
+    db = database_path()
+    if not db.is_file() or db.is_symlink():
+        return set()
+    con = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        bounds = con.execute(
+            "SELECT MIN(p.session_date), MAX(p.session_date) "
+            "FROM series s JOIN daily_prices p ON p.series_id=s.id "
+            "WHERE s.symbol=? AND s.provider=? AND s.frequency='1d' "
+            "AND s.adjustment='raw_unadjusted'",
+            (symbol, provider),
+        ).fetchone()
+    finally:
+        con.close()
+    if not bounds or bounds[0] is None or bounds[1] is None:
+        return set()
+    first = date.fromisoformat(bounds[0])
+    last = date.fromisoformat(bounds[1])
+    if end_date is not None:
+        last = min(last, end_date)
+    if first >= last:
+        return set()
+    expected = set(trading_sessions(first, last))
+    expected.difference_update(stored_sessions(symbol, provider, start=first, end=last))
+    return expected
+
+
 def _safe_error(exc: BaseException) -> dict[str, str]:
     return {"code": type(exc).__name__, "message": str(exc)[:240]}
+
+
+def automatic_schedule_dates(
+    settings: dict[str, object], *, now: datetime | None = None
+) -> list[date]:
+    """Return due automatic sessions, retaining durable unfinished work."""
+    current = due_date(now or now_utc(), str(settings["schedule_time"]), str(settings["timezone"]))
+    if current is None:
+        return []
+    current_day = date.fromisoformat(current)
+    existing = list_automatic_jobs(through=current)
+    existing_by_date = {
+        date.fromisoformat(str(job["schedule_date"])): job
+        for job in existing
+        if job.get("schedule_date")
+    }
+    actionable = {
+        day
+        for day, job in existing_by_date.items()
+        if job["status"] in ("scheduled", "running", "paused", "partial", "failed")
+    }
+    latest_completed = latest_completed_automatic_session()
+    if latest_completed:
+        first_missed = next_trading_day(date.fromisoformat(latest_completed))
+        missed = trading_sessions(first_missed, current_day)
+    else:
+        missed = [current_day]
+    catch_up_limit = max(1, int(settings["catch_up_limit"]))
+    actionable.update(day for day in missed if day not in existing_by_date)
+    new_dates = sorted(day for day in actionable if day not in existing_by_date)
+    if len(new_dates) > catch_up_limit:
+        actionable.difference_update(new_dates[:-catch_up_limit])
+    # Revisit today's completed job so a newly discovered instrument is added,
+    # while the unique automatic-date key prevents duplicate jobs.
+    actionable.add(current_day)
+    return sorted(actionable)
+
+
+def _ensure_automatic_job(schedule_day: date, settings: dict[str, object]) -> dict[str, object]:
+    schedule_date = schedule_day.isoformat()
+    job = get_automatic_job(schedule_date)
+    if job is None:
+        job = create_job(
+            kind="automatic",
+            provider=str(settings["primary_provider"]),
+            secondary_provider=settings["secondary_provider"],
+            scheduled_for=_schedule_datetime(
+                schedule_day,
+                str(settings["schedule_time"]),
+                str(settings["timezone"]),
+            )
+            .astimezone(UTC)
+            .isoformat(timespec="seconds"),
+            schedule_date=schedule_date,
+            equity_symbols=instruments(str(settings["primary_provider"])),
+            index_codes=list(INDEX_SERIES),
+        )
+    elif job["status"] in ("failed", "partial"):
+        job = requeue_job(str(job["id"])) or job
+    return (
+        merge_job_items(
+            str(job["id"]),
+            provider=str(settings["primary_provider"]),
+            equity_symbols=instruments(str(settings["primary_provider"])),
+            index_codes=list(INDEX_SERIES),
+        )
+        or job
+    )
 
 
 class DailyAcquisitionScheduler:
@@ -270,29 +431,15 @@ class DailyAcquisitionScheduler:
             try:
                 settings = get_settings()
                 active = get_active_job()
-                if active and active["status"] in ("scheduled", "running"):
-                    self._launch(str(active["id"]))
+                if active is not None:
+                    if active["status"] in ("scheduled", "running"):
+                        self._launch(str(active["id"]))
                 elif settings["enabled"]:
-                    scheduled_date = due_date(
-                        now_utc(), str(settings["schedule_time"]), str(settings["timezone"])
-                    )
-                    if scheduled_date:
-                        job = create_job(
-                            kind="automatic",
-                            provider=str(settings["primary_provider"]),
-                            secondary_provider=settings["secondary_provider"],
-                            scheduled_for=_schedule_datetime(
-                                date.fromisoformat(scheduled_date),
-                                str(settings["schedule_time"]),
-                                str(settings["timezone"]),
-                            )
-                            .astimezone(UTC)
-                            .isoformat(timespec="seconds"),
-                            schedule_date=scheduled_date,
-                            equity_symbols=instruments(str(settings["primary_provider"])),
-                            index_codes=list(INDEX_SERIES),
-                        )
-                        self._launch(str(job["id"]))
+                    for scheduled_day in automatic_schedule_dates(settings):
+                        job = _ensure_automatic_job(scheduled_day, settings)
+                        if job["status"] in ("scheduled", "running"):
+                            self._launch(str(job["id"]))
+                            break
             except (OSError, StorageError, ValueError, RuntimeError):
                 pass
             self._wake.wait(self._poll_seconds)
@@ -324,22 +471,50 @@ class DailyAcquisitionScheduler:
 
     def _run_job(self, job_id: str) -> None:
         owner = uuid.uuid4().hex
+        lease_lost = threading.Event()
+        heartbeat_stop = threading.Event()
+        heartbeat_thread: threading.Thread | None = None
         try:
-            if not claim_job(job_id, owner):
+            if not claim_job(job_id, owner, lease_seconds=LEASE_SECONDS):
                 return
             settings = get_settings()
             job = get_job(job_id, include_items=True)
             if not job:
                 return
+            heartbeat_thread = threading.Thread(
+                target=self._lease_loop,
+                args=(job_id, owner, lease_lost, heartbeat_stop),
+                name="finintel-daily-lease-heartbeat",
+                daemon=True,
+            )
+            heartbeat_thread.start()
             latest = latest_sessions(str(job["provider"]))
-            for item in job.get("items", []):
-                if item["status"] == "completed":
-                    continue
-                if self._should_stop(job_id):
+            seen: set[tuple[str, str]] = set()
+            while True:
+                current = get_job(job_id, include_items=True)
+                if not current:
                     return
-                set_current_instrument(job_id, item["code"])
+                item = next(
+                    (
+                        candidate
+                        for candidate in current.get("items", [])
+                        if candidate["status"] != "completed"
+                        and candidate["status"] != "cancelled"
+                        and (candidate["kind"], candidate["code"]) not in seen
+                    ),
+                    None,
+                )
+                if item is None:
+                    if self._should_stop(job_id, lease_lost=lease_lost, terminal_only=True):
+                        return
+                    finish_job(job_id, owner_token=owner)
+                    return
+                if self._should_stop(job_id, lease_lost=lease_lost):
+                    return
+                seen.add((item["kind"], item["code"]))
+                set_current_instrument(job_id, item["code"], owner_token=owner)
                 if item["kind"] == "index":
-                    self._run_index(job_id, item["code"], settings)
+                    self._run_index(job_id, item["code"], settings, owner, lease_lost)
                 else:
                     self._run_equity(
                         job_id,
@@ -348,17 +523,53 @@ class DailyAcquisitionScheduler:
                         job.get("secondary_provider"),
                         settings,
                         latest,
+                        owner,
+                        lease_lost,
                     )
-                heartbeat(job_id, owner)
-            if not self._should_stop(job_id, terminal_only=True):
-                finish_job(job_id)
+                if lease_lost.is_set():
+                    return
+        except LeaseLostError:
+            return
         except (OSError, StorageError, ValueError, RuntimeError) as exc:
-            append_provider_error(job_id, _safe_error(exc))
-            finish_job(job_id, status="failed")
+            if lease_lost.is_set():
+                return
+            try:
+                append_provider_error(job_id, _safe_error(exc), owner_token=owner)
+                finish_job(job_id, status="failed", owner_token=owner)
+            except LeaseLostError:
+                return
         finally:
+            heartbeat_stop.set()
+            if heartbeat_thread and heartbeat_thread is not threading.current_thread():
+                heartbeat_thread.join(timeout=2)
             release_lock(job_id, owner)
 
-    def _should_stop(self, job_id: str, *, terminal_only: bool = False) -> bool:
+    def _lease_loop(
+        self,
+        job_id: str,
+        owner: str,
+        lease_lost: threading.Event,
+        stop: threading.Event,
+    ) -> None:
+        interval = max(1.0, LEASE_SECONDS / 3)
+        while not stop.wait(interval):
+            try:
+                if not heartbeat(job_id, owner, lease_seconds=LEASE_SECONDS):
+                    lease_lost.set()
+                    return
+            except (OSError, StorageError, ValueError):
+                lease_lost.set()
+                return
+
+    def _should_stop(
+        self,
+        job_id: str,
+        *,
+        lease_lost: threading.Event | None = None,
+        terminal_only: bool = False,
+    ) -> bool:
+        if lease_lost and lease_lost.is_set():
+            return True
         control = job_control(job_id)
         if not control:
             return True
@@ -366,6 +577,8 @@ class DailyAcquisitionScheduler:
             return True
         if control["pause_requested"]:
             while not self._stop.is_set():
+                if lease_lost and lease_lost.is_set():
+                    return True
                 current = job_control(job_id)
                 if not current or current["cancel_requested"] or current["terminal"]:
                     return True
@@ -376,18 +589,27 @@ class DailyAcquisitionScheduler:
             return True
         return False
 
-    def _wait_retry(self, seconds: float) -> bool:
+    def _wait_retry(self, seconds: float, lease_lost: threading.Event | None = None) -> bool:
         deadline = time.monotonic() + seconds
         while not self._stop.is_set() and time.monotonic() < deadline:
+            if lease_lost and lease_lost.is_set():
+                return False
             self._stop.wait(min(0.5, max(0.01, deadline - time.monotonic())))
-        return not self._stop.is_set()
+        return not self._stop.is_set() and not (lease_lost and lease_lost.is_set())
 
-    def _run_index(self, job_id: str, code: str, settings: dict[str, object]) -> None:
+    def _run_index(
+        self,
+        job_id: str,
+        code: str,
+        settings: dict[str, object],
+        owner: str,
+        lease_lost: threading.Event,
+    ) -> None:
         attempts = int(settings["retry_attempts"])
         backoff = float(settings["retry_backoff_seconds"])
         last_error: BaseException | None = None
         for attempt in range(attempts):
-            set_item_running(job_id, "index", code)
+            set_item_running(job_id, "index", code, owner_token=owner)
             try:
                 result = acquire_index_closes(code)
                 record_item(
@@ -402,12 +624,17 @@ class DailyAcquisitionScheduler:
                     unchanged=int(result["unchanged"]),
                     validation_status="validated",
                     index_result=result,
+                    owner_token=owner,
                 )
                 return
+            except LeaseLostError:
+                raise
             except (IndexHistoryError, StorageError, OSError) as exc:
                 last_error = exc
-                append_provider_error(job_id, {**_safe_error(exc), "instrument": code})
-                if attempt + 1 < attempts and self._wait_retry(backoff * (2**attempt)):
+                append_provider_error(
+                    job_id, {**_safe_error(exc), "instrument": code}, owner_token=owner
+                )
+                if attempt + 1 < attempts and self._wait_retry(backoff * (2**attempt), lease_lost):
                     continue
         record_item(
             job_id,
@@ -418,6 +645,7 @@ class DailyAcquisitionScheduler:
             error_type=type(last_error).__name__ if last_error else "IndexHistoryError",
             error_message=str(last_error) if last_error else "Index refresh failed",
             validation_status="failed",
+            owner_token=owner,
         )
 
     def _run_equity(
@@ -428,6 +656,8 @@ class DailyAcquisitionScheduler:
         secondary_provider: object,
         settings: dict[str, object],
         latest: dict[str, date],
+        owner: str,
+        lease_lost: threading.Event,
     ) -> None:
         providers = [provider]
         if (
@@ -442,11 +672,12 @@ class DailyAcquisitionScheduler:
         last_session = latest.get(symbol)
         start = last_session - timedelta(days=overlap) if last_session and overlap else last_session
         last_error: BaseException | None = None
+        incomplete_result: tuple[str, dict[str, object], int] | None = None
         for selected in providers:
             for attempt in range(attempts):
-                if self._should_stop(job_id):
+                if self._should_stop(job_id, lease_lost=lease_lost):
                     return
-                set_item_running(job_id, "equity", symbol)
+                set_item_running(job_id, "equity", symbol, owner_token=owner)
                 try:
                     result = acquire_and_store(
                         symbol,
@@ -454,37 +685,69 @@ class DailyAcquisitionScheduler:
                         period="5y",
                         start_date=start if selected != "alpha_vantage" else None,
                     )
-                    missing = expected_missing_sessions(
-                        last_session, date.fromisoformat(str(result["last_session"]))
+                    missing = len(
+                        missing_sessions_for_instrument(
+                            symbol,
+                            selected,
+                            end_date=date.fromisoformat(str(result["last_session"])),
+                        )
                     )
-                    record_item(
-                        job_id,
-                        "equity",
-                        symbol,
-                        status="completed",
-                        provider=selected,
-                        last_session=str(result["last_session"]),
-                        inserted=int(result["inserted"]),
-                        updated=int(result["updated"]),
-                        unchanged=int(result["unchanged"]),
-                        stale=int(result["stale"]),
-                        validation_status="validated" if missing == 0 else "incomplete",
-                        missing_sessions=missing,
-                    )
-                    return
+                    if missing == 0:
+                        record_item(
+                            job_id,
+                            "equity",
+                            symbol,
+                            status="completed",
+                            provider=selected,
+                            last_session=str(result["last_session"]),
+                            inserted=int(result["inserted"]),
+                            updated=int(result["updated"]),
+                            unchanged=int(result["unchanged"]),
+                            stale=int(result["stale"]),
+                            validation_status="validated",
+                            owner_token=owner,
+                        )
+                        return
+                    incomplete_result = (selected, result, missing)
+                    break
+                except LeaseLostError:
+                    raise
                 except (ProviderError, StorageError, OSError, ValueError) as exc:
                     last_error = exc
                     append_provider_error(
                         job_id,
                         {**_safe_error(exc), "instrument": symbol, "provider": selected},
+                        owner_token=owner,
                     )
                     if (
                         isinstance(exc, RETRYABLE_ERRORS)
                         and attempt + 1 < attempts
-                        and self._wait_retry(backoff * (2**attempt))
+                        and self._wait_retry(backoff * (2**attempt), lease_lost)
                     ):
                         continue
                     break
+            if incomplete_result is not None:
+                continue
+        if incomplete_result is not None:
+            selected, result, missing = incomplete_result
+            record_item(
+                job_id,
+                "equity",
+                symbol,
+                status="incomplete",
+                provider=selected,
+                last_session=str(result["last_session"]),
+                inserted=int(result["inserted"]),
+                updated=int(result["updated"]),
+                unchanged=int(result["unchanged"]),
+                stale=int(result["stale"]),
+                error_type=type(last_error).__name__ if last_error else None,
+                error_message=str(last_error) if last_error else None,
+                validation_status="incomplete",
+                missing_sessions=missing,
+                owner_token=owner,
+            )
+            return
         record_item(
             job_id,
             "equity",
@@ -494,6 +757,7 @@ class DailyAcquisitionScheduler:
             error_type=type(last_error).__name__ if last_error else "ProviderError",
             error_message=str(last_error) if last_error else "Acquisition failed",
             validation_status="failed",
+            owner_token=owner,
         )
 
 

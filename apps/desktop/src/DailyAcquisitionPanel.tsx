@@ -61,7 +61,7 @@ export function DailyAcquisitionPanel() {
   const jobId = status?.job_id;
   const progress = useMemo(() => {
     if (!status || status.total_instruments === 0) return 0;
-    return Math.round(((status.completed_instruments + status.failed_instruments) / status.total_instruments) * 100);
+    return Math.round(((status.completed_instruments + status.failed_instruments + status.incomplete_instruments) / status.total_instruments) * 100);
   }, [status]);
 
   const action = async (kind: "run" | "pause" | "resume" | "cancel" | "retry-failed") => {
@@ -117,6 +117,10 @@ export function DailyAcquisitionPanel() {
               {(Object.keys(providerName) as DailyProvider[]).map((provider) => <option key={provider} value={provider}>{providerName[provider]}</option>)}
             </select>
           </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            {t("Catch-up limit")}
+            <input type="number" min={1} max={30} value={status?.catch_up_limit ?? 5} disabled={!status || saving} onChange={(event) => void update({ catch_up_limit: Number(event.target.value) })} className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground" />
+          </label>
         </div>
         <div className="rounded-md border border-border bg-background/40 p-3 text-xs">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -129,6 +133,7 @@ export function DailyAcquisitionPanel() {
           <div className="mt-2 grid gap-1 text-muted-foreground sm:grid-cols-3">
             <span>{t("Successful")}: {status?.successful_imports ?? 0}</span>
             <span>{t("Failed")}: {status?.failed_instruments ?? 0}</span>
+            <span>{t("Incomplete")}: {status?.incomplete_instruments ?? 0}</span>
             <span>{t("Pending")}: {status?.pending_instruments ?? 0}</span>
           </div>
         </div>
@@ -143,7 +148,7 @@ export function DailyAcquisitionPanel() {
           <Button type="button" size="sm" variant="secondary" onClick={() => void action("pause")} disabled={!active || status?.status === "paused" || !jobId}><Pause aria-hidden="true" />{t("Pause")}</Button>
           <Button type="button" size="sm" variant="secondary" onClick={() => void action("resume")} disabled={!jobId || status?.status !== "paused"}><Play aria-hidden="true" />{t("Resume")}</Button>
           <Button type="button" size="sm" variant="secondary" onClick={() => void action("cancel")} disabled={!active || !jobId}><Square aria-hidden="true" />{t("Cancel")}</Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => void action("retry-failed")} disabled={!jobId || status?.failed_instruments === 0}><RotateCcw aria-hidden="true" />{t("Retry Failed")}</Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => void action("retry-failed")} disabled={!jobId || (status?.failed_instruments ?? 0) + (status?.incomplete_instruments ?? 0) === 0}><RotateCcw aria-hidden="true" />{t("Retry Failed")}</Button>
           <Button type="button" size="sm" variant="ghost" onClick={() => void refresh()} disabled={!status}><RefreshCw aria-hidden="true" />{t("Refresh Status")}</Button>
         </div>
         {status?.status === "running" && status.current_instrument && <p role="status" className="text-xs text-muted-foreground">{t("Processing")} {status.current_instrument}…</p>}

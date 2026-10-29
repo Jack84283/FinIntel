@@ -14,6 +14,7 @@ const idleJob = {
   total_instruments: 0,
   completed_instruments: 0,
   failed_instruments: 0,
+  incomplete_instruments: 0,
   pending_instruments: 0,
   successful_imports: 0,
   inserted: 0,
@@ -35,6 +36,7 @@ describe("daily acquisition API parsing", () => {
       timezone: "America/New_York",
       primary_provider: "alpaca_sip",
       secondary_provider: null,
+      catch_up_limit: 5,
       last_execution_time: null,
       last_successful_execution: null,
       next_scheduled_execution: "2026-11-03T01:00:00+00:00",
@@ -56,6 +58,7 @@ describe("daily acquisition API parsing", () => {
       overlap_days: 8,
       retry_attempts: 3,
       retry_backoff_seconds: 2,
+      catch_up_limit: 5,
       updated_at: null,
     })).toThrow("Invalid daily acquisition settings.");
   });

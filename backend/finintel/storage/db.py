@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import HistoricalBatch
 from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -176,12 +176,13 @@ CREATE TABLE IF NOT EXISTS daily_acquisition_settings (
     overlap_days INTEGER NOT NULL CHECK(overlap_days BETWEEN 0 AND 60),
     retry_attempts INTEGER NOT NULL CHECK(retry_attempts BETWEEN 1 AND 5),
     retry_backoff_seconds REAL NOT NULL CHECK(retry_backoff_seconds BETWEEN 0 AND 300),
+    catch_up_limit INTEGER NOT NULL DEFAULT 5 CHECK(catch_up_limit BETWEEN 1 AND 30),
     updated_at TEXT NOT NULL
 );
 INSERT OR IGNORE INTO daily_acquisition_settings
     (id, enabled, schedule_time, timezone, primary_provider, secondary_provider,
-     overlap_days, retry_attempts, retry_backoff_seconds, updated_at)
-VALUES (1, 0, '20:00', 'America/New_York', 'alpaca_sip', 'tiingo', 8, 3, 2, '');
+     overlap_days, retry_attempts, retry_backoff_seconds, catch_up_limit, updated_at)
+VALUES (1, 0, '20:00', 'America/New_York', 'alpaca_sip', 'tiingo', 8, 3, 2, 5, '');
 
 CREATE TABLE IF NOT EXISTS daily_acquisition_jobs (
     id TEXT PRIMARY KEY NOT NULL,
@@ -198,6 +199,7 @@ CREATE TABLE IF NOT EXISTS daily_acquisition_jobs (
     total_instruments INTEGER NOT NULL DEFAULT 0 CHECK(total_instruments >= 0),
     completed_instruments INTEGER NOT NULL DEFAULT 0 CHECK(completed_instruments >= 0),
     failed_instruments INTEGER NOT NULL DEFAULT 0 CHECK(failed_instruments >= 0),
+    incomplete_instruments INTEGER NOT NULL DEFAULT 0 CHECK(incomplete_instruments >= 0),
     pending_instruments INTEGER NOT NULL DEFAULT 0 CHECK(pending_instruments >= 0),
     successful_imports INTEGER NOT NULL DEFAULT 0 CHECK(successful_imports >= 0),
     inserted INTEGER NOT NULL DEFAULT 0 CHECK(inserted >= 0),
@@ -221,7 +223,7 @@ CREATE TABLE IF NOT EXISTS daily_acquisition_items (
     kind TEXT NOT NULL CHECK(kind IN ('equity', 'index')),
     code TEXT NOT NULL,
     provider TEXT,
-    status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+    status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'completed', 'incomplete', 'failed', 'cancelled')),
     attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
     started_at TEXT,
     finished_at TEXT,
@@ -277,7 +279,7 @@ def _ensure_version(conn: sqlite3.Connection, *, allow_missing: bool) -> bool:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == 0 and allow_missing:
         return False
-    if version not in (1, 2, 3, 4, 5, 6, 7, SCHEMA_VERSION):
+    if version not in (1, 2, 3, 4, 5, 6, 7, 8, SCHEMA_VERSION):
         raise StorageError(
             "SQLite schema version is unsupported; expected version "
             + str(SCHEMA_VERSION)
@@ -396,6 +398,68 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if conn.in_transaction:
                 conn.rollback()
             raise StorageError("Unable to initialize daily acquisition storage v8") from exc
+        version = 8
+    if version == 8:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            settings_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(daily_acquisition_settings)")
+            }
+            if "catch_up_limit" not in settings_columns:
+                conn.execute(
+                    "ALTER TABLE daily_acquisition_settings ADD COLUMN catch_up_limit INTEGER NOT NULL DEFAULT 5"
+                )
+            job_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(daily_acquisition_jobs)")
+            }
+            if "incomplete_instruments" not in job_columns:
+                conn.execute(
+                    "ALTER TABLE daily_acquisition_jobs ADD COLUMN incomplete_instruments INTEGER NOT NULL DEFAULT 0"
+                )
+            item_schema = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='daily_acquisition_items'"
+            ).fetchone()
+            if item_schema and "'incomplete'" not in (item_schema[0] or ""):
+                conn.execute(
+                    "ALTER TABLE daily_acquisition_items RENAME TO daily_acquisition_items_v8"
+                )
+                conn.execute("DROP INDEX IF EXISTS daily_acquisition_items_status")
+                conn.execute(
+                    """CREATE TABLE daily_acquisition_items (
+                        job_id TEXT NOT NULL REFERENCES daily_acquisition_jobs(id) ON DELETE CASCADE,
+                        kind TEXT NOT NULL CHECK(kind IN ('equity', 'index')),
+                        code TEXT NOT NULL,
+                        provider TEXT,
+                        status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'completed', 'incomplete', 'failed', 'cancelled')),
+                        attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+                        started_at TEXT,
+                        finished_at TEXT,
+                        last_session TEXT,
+                        inserted INTEGER NOT NULL DEFAULT 0 CHECK(inserted >= 0),
+                        updated INTEGER NOT NULL DEFAULT 0 CHECK(updated >= 0),
+                        unchanged INTEGER NOT NULL DEFAULT 0 CHECK(unchanged >= 0),
+                        stale INTEGER NOT NULL DEFAULT 0 CHECK(stale >= 0),
+                        error_type TEXT,
+                        error_message TEXT,
+                        validation_status TEXT NOT NULL DEFAULT 'pending',
+                        missing_sessions INTEGER NOT NULL DEFAULT 0 CHECK(missing_sessions >= 0),
+                        PRIMARY KEY(job_id, kind, code)
+                    )"""
+                )
+                conn.execute(
+                    "INSERT INTO daily_acquisition_items SELECT * FROM daily_acquisition_items_v8"
+                )
+                conn.execute("DROP TABLE daily_acquisition_items_v8")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS daily_acquisition_items_status "
+                "ON daily_acquisition_items(job_id, status, kind, code)"
+            )
+            conn.execute("PRAGMA user_version = 9")
+            conn.commit()
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate daily acquisition storage to v9") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:

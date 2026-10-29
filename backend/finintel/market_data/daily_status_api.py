@@ -35,6 +35,7 @@ class DailySettingsRequest(BaseModel):
     overlap_days: int | None = Field(default=None, ge=0, le=60)
     retry_attempts: int | None = Field(default=None, ge=1, le=5)
     retry_backoff_seconds: float | None = Field(default=None, ge=0, le=300)
+    catch_up_limit: int | None = Field(default=None, ge=1, le=30)
 
 
 def scheduler() -> DailyAcquisitionScheduler:
@@ -84,6 +85,7 @@ def _status_payload() -> dict[str, object]:
             "total_instruments": 0,
             "completed_instruments": 0,
             "failed_instruments": 0,
+            "incomplete_instruments": 0,
             "pending_instruments": 0,
             "successful_imports": 0,
             "inserted": 0,
@@ -121,6 +123,7 @@ def _status_payload() -> dict[str, object]:
         "timezone": settings["timezone"],
         "primary_provider": settings["primary_provider"],
         "secondary_provider": settings["secondary_provider"],
+        "catch_up_limit": settings["catch_up_limit"],
         "last_execution_time": current.get("finished_at") or current.get("started_at"),
         "last_successful_execution": successful.get("finished_at") if successful else None,
         "next_scheduled_execution": next_scheduled_execution(
@@ -132,6 +135,7 @@ def _status_payload() -> dict[str, object]:
         "total_instruments": current.get("total_instruments", 0),
         "completed_instruments": current.get("completed_instruments", 0),
         "failed_instruments": current.get("failed_instruments", 0),
+        "incomplete_instruments": current.get("incomplete_instruments", 0),
         "pending_instruments": current.get("pending_instruments", 0),
         "successful_imports": current.get("successful_imports", 0),
         "inserted": current.get("inserted", 0),

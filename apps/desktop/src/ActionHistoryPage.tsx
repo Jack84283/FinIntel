@@ -191,7 +191,7 @@ function DailyJobHistory() {
               <th scope="col" className="px-3 py-2">{t("Provider")}</th>
               <th scope="col" className="px-3 py-2">{t("Status")}</th>
               <th scope="col" className="px-3 py-2 text-right">{t("Duration")}</th>
-              <th scope="col" className="px-3 py-2 text-right">{t("Completed / Failed / Pending")}</th>
+              <th scope="col" className="px-3 py-2 text-right">{t("Completed / Failed / Incomplete / Pending")}</th>
               <th scope="col" className="px-3 py-2 text-right">{t("New / Updated / Unchanged")}</th>
             </tr></thead>
             <tbody>{items.map((item) => <tr key={item.id} className="border-t border-border">
@@ -200,7 +200,7 @@ function DailyJobHistory() {
               <td className="px-3 py-2">{item.provider === "alpaca_sip" ? t("Alpaca SIP") : item.provider === "alpha_vantage" ? t("Alpha Vantage") : t("Tiingo")}</td>
               <td className="px-3 py-2"><Badge variant={item.status === "completed" ? "success" : item.status === "failed" || item.status === "partial" ? "destructive" : "outline"}>{t(item.status)}</Badge></td>
               <td className="px-3 py-2 text-right">{item.duration_ms === null ? "—" : `${Math.round(item.duration_ms / 1000)}s`}</td>
-              <td className="px-3 py-2 text-right">{item.completed_instruments} / {item.failed_instruments} / {item.pending_instruments}</td>
+              <td className="px-3 py-2 text-right">{item.completed_instruments} / {item.failed_instruments} / {item.incomplete_instruments} / {item.pending_instruments}</td>
               <td className="px-3 py-2 text-right">{item.inserted} / {item.updated} / {item.unchanged}</td>
             </tr>)}</tbody>
           </table>

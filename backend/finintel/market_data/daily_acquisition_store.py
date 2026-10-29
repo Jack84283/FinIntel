@@ -14,7 +14,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from finintel.storage.db import (
+    SCHEMA_VERSION,
     StorageError,
+    _database_version,
     _read_connection,
     _write_connection,
     database_path,
@@ -23,8 +25,9 @@ from finintel.storage.db import (
 
 PROVIDERS = ("alpaca_sip", "tiingo", "alpha_vantage")
 JOB_STATUSES = ("scheduled", "running", "paused", "completed", "partial", "failed", "cancelled")
-ITEM_STATUSES = ("pending", "running", "completed", "failed", "cancelled")
+ITEM_STATUSES = ("pending", "running", "completed", "incomplete", "failed", "cancelled")
 TIME_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+TERMINAL_STATUSES = ("completed", "partial", "failed", "cancelled")
 DEFAULT_SETTINGS = {
     "enabled": False,
     "schedule_time": "20:00",
@@ -34,8 +37,13 @@ DEFAULT_SETTINGS = {
     "overlap_days": 8,
     "retry_attempts": 3,
     "retry_backoff_seconds": 2.0,
+    "catch_up_limit": 5,
     "updated_at": None,
 }
+
+
+class LeaseLostError(StorageError):
+    """The worker no longer owns the durable acquisition lease."""
 
 
 def _now() -> datetime:
@@ -67,6 +75,7 @@ def _settings_row(row) -> dict[str, object]:
         "overlap_days": int(row["overlap_days"]),
         "retry_attempts": int(row["retry_attempts"]),
         "retry_backoff_seconds": float(row["retry_backoff_seconds"]),
+        "catch_up_limit": int(row["catch_up_limit"]),
         "updated_at": row["updated_at"] or None,
     }
 
@@ -101,11 +110,17 @@ def _validate_settings(values: dict[str, object]) -> dict[str, object]:
         or not 0 <= float(merged["retry_backoff_seconds"]) <= 300
     ):
         raise ValueError("retry_backoff_seconds must be between 0 and 300")
+    if not isinstance(merged["catch_up_limit"], int) or not 1 <= merged["catch_up_limit"] <= 30:
+        raise ValueError("catch_up_limit must be between 1 and 30")
     return merged
 
 
 def get_settings(*, db: Path | None = None) -> dict[str, object]:
-    conn = _read_connection(db if db is not None else database_path())
+    path = db if db is not None else database_path()
+    if path.is_file() and _database_version(path) < SCHEMA_VERSION:
+        migration_conn = _write_connection(path)
+        migration_conn.close()
+    conn = _read_connection(path)
     if conn is None:
         return dict(DEFAULT_SETTINGS)
     try:
@@ -120,15 +135,16 @@ def get_settings(*, db: Path | None = None) -> dict[str, object]:
 @serialized_storage_write
 def update_settings(values: dict[str, object], *, db: Path | None = None) -> dict[str, object]:
     path = db if db is not None else database_path()
-    merged = _validate_settings({**get_settings(db=path), **values})
     conn = _write_connection(path)
     try:
+        row = conn.execute("SELECT * FROM daily_acquisition_settings WHERE id=1").fetchone()
+        merged = _validate_settings({**_settings_row(row), **values})
         updated_at = _iso(_now())
         with conn:
             conn.execute(
                 "UPDATE daily_acquisition_settings SET enabled=?, schedule_time=?, timezone=?, "
                 "primary_provider=?, secondary_provider=?, overlap_days=?, retry_attempts=?, "
-                "retry_backoff_seconds=?, updated_at=? WHERE id=1",
+                "retry_backoff_seconds=?, catch_up_limit=?, updated_at=? WHERE id=1",
                 (
                     int(merged["enabled"]),
                     merged["schedule_time"],
@@ -138,6 +154,7 @@ def update_settings(values: dict[str, object], *, db: Path | None = None) -> dic
                     merged["overlap_days"],
                     merged["retry_attempts"],
                     float(merged["retry_backoff_seconds"]),
+                    merged["catch_up_limit"],
                     updated_at,
                 ),
             )
@@ -183,6 +200,7 @@ def _job_row(row) -> dict[str, object] | None:
         "total_instruments": int(row["total_instruments"]),
         "completed_instruments": int(row["completed_instruments"]),
         "failed_instruments": int(row["failed_instruments"]),
+        "incomplete_instruments": int(row["incomplete_instruments"]),
         "pending_instruments": int(row["pending_instruments"]),
         "successful_imports": int(row["successful_imports"]),
         "inserted": int(row["inserted"]),
@@ -259,6 +277,57 @@ def get_active_job(*, db: Path | None = None) -> dict[str, object] | None:
         conn.close()
 
 
+def get_automatic_job(schedule_date: str, *, db: Path | None = None) -> dict[str, object] | None:
+    conn = _read_connection(db if db is not None else database_path())
+    if conn is None:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT * FROM daily_acquisition_jobs WHERE kind='automatic' AND schedule_date=?",
+            (schedule_date,),
+        ).fetchone()
+        return _job_row(row)
+    finally:
+        conn.close()
+
+
+def list_automatic_jobs(
+    *, through: str | None = None, db: Path | None = None
+) -> list[dict[str, object]]:
+    conn = _read_connection(db if db is not None else database_path())
+    if conn is None:
+        return []
+    try:
+        if through is None:
+            rows = conn.execute(
+                "SELECT * FROM daily_acquisition_jobs WHERE kind='automatic' "
+                "ORDER BY schedule_date ASC, id ASC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM daily_acquisition_jobs WHERE kind='automatic' AND schedule_date<=? "
+                "ORDER BY schedule_date ASC, id ASC",
+                (through,),
+            ).fetchall()
+        return [_job_row(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def latest_completed_automatic_session(*, db: Path | None = None) -> str | None:
+    conn = _read_connection(db if db is not None else database_path())
+    if conn is None:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT MAX(schedule_date) AS schedule_date FROM daily_acquisition_jobs "
+            "WHERE kind='automatic' AND status='completed' AND schedule_date IS NOT NULL"
+        ).fetchone()
+        return row["schedule_date"] if row else None
+    finally:
+        conn.close()
+
+
 @serialized_storage_write
 def create_job(
     *,
@@ -285,11 +354,13 @@ def create_job(
     ]
     try:
         if kind == "automatic" and schedule_date is not None:
+            conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute(
                 "SELECT * FROM daily_acquisition_jobs WHERE kind='automatic' AND schedule_date=?",
                 (schedule_date,),
             ).fetchone()
             if existing is not None:
+                conn.rollback()
                 return _job_row(existing) or {"id": existing["id"]}
         with conn:
             conn.execute(
@@ -318,6 +389,88 @@ def create_job(
         return get_job(job_id, db=path) or {"id": job_id}
     except Exception as exc:
         raise StorageError("Could not create daily acquisition job") from exc
+    finally:
+        conn.close()
+
+
+@serialized_storage_write
+def merge_job_items(
+    job_id: str,
+    *,
+    provider: str,
+    equity_symbols: list[str],
+    index_codes: list[str],
+    db: Path | None = None,
+) -> dict[str, object] | None:
+    """Add only newly discovered instruments to an existing durable job."""
+    if provider not in PROVIDERS:
+        raise ValueError("Invalid acquisition provider")
+    path = db if db is not None else database_path()
+    conn = _write_connection(path)
+    try:
+        with conn:
+            job = _fetch_job(conn, job_id)
+            if job is None:
+                return None
+            existing = {
+                (row["kind"], row["code"])
+                for row in conn.execute(
+                    "SELECT kind,code FROM daily_acquisition_items WHERE job_id=?", (job_id,)
+                )
+            }
+            candidates = [("equity", symbol, provider) for symbol in equity_symbols] + [
+                ("index", code, "fred") for code in index_codes
+            ]
+            additions = []
+            candidate_keys = set(existing)
+            for item in candidates:
+                if item[:2] not in candidate_keys:
+                    additions.append(item)
+                    candidate_keys.add(item[:2])
+            if additions:
+                conn.executemany(
+                    "INSERT INTO daily_acquisition_items(job_id,kind,code,provider,status) "
+                    "VALUES (?, ?, ?, ?, 'pending')",
+                    (
+                        (job_id, kind, code, item_provider)
+                        for kind, code, item_provider in additions
+                    ),
+                )
+                conn.execute(
+                    "UPDATE daily_acquisition_jobs SET status=CASE WHEN status IN "
+                    "('completed','partial','failed') THEN 'scheduled' ELSE status END, "
+                    "finished_at=NULL, cancel_requested=0, last_error=NULL WHERE id=?",
+                    (job_id,),
+                )
+            _recalculate(conn, job_id)
+        return get_job(job_id, db=path)
+    finally:
+        conn.close()
+
+
+@serialized_storage_write
+def requeue_job(job_id: str, *, db: Path | None = None) -> dict[str, object] | None:
+    """Requeue failed or incomplete work while preserving completed items."""
+    path = db if db is not None else database_path()
+    conn = _write_connection(path)
+    try:
+        with conn:
+            job = _fetch_job(conn, job_id)
+            if job is None or job["status"] == "cancelled":
+                return _job_row(job)
+            conn.execute(
+                "UPDATE daily_acquisition_items SET status='pending', finished_at=NULL, "
+                "error_type=NULL, error_message=NULL, validation_status='pending' "
+                "WHERE job_id=? AND status IN ('failed','incomplete','running')",
+                (job_id,),
+            )
+            conn.execute(
+                "UPDATE daily_acquisition_jobs SET status='scheduled', finished_at=NULL, "
+                "cancel_requested=0, pause_requested=0, last_error=NULL WHERE id=?",
+                (job_id,),
+            )
+            _recalculate(conn, job_id)
+        return get_job(job_id, db=path)
     finally:
         conn.close()
 
@@ -363,6 +516,24 @@ def claim_job(
         conn.close()
 
 
+def _assert_lease(conn, job_id: str, owner_token: str) -> None:
+    now_text = _iso(_now())
+    row = conn.execute(
+        "SELECT l.owner_token, l.expires_at, j.status, j.cancel_requested, j.pause_requested "
+        "FROM daily_acquisition_lock l JOIN daily_acquisition_jobs j ON j.id=? "
+        "WHERE l.id=1 AND l.job_id=?",
+        (job_id, job_id),
+    ).fetchone()
+    if (
+        row is None
+        or row["owner_token"] != owner_token
+        or row["expires_at"] <= now_text
+        or row["status"] in TERMINAL_STATUSES
+        or row["cancel_requested"]
+    ):
+        raise LeaseLostError("Daily acquisition worker lease is no longer owned")
+
+
 @serialized_storage_write
 def heartbeat(
     job_id: str, owner_token: str, *, lease_seconds: int = 120, db: Path | None = None
@@ -374,8 +545,18 @@ def heartbeat(
     try:
         cursor = conn.execute(
             "UPDATE daily_acquisition_lock SET heartbeat_at=?, expires_at=? "
-            "WHERE id=1 AND owner_token=? AND job_id=?",
-            (now_text, _iso(now + timedelta(seconds=lease_seconds)), owner_token, job_id),
+            "WHERE id=1 AND owner_token=? AND job_id=? AND expires_at>? "
+            "AND EXISTS (SELECT 1 FROM daily_acquisition_jobs WHERE id=? "
+            "AND status NOT IN ('completed','partial','failed','cancelled') "
+            "AND cancel_requested=0)",
+            (
+                now_text,
+                _iso(now + timedelta(seconds=lease_seconds)),
+                owner_token,
+                job_id,
+                now_text,
+                job_id,
+            ),
         )
         if cursor.rowcount == 1:
             conn.execute(
@@ -389,10 +570,18 @@ def heartbeat(
 
 
 @serialized_storage_write
-def set_current_instrument(job_id: str, code: str | None, *, db: Path | None = None) -> None:
+def set_current_instrument(
+    job_id: str,
+    code: str | None,
+    *,
+    owner_token: str | None = None,
+    db: Path | None = None,
+) -> None:
     conn = _write_connection(db if db is not None else database_path())
     try:
         with conn:
+            if owner_token is not None:
+                _assert_lease(conn, job_id, owner_token)
             conn.execute(
                 "UPDATE daily_acquisition_jobs SET current_instrument=?, last_heartbeat=? WHERE id=?",
                 (code, _iso(_now()), job_id),
@@ -435,10 +624,19 @@ def job_control(job_id: str, *, db: Path | None = None) -> dict[str, bool] | Non
 
 
 @serialized_storage_write
-def set_item_running(job_id: str, kind: str, code: str, *, db: Path | None = None) -> None:
+def set_item_running(
+    job_id: str,
+    kind: str,
+    code: str,
+    *,
+    owner_token: str | None = None,
+    db: Path | None = None,
+) -> None:
     conn = _write_connection(db if db is not None else database_path())
     try:
         with conn:
+            if owner_token is not None:
+                _assert_lease(conn, job_id, owner_token)
             conn.execute(
                 "UPDATE daily_acquisition_items SET status='running', attempts=attempts+1, "
                 "started_at=?, validation_status='pending' WHERE job_id=? AND kind=? AND code=?",
@@ -466,6 +664,7 @@ def record_item(
     validation_status: str = "validated",
     missing_sessions: int = 0,
     index_result: dict[str, object] | None = None,
+    owner_token: str | None = None,
     db: Path | None = None,
 ) -> None:
     if status not in ITEM_STATUSES:
@@ -473,6 +672,8 @@ def record_item(
     conn = _write_connection(db if db is not None else database_path())
     try:
         with conn:
+            if owner_token is not None:
+                _assert_lease(conn, job_id, owner_token)
             conn.execute(
                 "UPDATE daily_acquisition_items SET status=?, provider=COALESCE(?, provider), "
                 "finished_at=?, last_session=?, inserted=?, updated=?, unchanged=?, stale=?, "
@@ -510,7 +711,8 @@ def record_item(
 def _recalculate(conn, job_id: str) -> None:
     row = conn.execute(
         "SELECT COUNT(*) AS total, SUM(status='completed') AS completed, "
-        "SUM(status='failed') AS failed, SUM(status IN ('pending','running')) AS pending, "
+        "SUM(status='failed') AS failed, SUM(status='incomplete') AS incomplete, "
+        "SUM(status IN ('pending','running')) AS pending, "
         "SUM(status='completed' AND (inserted + updated + unchanged) > 0) AS imports, "
         "COALESCE(SUM(inserted),0) AS inserted, COALESCE(SUM(updated),0) AS updated, "
         "COALESCE(SUM(unchanged),0) AS unchanged, "
@@ -521,7 +723,7 @@ def _recalculate(conn, job_id: str) -> None:
     conn.execute(
         "UPDATE daily_acquisition_jobs SET total_instruments=?, completed_instruments=?, "
         "failed_instruments=?, pending_instruments=?, successful_imports=?, inserted=?, updated=?, "
-        "unchanged=?, retry_count=? WHERE id=?",
+        "incomplete_instruments=?, unchanged=?, retry_count=? WHERE id=?",
         (
             int(row["total"] or 0),
             int(row["completed"] or 0),
@@ -530,6 +732,7 @@ def _recalculate(conn, job_id: str) -> None:
             int(row["imports"] or 0),
             int(row["inserted"] or 0),
             int(row["updated"] or 0),
+            int(row["incomplete"] or 0),
             int(row["unchanged"] or 0),
             int(row["retries"] or 0),
             job_id,
@@ -538,10 +741,18 @@ def _recalculate(conn, job_id: str) -> None:
 
 
 @serialized_storage_write
-def append_provider_error(job_id: str, error: dict[str, object], *, db: Path | None = None) -> None:
+def append_provider_error(
+    job_id: str,
+    error: dict[str, object],
+    *,
+    owner_token: str | None = None,
+    db: Path | None = None,
+) -> None:
     conn = _write_connection(db if db is not None else database_path())
     try:
         with conn:
+            if owner_token is not None:
+                _assert_lease(conn, job_id, owner_token)
             row = _fetch_job(conn, job_id)
             errors = _json(row["provider_errors"] if row else "[]", [])
             if not isinstance(errors, list):
@@ -561,7 +772,11 @@ def append_provider_error(job_id: str, error: dict[str, object], *, db: Path | N
 
 @serialized_storage_write
 def finish_job(
-    job_id: str, *, status: str | None = None, db: Path | None = None
+    job_id: str,
+    *,
+    status: str | None = None,
+    owner_token: str | None = None,
+    db: Path | None = None,
 ) -> dict[str, object] | None:
     if status is not None and status not in JOB_STATUSES:
         raise ValueError("Invalid daily acquisition status")
@@ -572,12 +787,14 @@ def finish_job(
             row = _fetch_job(conn, job_id)
             if row is None:
                 return None
+            if owner_token is not None:
+                _assert_lease(conn, job_id, owner_token)
             _recalculate(conn, job_id)
             row = _fetch_job(conn, job_id)
             if status is None:
                 if row["cancel_requested"]:
                     status = "cancelled"
-                elif row["failed_instruments"] and not row["pending_instruments"]:
+                elif row["failed_instruments"] or row["incomplete_instruments"]:
                     status = "partial"
                 elif row["pending_instruments"]:
                     status = "failed"
@@ -627,6 +844,12 @@ def cancel_job(job_id: str, *, db: Path | None = None) -> dict[str, object] | No
                     "UPDATE daily_acquisition_jobs SET cancel_requested=1, status='cancelled' WHERE id=?",
                     (job_id,),
                 )
+                conn.execute(
+                    "UPDATE daily_acquisition_items SET status='cancelled', finished_at=?, "
+                    "validation_status='cancelled' WHERE job_id=? AND status IN ('pending','running')",
+                    (_iso(_now()), job_id),
+                )
+                _recalculate(conn, job_id)
         return get_job(job_id, db=path)
     finally:
         conn.close()
@@ -641,7 +864,8 @@ def retry_failed_job(job_id: str, *, db: Path | None = None) -> dict[str, object
         if original is None:
             return None
         rows = conn.execute(
-            "SELECT kind,code,provider FROM daily_acquisition_items WHERE job_id=? AND status='failed'",
+            "SELECT kind,code,provider FROM daily_acquisition_items "
+            "WHERE job_id=? AND status IN ('failed','incomplete')",
             (job_id,),
         ).fetchall()
         if not rows:
