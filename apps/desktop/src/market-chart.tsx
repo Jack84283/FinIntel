@@ -1,6 +1,7 @@
 import { useLocale } from "./localization";
 import type { DailyBar } from "./market";
 import { chartBars, chartInterval, type HistoryPeriod } from "./history-range";
+import type { IndexCloseRecord } from "./index-history-api";
 
 /** Deliberately lightweight SVG: no new chart dependency or third-party data feed. */
 export function MarketCharts({ bars, period }: { bars: DailyBar[]; period: HistoryPeriod }) {
@@ -86,6 +87,58 @@ export function MarketCharts({ bars, period }: { bars: DailyBar[]; period: Histo
         </svg>
       </div>
       <p className="text-xs text-muted-foreground">{t("Chart represents")} {bars.length.toLocaleString()} {t("actual daily sessions across")} {visible.length} {t(interval.toLowerCase())} {t("intervals. Green means close ≥ open; red means close < open. Prices are raw, not corporate-action adjusted.")}</p>
+    </div>
+  );
+}
+
+export function IndexLineChart({ observations }: { observations: IndexCloseRecord[] }) {
+  const { t } = useLocale();
+  if (observations.length === 0) {
+    return <p className="py-10 text-center text-sm text-muted-foreground">{t("No observations in this date range.")}</p>;
+  }
+
+  const width = 840;
+  const left = 64;
+  const right = 18;
+  const top = 18;
+  const bottom = 238;
+  const innerWidth = width - left - right;
+  const values = observations.map((row) => Number(row.close));
+  const maximum = Math.max(...values);
+  const minimum = Math.min(...values);
+  const padding = Math.max((maximum - minimum) * 0.08, 0.01);
+  const floor = minimum - padding;
+  const ceiling = maximum + padding;
+  const span = Math.max(ceiling - floor, 0.01);
+  const x = (index: number) => left + (index / Math.max(observations.length - 1, 1)) * innerWidth;
+  const y = (value: number) => bottom - ((value - floor) / span) * (bottom - top);
+  const path = observations.map((row, index) => `${index === 0 ? "M" : "L"}${x(index).toFixed(2)},${y(Number(row.close)).toFixed(2)}`).join(" ");
+  const ticks = Array.from({ length: 5 }, (_, index) => floor + span * index / 4);
+  const labels = [0, Math.floor((observations.length - 1) / 2), observations.length - 1]
+    .filter((index, indexInArray, all) => all.indexOf(index) === indexInArray);
+  const formatLevel = (value: number) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
+
+  return (
+    <div className="overflow-x-auto rounded-md border border-border bg-muted/40 p-2">
+      <svg viewBox="0 0 840 280" role="img" aria-label={`${t("Historical index closing-level line chart")} ${observations.length} ${t("observations")}`} className="h-auto min-w-[560px] w-full">
+        {ticks.map((tick) => (
+          <g key={tick}>
+            <line x1={left} x2={width - right} y1={y(tick)} y2={y(tick)} stroke="#2b394b" strokeDasharray="3 4" />
+            <text x={left - 7} y={y(tick) + 4} textAnchor="end" fontSize="11" fill="#a5b4c7">{formatLevel(tick)}</text>
+          </g>
+        ))}
+        <path d={path} fill="none" stroke="#5c9ded" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        {observations.map((row, index) => (
+          <circle key={row.session_date} cx={x(index)} cy={y(Number(row.close))} r={observations.length > 120 ? 1.5 : 2.5} fill="#5c9ded">
+            <title>{row.session_date + ": " + row.close}</title>
+          </circle>
+        ))}
+        {labels.map((index) => (
+          <text key={observations[index].session_date} x={x(index)} y={264} fontSize="11" textAnchor="middle" fill="#a5b4c7">
+            {observations[index].session_date}
+          </text>
+        ))}
+      </svg>
     </div>
   );
 }

@@ -1,10 +1,26 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MarketExplorer } from "./MarketExplorer";
 import { DataAcquisitionPage } from "./DataAcquisitionPage";
 import { ActionHistoryPage } from "./ActionHistoryPage";
 
 describe("navigation between research and data operations", () => {
+  it("shows SP500 as the initial Market selection", () => {
+    const market = renderToStaticMarkup(<MarketExplorer onOpenAcquisition={() => undefined} />);
+    expect(market).toContain("S&amp;P 500 (SP500)");
+    expect(market).toContain("Selected instrument");
+  });
+
+  it("keeps the Market layout responsive on desktop widths", () => {
+    const market = renderToStaticMarkup(<MarketExplorer onOpenAcquisition={() => undefined} />);
+    expect(market).toContain("min-w-0");
+    const source = readFileSync(join(import.meta.dirname, "MarketExplorer.tsx"), "utf8");
+    expect(source).toContain("sm:grid-cols-2");
+    expect(source).toContain("2xl:grid-cols");
+  });
+
   it("keeps acquisition controls and action history off the Markets screen", () => {
     const market = renderToStaticMarkup(
       <MarketExplorer onOpenAcquisition={() => undefined} />,

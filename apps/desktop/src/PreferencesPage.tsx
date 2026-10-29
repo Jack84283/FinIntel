@@ -105,25 +105,6 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition, 
 
           <ProviderCredentialsCard />
           <DatabaseBackupCard />
-          <Card className="min-w-0">
-            <CardHeader className="min-w-0 gap-y-2">
-              <CardTitle>{t("Historical market data")}</CardTitle>
-              <CardDescription>{t("Review acquisition defaults without interrupting a running backfill.")}</CardDescription>
-            </CardHeader>
-            <CardContent className="min-w-0 divide-y divide-border">
-              <SettingRow title={t("Background historical window")} detail={t("The local backfill script currently defaults to ten years of available daily data.")}>
-                <Badge variant="secondary">{t("10 years")}</Badge>
-              </SettingRow>
-              <SettingRow title={t("Storage format")} detail={t("Daily OHLCV bars are validated and stored in the local SQLite database.")}>
-                <Badge variant="outline">SQLite</Badge>
-              </SettingRow>
-              <SettingRow title={t("Acquisition controls")} detail={t("Select instruments and data providers, or inspect an active import in Data Acquisition.")}>
-                <Button type="button" variant="secondary" size="sm" onClick={onOpenAcquisition}>
-                  {t("Open Data Acquisition")} <ArrowUpRight aria-hidden="true" />
-                </Button>
-              </SettingRow>
-            </CardContent>
-          </Card>
         </div>
 
         <aside className="flex min-w-0 flex-col gap-2" aria-label={t("Workspace information")}>
@@ -142,6 +123,25 @@ export function PreferencesPage({ backend, onRecheckBackend, onOpenAcquisition, 
               <Button type="button" variant="outline" size="sm" disabled={backend.kind === "loading"} onClick={onRecheckBackend}>
                 <RefreshCw aria-hidden="true" /> {t("Recheck")}
               </Button>
+            </CardContent>
+          </Card>
+          <Card className="min-w-0">
+            <CardHeader className="min-w-0 gap-y-2">
+              <CardTitle>{t("Historical market data")}</CardTitle>
+              <CardDescription>{t("Review acquisition defaults without interrupting a running backfill.")}</CardDescription>
+            </CardHeader>
+            <CardContent className="min-w-0 divide-y divide-border">
+              <SettingRow title={t("Background historical window")} detail={t("The local backfill script currently defaults to ten years of available daily data.")}>
+                <Badge variant="secondary">{t("10 years")}</Badge>
+              </SettingRow>
+              <SettingRow title={t("Storage format")} detail={t("Daily OHLCV bars are validated and stored in the local SQLite database.")}>
+                <Badge variant="outline">SQLite</Badge>
+              </SettingRow>
+              <SettingRow title={t("Acquisition controls")} detail={t("Select instruments and data providers, or inspect an active import in Data Acquisition.")}>
+                <Button type="button" variant="secondary" size="sm" onClick={onOpenAcquisition}>
+                  {t("Open Data Acquisition")} <ArrowUpRight aria-hidden="true" />
+                </Button>
+              </SettingRow>
             </CardContent>
           </Card>
           <Card className="min-w-0">

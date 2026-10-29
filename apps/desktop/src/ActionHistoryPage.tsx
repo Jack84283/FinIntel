@@ -101,7 +101,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
                     <td className="px-3 py-2 text-right">{item.inserted.toLocaleString()} / {item.updated.toLocaleString()} / {item.unchanged.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right">
                       {item.provider === "alpaca_sip" || item.provider === "alpha_vantage" || item.provider === "tiingo"
-                        ? <Button type="button" size="sm" variant="ghost" onClick={() => onViewMarket({ symbol: item.symbol, provider: item.provider as AcquisitionProvider })}><BarChart3 aria-hidden="true" /> {t("View")}</Button>
+                        ? <Button type="button" size="sm" variant="ghost" onClick={() => onViewMarket({ kind: "equity", symbol: item.symbol, provider: item.provider as AcquisitionProvider })}><BarChart3 aria-hidden="true" /> {t("View")}</Button>
                         : "—"}
                     </td>
                   </tr>

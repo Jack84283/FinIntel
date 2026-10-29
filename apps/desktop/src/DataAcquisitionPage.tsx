@@ -7,13 +7,10 @@ import { IndexHistoryCard } from "./IndexHistoryCard";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import type { AcquisitionProvider } from "./market-acquisition-api";
 import { DailyAcquisitionPanel } from "./DailyAcquisitionPanel";
+import type { EquityMarketSelection, MarketSelection } from "./market-selection";
 
-export interface MarketSelection {
-  symbol: string;
-  provider: AcquisitionProvider;
-}
+export type { MarketSelection } from "./market-selection";
 
 /** Acquisition actions and their completed-import history live outside Markets. */
 export function DataAcquisitionPage({
@@ -22,7 +19,7 @@ export function DataAcquisitionPage({
   onViewMarket: (selection?: MarketSelection) => void;
 }) {
   const { t } = useLocale();
-  const [latest, setLatest] = useState<MarketSelection | null>(null);
+  const [latest, setLatest] = useState<EquityMarketSelection | null>(null);
 
   return (
     <section className="min-w-0 space-y-2" aria-labelledby="acquisition-page-title">
@@ -38,7 +35,7 @@ export function DataAcquisitionPage({
           <AcquisitionCard
             selectedSymbol=""
             onAcquired={(symbol, provider) => {
-              setLatest({ symbol, provider });
+              setLatest({ kind: "equity", symbol, provider });
             }}
           />
           {latest && (

@@ -15,6 +15,7 @@ import { ActionHistoryPage } from "./ActionHistoryPage";
 import { DataValidationPage } from "./DataValidationPage";
 import { IndexMembershipPage } from "./IndexMembershipPage";
 import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
+import { resolveMarketSelection } from "./market-selection";
 
 type Screen = "overview" | "market" | "intelligence" | "data-acquisition" | "data-validation" | "index-membership" | "action-history" | "portfolio" | "settings";
 const groups = [
@@ -48,7 +49,7 @@ export default function App() {
   const poller = useRef<ReturnType<typeof createHealthPoller> | null>(null);
 
   const openMarkets = (selection?: MarketSelection) => {
-    setMarketSelection(selection ?? null);
+    setMarketSelection((current) => resolveMarketSelection(current, selection));
     setScreen("market");
   };
 
@@ -91,7 +92,11 @@ export default function App() {
           ))}
         </nav>
         {screen === "market" ? (
-          <MarketExplorer initialSelection={marketSelection} onOpenAcquisition={() => setScreen("data-acquisition")} />
+          <MarketExplorer
+            initialSelection={marketSelection}
+            onSelectionChange={setMarketSelection}
+            onOpenAcquisition={() => setScreen("data-acquisition")}
+          />
         ) : screen === "data-acquisition" ? (
           <DataAcquisitionPage onViewMarket={openMarkets} />
         ) : screen === "data-validation" ? (
