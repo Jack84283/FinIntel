@@ -37,7 +37,6 @@ from finintel.market_data.daily_acquisition_store import (
     get_settings,
     heartbeat,
     job_control,
-    latest_completed_automatic_session,
     list_automatic_jobs,
     merge_job_items,
     record_item,
@@ -63,6 +62,14 @@ STATE = Path("data/daily-acquisition.json")
 RETRYABLE_ERRORS = (ProviderRateLimited, ProviderUnavailable, OSError)
 _CALENDAR = xcals.get_calendar("XNYS")
 LEASE_SECONDS = 120
+# Provider EOD feeds have different publication guarantees. A one-session
+# grace period keeps a normal provider publication delay from becoming a false
+# incomplete result, while still rejecting older/stale responses.
+PROVIDER_PUBLICATION_DELAY_SESSIONS = {
+    "alpaca_sip": 0,
+    "tiingo": 1,
+    "alpha_vantage": 1,
+}
 
 
 def now_utc() -> datetime:
@@ -127,6 +134,46 @@ def next_scheduled_execution(
     return _schedule_datetime(next_trading_day(local.date()), schedule_time, timezone).astimezone(
         UTC
     )
+
+
+def _latest_trading_session_on_or_before(day: date) -> date | None:
+    start = max(day - timedelta(days=370), _CALENDAR.first_session.date())
+    end = min(day, _CALENDAR.last_session.date())
+    if start > end:
+        return None
+    sessions = _CALENDAR.sessions_in_range(pd.Timestamp(start), pd.Timestamp(end))
+    return sessions[-1].date() if len(sessions) else None
+
+
+def latest_expected_session(now: datetime | None = None) -> date | None:
+    """Return the latest NYSE session whose regular close has passed."""
+    local = (now or now_utc()).astimezone(ET)
+    upper = local.date()
+    if is_trading_day(upper) and local < _schedule_datetime(upper, "16:00", ET.key):
+        upper -= timedelta(days=1)
+    return _latest_trading_session_on_or_before(upper)
+
+
+def latest_recovery_session(now: datetime, schedule_time: str, timezone: str) -> date | None:
+    """Return the latest session eligible for overdue work before today's run."""
+    local = now.astimezone(ZoneInfo(timezone))
+    if is_trading_day(local.date()) and local < _schedule_datetime(
+        local.date(), schedule_time, timezone
+    ):
+        return _latest_trading_session_on_or_before(local.date() - timedelta(days=1))
+    return latest_expected_session(now)
+
+
+def latest_provider_eligible_session(provider: str, reference_date: date) -> date | None:
+    """Return the latest session expected to be published by ``provider``."""
+    delay = PROVIDER_PUBLICATION_DELAY_SESSIONS.get(provider, 0)
+    sessions = trading_sessions(
+        max(reference_date - timedelta(days=370), _CALENDAR.first_session.date()),
+        min(reference_date, _CALENDAR.last_session.date()),
+    )
+    if len(sessions) <= delay:
+        return None
+    return sessions[-1 - delay]
 
 
 def expected_missing_sessions(
@@ -267,7 +314,9 @@ def missing_sessions_for_instrument(
     first = date.fromisoformat(bounds[0])
     last = date.fromisoformat(bounds[1])
     if end_date is not None:
-        last = min(last, end_date)
+        last = end_date
+    if last < first:
+        return set()
     if first >= last:
         return set()
     expected = set(trading_sessions(first, last))
@@ -282,12 +331,18 @@ def _safe_error(exc: BaseException) -> dict[str, str]:
 def automatic_schedule_dates(
     settings: dict[str, object], *, now: datetime | None = None
 ) -> list[date]:
-    """Return due automatic sessions, retaining durable unfinished work."""
+    """Return new due work plus overdue work eligible during non-trading days."""
     current = due_date(now or now_utc(), str(settings["schedule_time"]), str(settings["timezone"]))
-    if current is None:
+    recovery_end = (
+        date.fromisoformat(current)
+        if current
+        else latest_recovery_session(
+            now or now_utc(), str(settings["schedule_time"]), str(settings["timezone"])
+        )
+    )
+    if recovery_end is None:
         return []
-    current_day = date.fromisoformat(current)
-    existing = list_automatic_jobs(through=current)
+    existing = list_automatic_jobs(through=recovery_end.isoformat())
     existing_by_date = {
         date.fromisoformat(str(job["schedule_date"])): job
         for job in existing
@@ -298,20 +353,28 @@ def automatic_schedule_dates(
         for day, job in existing_by_date.items()
         if job["status"] in ("scheduled", "running", "paused", "partial", "failed")
     }
-    latest_completed = latest_completed_automatic_session()
+    completed_dates = [
+        date.fromisoformat(str(job["schedule_date"]))
+        for job in existing
+        if job["status"] == "completed" and job.get("schedule_date")
+    ]
+    latest_completed = max(completed_dates, default=None)
     if latest_completed:
-        first_missed = next_trading_day(date.fromisoformat(latest_completed))
-        missed = trading_sessions(first_missed, current_day)
+        first_missed = next_trading_day(latest_completed)
+        missed = trading_sessions(first_missed, recovery_end)
+    elif current:
+        missed = [recovery_end]
     else:
-        missed = [current_day]
+        missed = []
     catch_up_limit = max(1, int(settings["catch_up_limit"]))
     actionable.update(day for day in missed if day not in existing_by_date)
     new_dates = sorted(day for day in actionable if day not in existing_by_date)
     if len(new_dates) > catch_up_limit:
         actionable.difference_update(new_dates[:-catch_up_limit])
-    # Revisit today's completed job so a newly discovered instrument is added,
-    # while the unique automatic-date key prevents duplicate jobs.
-    actionable.add(current_day)
+    if current:
+        # Revisit today's completed job so a newly discovered instrument is
+        # added, while the unique automatic-date key prevents duplicates.
+        actionable.add(recovery_end)
     return sorted(actionable)
 
 
@@ -489,6 +552,15 @@ class DailyAcquisitionScheduler:
             )
             heartbeat_thread.start()
             latest = latest_sessions(str(job["provider"]))
+            latest_eligible_session = latest_expected_session()
+            scheduled_session = (
+                date.fromisoformat(str(job["schedule_date"])) if job.get("schedule_date") else None
+            )
+            expected_session = (
+                min(scheduled_session, latest_eligible_session)
+                if scheduled_session and latest_eligible_session
+                else scheduled_session or latest_eligible_session
+            )
             seen: set[tuple[str, str]] = set()
             while True:
                 current = get_job(job_id, include_items=True)
@@ -523,6 +595,7 @@ class DailyAcquisitionScheduler:
                         job.get("secondary_provider"),
                         settings,
                         latest,
+                        expected_session,
                         owner,
                         lease_lost,
                     )
@@ -656,6 +729,7 @@ class DailyAcquisitionScheduler:
         secondary_provider: object,
         settings: dict[str, object],
         latest: dict[str, date],
+        expected_session: date | None,
         owner: str,
         lease_lost: threading.Event,
     ) -> None:
@@ -685,11 +759,16 @@ class DailyAcquisitionScheduler:
                         period="5y",
                         start_date=start if selected != "alpha_vantage" else None,
                     )
+                    provider_end = (
+                        latest_provider_eligible_session(selected, expected_session)
+                        if expected_session
+                        else None
+                    ) or date.fromisoformat(str(result["last_session"]))
                     missing = len(
                         missing_sessions_for_instrument(
                             symbol,
                             selected,
-                            end_date=date.fromisoformat(str(result["last_session"])),
+                            end_date=provider_end,
                         )
                     )
                     if missing == 0:

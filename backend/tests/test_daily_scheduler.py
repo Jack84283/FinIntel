@@ -7,6 +7,7 @@ from finintel.market_data.daily_scheduler import (
     due_date,
     expected_missing_sessions,
     is_trading_day,
+    latest_provider_eligible_session,
     missing_sessions_for_instrument,
     next_scheduled_execution,
     save,
@@ -83,6 +84,20 @@ def test_missing_sessions_uses_stored_provider_dates_and_listing_boundary(tmp_pa
     assert missing_sessions_for_instrument("MSFT", "alpaca_sip", end_date=date(2026, 7, 6)) == set()
 
 
+def test_stale_provider_response_is_incomplete_through_expected_session(tmp_path, monkeypatch):
+    db = tmp_path / "daily.sqlite3"
+    from finintel.market_data.daily_acquisition_store import update_settings
+
+    update_settings({}, db=db)
+    _seed_sessions(db, "AAPL", "alpaca_sip", [date(2026, 7, 1), date(2026, 7, 2)])
+    monkeypatch.setattr("finintel.market_data.daily_scheduler.database_path", lambda: db)
+    assert missing_sessions_for_instrument("AAPL", "alpaca_sip", end_date=date(2026, 7, 2)) == set()
+    assert missing_sessions_for_instrument("AAPL", "alpaca_sip", end_date=date(2026, 7, 6)) == {
+        date(2026, 7, 6)
+    }
+    assert latest_provider_eligible_session("tiingo", date(2026, 7, 6)) == date(2026, 7, 2)
+
+
 def test_automatic_schedule_dates_catches_up_with_limit_and_never_runs_early(monkeypatch):
     settings = {
         "schedule_time": "20:00",
@@ -91,16 +106,27 @@ def test_automatic_schedule_dates_catches_up_with_limit_and_never_runs_early(mon
     }
     monkeypatch.setattr(
         "finintel.market_data.daily_scheduler.list_automatic_jobs",
-        lambda **_: [],
-    )
-    monkeypatch.setattr(
-        "finintel.market_data.daily_scheduler.latest_completed_automatic_session",
-        lambda: "2026-10-26",
+        lambda **_: [{"schedule_date": "2026-10-26", "status": "completed"}],
     )
     before_close = automatic_schedule_dates(settings, now=datetime(2026, 10, 29, 23, 0, tzinfo=UTC))
-    assert before_close == []
+    assert before_close == [date(2026, 10, 27), date(2026, 10, 28)]
     after_close = automatic_schedule_dates(settings, now=datetime(2026, 10, 30, 0, 0, tzinfo=UTC))
     assert after_close == [date(2026, 10, 28), date(2026, 10, 29)]
+
+
+def test_automatic_schedule_dates_recovers_missed_work_on_weekend(monkeypatch):
+    settings = {
+        "schedule_time": "20:00",
+        "timezone": "America/New_York",
+        "catch_up_limit": 2,
+    }
+    monkeypatch.setattr(
+        "finintel.market_data.daily_scheduler.list_automatic_jobs",
+        lambda **_: [{"schedule_date": "2026-10-29", "status": "completed"}],
+    )
+    assert automatic_schedule_dates(settings, now=datetime(2026, 10, 31, 18, 0, tzinfo=UTC)) == [
+        date(2026, 10, 30)
+    ]
 
 
 def test_automatic_schedule_dates_preserves_existing_incomplete_work(monkeypatch):
@@ -115,10 +141,6 @@ def test_automatic_schedule_dates_preserves_existing_incomplete_work(monkeypatch
             {"schedule_date": "2026-10-27", "status": "partial"},
             {"schedule_date": "2026-10-28", "status": "completed"},
         ],
-    )
-    monkeypatch.setattr(
-        "finintel.market_data.daily_scheduler.latest_completed_automatic_session",
-        lambda: "2026-10-28",
     )
     assert automatic_schedule_dates(settings, now=datetime(2026, 10, 30, 0, 0, tzinfo=UTC)) == [
         date(2026, 10, 27),
