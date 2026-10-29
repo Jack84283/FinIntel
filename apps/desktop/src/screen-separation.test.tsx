@@ -5,6 +5,12 @@ import { DataAcquisitionPage } from "./DataAcquisitionPage";
 import { ActionHistoryPage } from "./ActionHistoryPage";
 
 describe("navigation between research and data operations", () => {
+  it("shows SP500 as the initial Market selection", () => {
+    const market = renderToStaticMarkup(<MarketExplorer onOpenAcquisition={() => undefined} />);
+    expect(market).toContain("S&amp;P 500 (SP500)");
+    expect(market).toContain("Selected instrument");
+  });
+
   it("keeps acquisition controls and action history off the Markets screen", () => {
     const market = renderToStaticMarkup(
       <MarketExplorer onOpenAcquisition={() => undefined} />,
