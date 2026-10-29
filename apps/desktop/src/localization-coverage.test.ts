@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { translate } from "./localization";
 
 const screens = [
-  "App.tsx", "AcquisitionCard.tsx", "ActionHistoryPage.tsx", "DataAcquisitionPage.tsx",
+  "App.tsx", "AcquisitionCard.tsx", "ActionHistoryPage.tsx", "DataAcquisitionPage.tsx", "DailyAcquisitionPanel.tsx",
   "DatabaseBackupCard.tsx",
   "TechnicalIndicatorsCard.tsx", "IndexHistoryCard.tsx",
   "DataValidationPage.tsx", "IndexMembershipPage.tsx", "MarketExplorer.tsx",

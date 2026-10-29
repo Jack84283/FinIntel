@@ -11,6 +11,7 @@ import { searchMarketImports } from "./market-api";
 import type { ImportRecord } from "./market";
 import type { MarketSelection } from "./DataAcquisitionPage";
 import type { AcquisitionProvider } from "./market-acquisition-api";
+import { searchDailyHistory, type DailyJob } from "./daily-acquisition-api";
 
 /** Read-only history of successful persisted imports. No events are fabricated. */
 export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?: MarketSelection) => void }) {
@@ -118,6 +119,93 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
           <p className="text-xs text-muted-foreground">{t("Full local SQLite import-history search, 20 records per page. Only successful imports are recorded here.")}</p>
         </CardContent>
       </Card>
+      <DailyJobHistory />
     </section>
+  );
+}
+
+function DailyJobHistory() {
+  const { t } = useLocale();
+  const notify = useNotify();
+  const [items, setItems] = useState<DailyJob[]>([]);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [provider, setProvider] = useState("");
+  const [status, setStatus] = useState("");
+  const [kind, setKind] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setState("loading");
+    searchDailyHistory(query.trim(), provider, status, kind, 0, 50)
+      .then((result) => {
+        if (cancelled) return;
+        setItems(result.items);
+        setError("");
+        setState("ready");
+      })
+      .catch((reason: unknown) => {
+        if (cancelled) return;
+        setError(reason instanceof Error ? reason.message : String(reason));
+        setState("error");
+        notify(t("Daily acquisition history could not be loaded."), "error");
+      });
+    return () => { cancelled = true; };
+  }, [query, provider, status, kind]);
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-col items-start gap-2">
+        <CardTitle>{t("Daily acquisition jobs")}</CardTitle>
+        <CardDescription>{t("Automatic and manually triggered daily jobs, including safe provider errors and result counts.")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap gap-3">
+          <input aria-label={t("Search daily jobs")} placeholder={t("Search instrument or job") } value={query} onChange={(event) => setQuery(event.target.value)} className="h-9 min-w-48 flex-1 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+          <select aria-label={t("Filter daily provider")} value={provider} onChange={(event) => setProvider(event.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+            <option value="">{t("All providers")}</option>
+            <option value="alpaca_sip">{t("Alpaca SIP")}</option>
+            <option value="tiingo">{t("Tiingo")}</option>
+            <option value="alpha_vantage">{t("Alpha Vantage")}</option>
+          </select>
+          <select aria-label={t("Filter daily status")} value={status} onChange={(event) => setStatus(event.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+            <option value="">{t("All statuses")}</option>
+            {(["scheduled", "running", "paused", "completed", "partial", "failed", "cancelled"] as const).map((value) => <option key={value} value={value}>{t(value)}</option>)}
+          </select>
+          <select aria-label={t("Filter acquisition type")} value={kind} onChange={(event) => setKind(event.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+            <option value="">{t("All acquisition types")}</option>
+            <option value="automatic">{t("Automatic")}</option>
+            <option value="manual">{t("Manual")}</option>
+            <option value="retry_failed">{t("Retry failed")}</option>
+          </select>
+        </div>
+        {state === "loading" && <Skeleton aria-label={t("Loading daily acquisition history")} className="h-24 w-full" />}
+        {state === "error" && <div role="alert" className="text-sm text-destructive">{error}</div>}
+        {state === "ready" && items.length === 0 && <p className="py-4 text-sm text-muted-foreground">{t("No daily acquisition jobs yet.")}</p>}
+        {state === "ready" && items.length > 0 && <div className="overflow-x-auto rounded-md border border-border">
+          <table className="w-full min-w-[900px] text-left text-xs tabular-nums">
+            <thead className="bg-muted text-muted-foreground"><tr>
+              <th scope="col" className="px-3 py-2">{t("Started")}</th>
+              <th scope="col" className="px-3 py-2">{t("Type")}</th>
+              <th scope="col" className="px-3 py-2">{t("Provider")}</th>
+              <th scope="col" className="px-3 py-2">{t("Status")}</th>
+              <th scope="col" className="px-3 py-2 text-right">{t("Duration")}</th>
+              <th scope="col" className="px-3 py-2 text-right">{t("Completed / Failed / Pending")}</th>
+              <th scope="col" className="px-3 py-2 text-right">{t("New / Updated / Unchanged")}</th>
+            </tr></thead>
+            <tbody>{items.map((item) => <tr key={item.id} className="border-t border-border">
+              <td className="px-3 py-2">{item.started_at ?? item.scheduled_for ?? "—"}</td>
+              <td className="px-3 py-2">{item.kind ?? "—"}</td>
+              <td className="px-3 py-2">{item.provider === "alpaca_sip" ? t("Alpaca SIP") : item.provider === "alpha_vantage" ? t("Alpha Vantage") : t("Tiingo")}</td>
+              <td className="px-3 py-2"><Badge variant={item.status === "completed" ? "success" : item.status === "failed" || item.status === "partial" ? "destructive" : "outline"}>{t(item.status)}</Badge></td>
+              <td className="px-3 py-2 text-right">{item.duration_ms === null ? "—" : `${Math.round(item.duration_ms / 1000)}s`}</td>
+              <td className="px-3 py-2 text-right">{item.completed_instruments} / {item.failed_instruments} / {item.pending_instruments}</td>
+              <td className="px-3 py-2 text-right">{item.inserted} / {item.updated} / {item.unchanged}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>}
+      </CardContent>
+    </Card>
   );
 }

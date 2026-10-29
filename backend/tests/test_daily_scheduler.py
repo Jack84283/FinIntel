@@ -1,8 +1,15 @@
-"""No-network tests for Eastern-time scheduling and monitoring."""
+"""No-network tests for calendar-aware scheduling and monitoring."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from finintel.market_data.daily_scheduler import due_date, save, status
+from finintel.market_data.daily_scheduler import (
+    due_date,
+    expected_missing_sessions,
+    is_trading_day,
+    next_scheduled_execution,
+    save,
+    status,
+)
 
 
 def test_after_close_eastern_standard_time():
@@ -17,6 +24,19 @@ def test_after_close_eastern_daylight_time():
 
 def test_weekend_has_no_scheduled_run():
     assert due_date(datetime(2026, 10, 31, 23, 0, tzinfo=UTC)) is None
+
+
+def test_nyse_holiday_has_no_scheduled_run():
+    assert not is_trading_day(date(2026, 7, 3))
+    assert due_date(datetime(2026, 7, 4, 0, 30, tzinfo=UTC)) is None
+
+
+def test_next_execution_and_missing_sessions_use_exchange_calendar():
+    upcoming = next_scheduled_execution(
+        datetime(2026, 7, 3, 1, 0, tzinfo=UTC), "20:00", "America/New_York"
+    )
+    assert upcoming.isoformat().startswith("2026-07-07T00:00:00")
+    assert expected_missing_sessions(date(2026, 7, 1), date(2026, 7, 6)) == 2
 
 
 def test_status_round_trip(tmp_path):
