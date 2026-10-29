@@ -689,6 +689,132 @@ async fn index_history_acquire(code: String) -> Result<serde_json::Value, String
     Ok(payload)
 }
 
+async fn daily_write(
+    path: &str,
+    method: reqwest::Method,
+    body: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize the daily acquisition client.".to_string())?;
+    let mut request = client
+        .request(method, format!("{}{}", backend_base(), path))
+        .header("x-finintel-process-token", backend_token())
+        .header("x-finintel-client", "local-workstation");
+    if let Some(payload) = body {
+        request = request.json(&payload);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|_| "Daily acquisition backend is unreachable or timed out.".to_string())?;
+    let status = response.status();
+    let payload = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|_| "Daily acquisition backend returned malformed JSON.".to_string())?;
+    if !status.is_success() {
+        let detail = payload
+            .get("detail")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Daily acquisition request failed.");
+        return Err(format!("HTTP {}: {detail}", status.as_u16()));
+    }
+    Ok(payload)
+}
+
+#[tauri::command]
+async fn daily_acquisition_status() -> Result<serde_json::Value, String> {
+    read_backend("/api/v1/daily-acquisition/status", &[]).await
+}
+
+#[tauri::command]
+async fn daily_acquisition_settings() -> Result<serde_json::Value, String> {
+    read_backend("/api/v1/daily-acquisition/settings", &[]).await
+}
+
+#[tauri::command]
+async fn daily_acquisition_save_settings(
+    settings: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    if !settings.is_object() {
+        return Err("Invalid daily acquisition settings.".to_string());
+    }
+    daily_write(
+        "/api/v1/daily-acquisition/settings",
+        reqwest::Method::PUT,
+        Some(settings),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn daily_acquisition_run() -> Result<serde_json::Value, String> {
+    daily_write("/api/v1/daily-acquisition/run", reqwest::Method::POST, None).await
+}
+
+async fn daily_control(job_id: String, action: &str) -> Result<serde_json::Value, String> {
+    if job_id.len() != 32 || !job_id.chars().all(|value| value.is_ascii_hexdigit()) {
+        return Err("Invalid daily acquisition job ID.".to_string());
+    }
+    daily_write(
+        &format!("/api/v1/daily-acquisition/jobs/{job_id}/{action}"),
+        reqwest::Method::POST,
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn daily_acquisition_pause(job_id: String) -> Result<serde_json::Value, String> {
+    daily_control(job_id, "pause").await
+}
+
+#[tauri::command]
+async fn daily_acquisition_resume(job_id: String) -> Result<serde_json::Value, String> {
+    daily_control(job_id, "resume").await
+}
+
+#[tauri::command]
+async fn daily_acquisition_cancel(job_id: String) -> Result<serde_json::Value, String> {
+    daily_control(job_id, "cancel").await
+}
+
+#[tauri::command]
+async fn daily_acquisition_retry_failed(job_id: String) -> Result<serde_json::Value, String> {
+    daily_control(job_id, "retry-failed").await
+}
+
+#[tauri::command]
+async fn daily_acquisition_history(
+    q: String,
+    provider: String,
+    status: String,
+    kind: String,
+    limit: u8,
+    offset: u32,
+) -> Result<serde_json::Value, String> {
+    if q.len() > 80 || provider.len() > 40 || status.len() > 20 || kind.len() > 20
+        || limit == 0 || limit > 100
+    {
+        return Err("Invalid daily acquisition history query.".to_string());
+    }
+    read_backend(
+        "/api/v1/daily-acquisition/history",
+        &[
+            ("q", q),
+            ("provider", provider),
+            ("status", status),
+            ("kind", kind),
+            ("limit", limit.to_string()),
+            ("offset", offset.to_string()),
+        ],
+    )
+    .await
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -827,6 +953,15 @@ fn main() {
             index_history_catalog,
             index_history_daily,
             index_history_acquire,
+            daily_acquisition_status,
+            daily_acquisition_settings,
+            daily_acquisition_save_settings,
+            daily_acquisition_run,
+            daily_acquisition_pause,
+            daily_acquisition_resume,
+            daily_acquisition_cancel,
+            daily_acquisition_retry_failed,
+            daily_acquisition_history,
             index_catalog,
             index_constituents,
             index_stock_memberships

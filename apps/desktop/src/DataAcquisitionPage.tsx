@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { AcquisitionProvider } from "./market-acquisition-api";
+import { DailyAcquisitionPanel } from "./DailyAcquisitionPanel";
 
 export interface MarketSelection {
   symbol: string;
@@ -33,6 +34,7 @@ export function DataAcquisitionPage({
       <div className="grid min-w-0 items-start gap-2 2xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-2">
           <IndexHistoryCard />
+          <DailyAcquisitionPanel />
           <AcquisitionCard
             selectedSymbol=""
             onAcquired={(symbol, provider) => {

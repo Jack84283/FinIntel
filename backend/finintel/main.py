@@ -1,6 +1,7 @@
 """Local-only backend API for the FinIntel workstation."""
 
 import os
+from contextlib import asynccontextmanager
 from hmac import compare_digest
 
 from fastapi import FastAPI, Request
@@ -9,11 +10,22 @@ from pydantic import BaseModel, ConfigDict
 
 from finintel import __version__
 from finintel.market_data.daily_status_api import router as daily_status_router
+from finintel.market_data.daily_status_api import start_scheduler, stop_scheduler
 from finintel.market_data.index_history_api import router as index_history_router
 from finintel.market_data.membership_api import router as membership_router
 from finintel.market_data.validation_api import router as validation_router
 from finintel.settings.api import router as settings_router
 from finintel.storage.api import router as market_data_router
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    start_scheduler()
+    try:
+        yield
+    finally:
+        stop_scheduler()
+
 
 app = FastAPI(
     title="FinIntel Local API",
@@ -21,6 +33,7 @@ app = FastAPI(
     description="Local development backend. No external network access is required.",
     docs_url=None,
     redoc_url=None,
+    lifespan=lifespan,
 )
 
 
