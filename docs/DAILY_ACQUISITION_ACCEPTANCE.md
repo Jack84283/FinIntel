@@ -89,6 +89,12 @@ For a `pass`, `evidence` must include an ISO-8601 `tested_at` timestamp, a
 non-empty `build_id`, and a non-empty `tested_features` list. `summary` is
 optional; blocked and not-run entries may omit the proof fields:
 
+The canonical required feature identifiers are `packaged_launch`,
+`sidecar_authentication`, `graceful_shutdown`, `offline_operation`,
+`acquisition`, `index_history`, `action_history`, `notifications`,
+`recovery_states`, and `bilingual_ui`. A platform cannot be marked `pass` until
+all ten are present.
+
 ```json
 {
   "macos": {
@@ -97,7 +103,18 @@ optional; blocked and not-run entries may omit the proof fields:
     "evidence": {
       "tested_at": "2026-10-31T15:30:00Z",
       "build_id": "finintel-2bbdd62",
-      "tested_features": ["sidecar readiness", "Action History"]
+      "tested_features": [
+        "packaged_launch",
+        "sidecar_authentication",
+        "graceful_shutdown",
+        "offline_operation",
+        "acquisition",
+        "index_history",
+        "action_history",
+        "notifications",
+        "recovery_states",
+        "bilingual_ui"
+      ]
     }
   },
   "windows": {"status": "blocked", "summary": "Clean Windows machine unavailable."},

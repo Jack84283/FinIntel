@@ -38,6 +38,18 @@ EQUITY_PROVIDERS = ("alpaca_sip", "tiingo", "alpha_vantage")
 INDEX_CODES = ("SP500", "DJIA", "NASDAQCOM", "NDX", "VIX")
 DESKTOP_PLATFORMS = ("macos", "windows", "linux")
 ACCEPTANCE_STATUSES = ("pass", "fail", "blocked", "not_run")
+REQUIRED_DESKTOP_FEATURES = (
+    "packaged_launch",
+    "sidecar_authentication",
+    "graceful_shutdown",
+    "offline_operation",
+    "acquisition",
+    "index_history",
+    "action_history",
+    "notifications",
+    "recovery_states",
+    "bilingual_ui",
+)
 SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 REPORT_VERSION = 1
 
@@ -172,6 +184,16 @@ def _validate_desktop_result(
         ):
             raise ValueError(
                 f"Passing {platform_name} evidence requires a non-empty tested_features list"
+            )
+        missing_features = [
+            feature
+            for feature in REQUIRED_DESKTOP_FEATURES
+            if feature not in tested_features
+        ]
+        if missing_features:
+            raise ValueError(
+                f"Passing {platform_name} evidence is missing required features: "
+                + ", ".join(missing_features)
             )
     return {"status": status, "summary": summary, "evidence": details}
 

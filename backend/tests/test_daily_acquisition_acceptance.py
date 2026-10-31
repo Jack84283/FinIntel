@@ -129,7 +129,7 @@ def test_manual_desktop_evidence_can_complete_production_matrix(tmp_path):
             "evidence": {
                 "tested_at": "2026-10-31T15:30:00Z",
                 "build_id": "finintel-2bbdd62",
-                "tested_features": ["sidecar readiness", "Action History"],
+                "tested_features": list(module.REQUIRED_DESKTOP_FEATURES),
             },
         }
         for platform in module.DESKTOP_PLATFORMS
@@ -177,7 +177,7 @@ def test_record_desktop_evidence_updates_existing_live_report(tmp_path):
                     "evidence": {
                         "tested_at": "2026-10-31T15:30:00Z",
                         "build_id": "finintel-2bbdd62",
-                        "tested_features": ["clean install", "Action History"],
+                        "tested_features": list(module.REQUIRED_DESKTOP_FEATURES),
                     },
                 }
                 for platform in module.DESKTOP_PLATFORMS
@@ -216,7 +216,12 @@ def test_record_desktop_evidence_updates_existing_live_report(tmp_path):
         {
             "tested_at": "not-a-timestamp",
             "build_id": "finintel-2bbdd62",
-            "tested_features": ["Action History"],
+            "tested_features": ["action_history"],
+        },
+        {
+            "tested_at": "2026-10-31T15:30:00Z",
+            "build_id": "finintel-2bbdd62",
+            "tested_features": ["action_history"],
         },
     ],
 )
@@ -256,7 +261,7 @@ def test_failed_synthetic_suite_forces_live_overall_failure(tmp_path):
             "evidence": {
                 "tested_at": "2026-10-31T15:30:00Z",
                 "build_id": "finintel-2bbdd62",
-                "tested_features": ["Action History"],
+                "tested_features": list(module.REQUIRED_DESKTOP_FEATURES),
             },
         }
         for platform in module.DESKTOP_PLATFORMS
