@@ -293,10 +293,20 @@ def reserve_provider_request(
             conn.commit()
             raise ProviderBudgetExhausted(message)
 
+        # Request counts are intentionally date-local for daily budgets, but
+        # pacing is provider-global. A reservation made just before midnight
+        # may have been assigned a slot after midnight, so looking only at the
+        # current day's row can create an overlapping request.
+        latest_reservation = conn.execute(
+            "SELECT last_request_at FROM daily_acquisition_provider_usage "
+            "WHERE provider=? AND last_request_at IS NOT NULL "
+            "ORDER BY last_request_at DESC LIMIT 1",
+            (provider,),
+        ).fetchone()
         previous = None
-        if row and row["last_request_at"]:
+        if latest_reservation and latest_reservation["last_request_at"]:
             try:
-                previous = datetime.fromisoformat(row["last_request_at"])
+                previous = datetime.fromisoformat(latest_reservation["last_request_at"])
             except ValueError:
                 previous = None
         interval = timedelta(microseconds=interval_microseconds)

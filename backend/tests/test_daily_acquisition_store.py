@@ -2,7 +2,7 @@
 
 import multiprocessing
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -478,6 +478,72 @@ def test_provider_request_spacing_preserves_precision(tmp_path, requests_per_min
     usage = provider_usage_status(db=db, now=moment)["alpaca_sip"]
     assert str(usage["last_request_at"]).endswith("+00:00")
     assert "." in str(usage["last_request_at"])
+
+
+@pytest.mark.parametrize(
+    ("requests_per_minute", "minimum_wait"),
+    ((5, 12.0), (60, 1.0), (180, 60 / 180)),
+)
+def test_provider_request_spacing_crosses_utc_midnight(tmp_path, requests_per_minute, minimum_wait):
+    db = tmp_path / "daily.sqlite3"
+    update_settings(
+        {
+            "provider_limits": {
+                "alpaca_sip": {
+                    "requests_per_minute": requests_per_minute,
+                    "daily_request_budget": 10,
+                }
+            }
+        },
+        db=db,
+    )
+    from finintel.market_data.daily_acquisition_store import (
+        provider_usage_status,
+        reserve_provider_request,
+    )
+
+    before_midnight = datetime(2026, 10, 29, 23, 59, 59, tzinfo=UTC)
+    after_midnight = datetime(2026, 10, 30, 0, 0, tzinfo=UTC)
+    first = reserve_provider_request("alpaca_sip", db=db, now=before_midnight)
+    second = reserve_provider_request("alpaca_sip", db=db, now=after_midnight)
+
+    assert first["usage_date"] == "2026-10-29"
+    assert second["usage_date"] == "2026-10-30"
+    assert second["wait_seconds"] >= max(0.0, minimum_wait - 1.0)
+    first_slot = datetime.fromisoformat(
+        str(provider_usage_status(db=db, now=before_midnight)["alpaca_sip"]["last_request_at"])
+    )
+    second_slot = datetime.fromisoformat(
+        str(provider_usage_status(db=db, now=after_midnight)["alpaca_sip"]["last_request_at"])
+    )
+    assert second_slot - first_slot >= timedelta(seconds=minimum_wait)
+    assert provider_usage_status(db=db, now=before_midnight)["alpaca_sip"]["requests_used"] == 1
+    assert provider_usage_status(db=db, now=after_midnight)["alpaca_sip"]["requests_used"] == 1
+
+
+def test_provider_request_spacing_uses_future_slot_scheduled_into_next_day(tmp_path):
+    db = tmp_path / "daily.sqlite3"
+    update_settings(
+        {
+            "provider_limits": {
+                "alpaca_sip": {"requests_per_minute": 5, "daily_request_budget": 10},
+            }
+        },
+        db=db,
+    )
+    from finintel.market_data.daily_acquisition_store import reserve_provider_request
+
+    first = datetime(2026, 10, 29, 23, 59, 50, tzinfo=UTC)
+    second = datetime(2026, 10, 29, 23, 59, 51, tzinfo=UTC)
+    midnight = datetime(2026, 10, 30, 0, 0, tzinfo=UTC)
+    reserve_provider_request("alpaca_sip", db=db, now=first)
+    scheduled = reserve_provider_request("alpaca_sip", db=db, now=second)
+    next_day = reserve_provider_request("alpaca_sip", db=db, now=midnight)
+
+    assert scheduled["wait_seconds"] >= 11.0
+    # The second reservation occupies 00:00:02 UTC; the next one must be
+    # reserved after that slot rather than overlapping it.
+    assert next_day["wait_seconds"] >= 14.0
 
 
 def _reserve_from_process(args):
