@@ -74,7 +74,12 @@ def _save(path: Path, state: dict[str, object]) -> None:
         temporary = Path(temporary_name)
         if stat.S_ISLNK(os.lstat(temporary).st_mode):
             raise OSError("Refusing to write through a symlink checkpoint temporary")
-        os.fchmod(fd, 0o600)
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        else:
+            # Python 3.12 on Windows has no os.fchmod; mkstemp still creates
+            # the file securely, and chmod applies the private mode there.
+            os.chmod(temporary, 0o600)
         handle = os.fdopen(fd, "w", encoding="utf-8")
         fd = None
         with handle:
@@ -99,7 +104,6 @@ def _database_identity(path: Path) -> dict[str, object]:
         "path": str(resolved),
         "device": None,
         "inode": None,
-        "ctime_ns": None,
     }
     try:
         metadata = resolved.stat()
@@ -108,7 +112,6 @@ def _database_identity(path: Path) -> dict[str, object]:
     identity.update(
         device=metadata.st_dev,
         inode=metadata.st_ino,
-        ctime_ns=metadata.st_ctime_ns,
     )
     return identity
 

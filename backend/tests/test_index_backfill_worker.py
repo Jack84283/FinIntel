@@ -211,3 +211,40 @@ def test_checkpoint_rejects_symlinked_temporary_file(tmp_path, monkeypatch):
         raise AssertionError("A symlinked checkpoint temporary must be rejected")
     assert protected.read_text() == "do not truncate"
     assert not temporary.exists()
+
+
+def test_checkpoint_creation_works_without_fchmod(tmp_path, monkeypatch):
+    monkeypatch.delattr(index_backfill_worker.os, "fchmod", raising=False)
+    checkpoint = tmp_path / "windows-compatible.json"
+
+    index_backfill_worker._save(checkpoint, {"status": "created"})
+
+    assert json.loads(checkpoint.read_text()) == {"status": "created"}
+
+
+def test_checkpoint_survives_ordinary_sqlite_writes(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "market.sqlite3"
+    checkpoint = tmp_path / "sp500.json"
+
+    def acquire(_code, **kwargs):
+        with sqlite3.connect(kwargs["db"]) as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS observations (value TEXT)")
+            conn.execute("INSERT INTO observations VALUES ('stored')")
+        return {"status": "stored", "sessions": 1}
+
+    args = {
+        "code": "SP500",
+        "state_path": checkpoint,
+        "db": db,
+        "start": date(2020, 1, 1),
+        "end": date(2020, 1, 1),
+        "once": True,
+        "acquire": acquire,
+    }
+    assert index_backfill_worker.run(**args) == 0
+    with sqlite3.connect(db) as conn:
+        conn.execute("INSERT INTO observations VALUES ('later')")
+
+    assert index_backfill_worker.run(**args) == 0
