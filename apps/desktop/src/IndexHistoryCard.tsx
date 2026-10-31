@@ -21,6 +21,8 @@ export function IndexHistoryCard() {
   const [reading, setReading] = useState(false);
   const [error, setError] = useState("");
   const [detailsError, setDetailsError] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   const reloadCatalog = async () => {
     setCatalog(await listIndexHistory());
@@ -48,13 +50,17 @@ export function IndexHistoryCard() {
 
   const download = async (all: boolean) => {
     if (loading) return;
+    if (startDate && endDate && startDate > endDate) {
+      setError(t("Backfill start must not be after the end date."));
+      return;
+    }
     setLoading(true);
     setError("");
     let success = 0;
     const failures: string[] = [];
     for (const code of (all ? INDEX_CODES : [selected])) {
       try {
-        await acquireIndexHistory(code);
+        await acquireIndexHistory(code, startDate || undefined, endDate || undefined);
         success += 1;
       } catch (reason) {
         failures.push(code + ": " + String(reason));
@@ -112,6 +118,30 @@ export function IndexHistoryCard() {
             </Button>
           </div>
         </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="grid gap-1 text-xs font-medium">
+            {t("Backfill start")}
+            <input
+              aria-label={t("Backfill start")}
+              type="date"
+              value={startDate}
+              disabled={loading}
+              onChange={event => setStartDate(event.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm font-normal text-foreground"
+            />
+          </label>
+          <label className="grid gap-1 text-xs font-medium">
+            {t("Backfill end")}
+            <input
+              aria-label={t("Backfill end")}
+              type="date"
+              value={endDate}
+              disabled={loading}
+              onChange={event => setEndDate(event.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm font-normal text-foreground"
+            />
+          </label>
+        </div>
         <div className="grid gap-2 sm:grid-cols-3">
           <div className="rounded-md border border-border p-3">
             <p className="text-xs text-muted-foreground">{t("Stored sessions")}</p>
@@ -129,11 +159,20 @@ export function IndexHistoryCard() {
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          {t("Coverage")}: {selectedItem?.first_session ?? "—"} – {selectedItem?.last_session ?? "—"}
-          {" · "}{t("FRED · daily close only · index points, not trade volume")}
+          {t("Local coverage")}: {selectedItem?.local_first_session ?? "—"} – {selectedItem?.local_last_session ?? "—"}
+          {" · "}{t("Last available")}: {selectedItem?.local_last_session ?? "—"}
         </p>
         <p className="text-xs text-muted-foreground">
-          {t("U.S. index history from FRED may be limited to 10 years. Provider licenses and terms apply. Downloads occur only when requested.")}
+          {t("Provider availability")}: {selectedItem?.provider_earliest_available ?? t("Unknown")}
+          {" – "}{selectedItem?.provider_latest_available ?? t("Unknown")}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {selectedItem
+            ? `${t("Provider")}: ${selectedItem.provider} · ${t("Data type")}: ${selectedItem.series_type === "price" ? t("Price") : t("Volatility")} · ${t("Frequency")}: ${selectedItem.frequency} · ${t("Units")}: ${selectedItem.units}`
+            : t("Loading index capability metadata…")}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {selectedItem?.known_history_limit ?? t("Provider coverage is reported after a successful import.")}
         </p>
         {loading && <p role="status" className="text-xs text-muted-foreground">{t("Fetching index history…")}</p>}
         {reading && <p role="status" className="text-xs text-muted-foreground">{t("Reading locally stored index history…")}</p>}

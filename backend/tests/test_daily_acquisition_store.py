@@ -346,7 +346,7 @@ def test_schema_v9_migrates_provider_usage_without_touching_price_history(tmp_pa
 
     assert get_settings(db=db)["provider_limits"]["alpaca_sip"]["requests_per_minute"] == 180
     with sqlite3.connect(db) as check:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 12
         assert check.execute("SELECT close FROM daily_prices").fetchone()[0] == "100.5"
         assert (
             check.execute(
@@ -439,7 +439,7 @@ def test_schema_v10_failure_rolls_back_and_succeeds_on_retry(tmp_path, monkeypat
     conn = storage_db._write_connection(db)
     conn.close()
     with sqlite3.connect(db) as check:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 12
         assert (
             check.execute(
                 "SELECT name FROM sqlite_master "

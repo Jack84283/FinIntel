@@ -636,6 +636,34 @@ fn valid_index_history_code(code: &str) -> bool {
     matches!(code, "SP500" | "DJIA" | "NASDAQCOM" | "NDX" | "VIX")
 }
 
+fn valid_index_history_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if !(bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit()))
+    {
+        return false;
+    }
+    let Ok(year) = value[0..4].parse::<u32>() else { return false };
+    let Ok(month) = value[5..7].parse::<u32>() else { return false };
+    let Ok(day) = value[8..10].parse::<u32>() else { return false };
+    if year == 0 || !(1..=12).contains(&month) || day == 0 {
+        return false;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    day <= days_in_month
+}
+
 #[tauri::command]
 async fn index_history_catalog() -> Result<serde_json::Value, String> {
     read_backend("/api/v1/market-data/index-history", &[]).await
@@ -654,18 +682,42 @@ async fn index_history_daily(code: String, limit: u16) -> Result<serde_json::Val
 }
 
 #[tauri::command]
-async fn index_history_acquire(code: String) -> Result<serde_json::Value, String> {
-    if !valid_index_history_code(&code) || backend_token().is_empty() {
+async fn index_history_acquire(
+    code: String,
+    start: Option<String>,
+    end: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if !valid_index_history_code(&code)
+        || backend_token().is_empty()
+        || start.as_deref().is_some_and(|value| !valid_index_history_date(value))
+        || end.as_deref().is_some_and(|value| !valid_index_history_date(value))
+        || start.as_deref().zip(end.as_deref()).is_some_and(|(first, last)| first > last)
+    {
         return Err("Index acquisition requires a managed desktop and valid index.".to_string());
     }
     // First write may perform a verified backup of the large local database
     // before the v6 -> v7 migration. Do not abandon that write after 120s.
-    let response = reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(900))
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|_| "Unable to initialize the index history client.".to_string())?
-        .post(format!("{}/api/v1/market-data/index-history/{code}/acquire", backend_base()))
+        .map_err(|_| "Unable to initialize the index history client.".to_string())?;
+    let mut url = reqwest::Url::parse(&format!(
+        "{}/api/v1/market-data/index-history/{code}/acquire",
+        backend_base()
+    ))
+    .map_err(|_| "Unable to initialize the index history URL.".to_string())?;
+    {
+        let mut query = url.query_pairs_mut();
+        if let Some(value) = start.as_deref() {
+            query.append_pair("start", value);
+        }
+        if let Some(value) = end.as_deref() {
+            query.append_pair("end", value);
+        }
+    }
+    let response = client
+        .post(url)
         .header("x-finintel-process-token", backend_token())
         .send()
         .await
