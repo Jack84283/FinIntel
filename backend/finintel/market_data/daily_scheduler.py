@@ -40,11 +40,11 @@ from finintel.market_data.daily_acquisition_store import (
     list_automatic_jobs,
     mark_provider_status,
     merge_job_items,
-    provider_request_guard,
     provider_usage_status,
     record_item,
     release_lock,
     requeue_job,
+    reserve_provider_request,
     reset_provider_status,
     resumable_job,
     retry_failed_job,
@@ -84,6 +84,10 @@ PROVIDER_PUBLICATION_DELAY_SESSIONS = {
 
 class _AcquisitionStopped(Exception):
     """Stop before an HTTP request when a scheduled job is paused or cancelled."""
+
+    def __init__(self, *, shutdown: bool = False) -> None:
+        super().__init__()
+        self.shutdown = shutdown
 
 
 def now_utc() -> datetime:
@@ -666,6 +670,9 @@ class DailyAcquisitionScheduler:
                     )
                 if lease_lost.is_set():
                     return
+        except _AcquisitionStopped:
+            # A scheduler shutdown must leave unfinished work resumable.
+            return
         except LeaseLostError:
             return
         except (OSError, StorageError, ValueError, RuntimeError) as exc:
@@ -706,7 +713,7 @@ class DailyAcquisitionScheduler:
         lease_lost: threading.Event | None = None,
         terminal_only: bool = False,
     ) -> bool:
-        if lease_lost and lease_lost.is_set():
+        if self._stop.is_set() or (lease_lost and lease_lost.is_set()):
             return True
         control = job_control(job_id)
         if not control:
@@ -735,22 +742,45 @@ class DailyAcquisitionScheduler:
             self._stop.wait(min(0.5, max(0.01, deadline - time.monotonic())))
         return not self._stop.is_set() and not (lease_lost and lease_lost.is_set())
 
-    def _wait_request_slot(self, seconds: float, job_id: str, lease_lost: threading.Event) -> None:
+    def _wait_request_slot(self, seconds: float, job_id: str, lease_lost: threading.Event) -> bool:
         deadline = time.monotonic() + max(0.0, seconds)
+        paused = False
         while True:
-            if self._stop.is_set() or self._should_stop(job_id, lease_lost=lease_lost):
+            if self._stop.is_set():
+                raise _AcquisitionStopped(shutdown=True)
+            if lease_lost and lease_lost.is_set():
                 raise _AcquisitionStopped
+            control = job_control(job_id)
+            if not control or control["cancel_requested"] or control["terminal"]:
+                raise _AcquisitionStopped
+            if control["pause_requested"]:
+                paused = True
+                self._stop.wait(0.5)
+                continue
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return
+                control = job_control(job_id)
+                if not control or control["cancel_requested"] or control["terminal"]:
+                    raise _AcquisitionStopped
+                if control["pause_requested"]:
+                    paused = True
+                    continue
+                return paused
             self._stop.wait(min(0.5, remaining))
 
     def _request_guard(self, provider: str, job_id: str, lease_lost: threading.Event):
         """Reserve a durable request slot before each provider HTTP request."""
-        return provider_request_guard(
-            provider,
-            sleeper=lambda seconds: self._wait_request_slot(seconds, job_id, lease_lost),
-        )
+
+        def reserve() -> None:
+            while True:
+                reservation = reserve_provider_request(provider)
+                paused = self._wait_request_slot(
+                    float(reservation.get("wait_seconds", 0.0)), job_id, lease_lost
+                )
+                if not paused:
+                    return
+
+        return reserve
 
     def _run_index(
         self,
@@ -802,7 +832,9 @@ class DailyAcquisitionScheduler:
                 return
             except LeaseLostError:
                 raise
-            except _AcquisitionStopped:
+            except _AcquisitionStopped as stopped:
+                if stopped.shutdown:
+                    raise
                 return
             except (ProviderRateLimited, ProviderAccessDenied) as exc:
                 blocked_providers.add("fred")
@@ -960,7 +992,9 @@ class DailyAcquisitionScheduler:
                     break
                 except LeaseLostError:
                     raise
-                except _AcquisitionStopped:
+                except _AcquisitionStopped as stopped:
+                    if stopped.shutdown:
+                        raise
                     return
                 except (ProviderRateLimited, ProviderAccessDenied) as exc:
                     last_error = exc

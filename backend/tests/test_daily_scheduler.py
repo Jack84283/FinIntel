@@ -212,12 +212,55 @@ def test_explicit_manual_and_retry_recovery_resets_fred(monkeypatch):
 def test_scheduled_request_guard_stops_before_http_on_cancellation(monkeypatch):
     scheduler = DailyAcquisitionScheduler()
     lease_lost = threading.Event()
-    monkeypatch.setattr(scheduler, "_should_stop", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         daily_scheduler,
-        "provider_request_guard",
-        lambda _provider, *, sleeper: sleeper(60),
+        "reserve_provider_request",
+        lambda _provider: {"wait_seconds": 60},
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_wait_request_slot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(daily_scheduler._AcquisitionStopped()),
     )
 
     with pytest.raises(daily_scheduler._AcquisitionStopped):
         scheduler._request_guard("alpaca_sip", "job-id", lease_lost)()
+
+
+def test_scheduled_request_guard_revalidates_after_pause(monkeypatch):
+    scheduler = DailyAcquisitionScheduler()
+    lease_lost = threading.Event()
+    reservations = []
+    paused = iter((True, False))
+    monkeypatch.setattr(
+        daily_scheduler,
+        "reserve_provider_request",
+        lambda provider: reservations.append(provider) or {"wait_seconds": 0},
+    )
+    monkeypatch.setattr(scheduler, "_wait_request_slot", lambda *_args, **_kwargs: next(paused))
+
+    scheduler._request_guard("alpaca_sip", "job-id", lease_lost)()
+
+    assert reservations == ["alpaca_sip", "alpaca_sip"]
+
+
+def test_scheduled_shutdown_propagates_out_of_index_handler(monkeypatch):
+    scheduler = DailyAcquisitionScheduler()
+    scheduler._stop.set()
+    monkeypatch.setattr(daily_scheduler, "set_item_running", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        daily_scheduler,
+        "reserve_provider_request",
+        lambda _provider: {"wait_seconds": 0},
+    )
+
+    with pytest.raises(daily_scheduler._AcquisitionStopped) as caught:
+        scheduler._run_index(
+            "job-id",
+            "SP500",
+            {"retry_attempts": 1, "retry_backoff_seconds": 0},
+            "owner",
+            threading.Event(),
+        )
+
+    assert caught.value.shutdown is True
