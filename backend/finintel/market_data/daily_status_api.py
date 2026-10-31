@@ -15,6 +15,7 @@ from finintel.market_data.daily_acquisition_store import (
     get_job,
     get_latest_job,
     get_settings,
+    latest_successful_trading_session,
     list_history,
     provider_usage_status,
 )
@@ -124,14 +125,7 @@ def _status_payload() -> dict[str, object]:
         (str(item["last_session"]) for item in items if item.get("last_session")),
         default=None,
     )
-    last_successful_session = max(
-        (
-            str(item["last_session"])
-            for item in items
-            if item.get("status") == "completed" and item.get("last_session")
-        ),
-        default=None,
-    )
+    last_successful_session = latest_successful_trading_session()
     return {
         "status": status,
         "enabled": bool(settings["enabled"]),

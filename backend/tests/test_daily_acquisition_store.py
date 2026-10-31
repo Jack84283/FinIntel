@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import finintel.storage.db as storage_db
 from finintel.market_data.daily_acquisition_store import (
     LeaseLostError,
     claim_job,
@@ -372,7 +373,7 @@ def test_provider_request_budget_and_cross_process_pacing_are_durable(tmp_path):
         reserve_provider_request,
         reset_provider_status,
     )
-    from finintel.market_data.provider import ProviderRateLimited
+    from finintel.market_data.provider import ProviderBudgetExhausted
 
     moment = datetime(2026, 10, 29, 20, 0, tzinfo=UTC)
     first = reserve_provider_request("alpaca_sip", db=db, now=moment)
@@ -380,12 +381,18 @@ def test_provider_request_budget_and_cross_process_pacing_are_durable(tmp_path):
     assert first["request_count"] == 1
     assert second["request_count"] == 2
     assert second["wait_seconds"] == 1
-    with pytest.raises(ProviderRateLimited):
+    with pytest.raises(ProviderBudgetExhausted):
         reserve_provider_request("alpaca_sip", db=db, now=moment)
     assert (
         provider_usage_status(db=db, now=moment)["alpaca_sip"]["quota_state"] == "budget_exhausted"
     )
     mark_provider_status("alpaca_sip", "quota_exhausted", "test quota", db=db, now=moment)
+    mark_provider_status("alpaca_sip", "available", db=db, now=moment)
+    assert (
+        provider_usage_status(db=db, now=moment)["alpaca_sip"]["quota_state"] == "budget_exhausted"
+    )
+    reset_provider_status("alpaca_sip", db=db, now=moment)
+    mark_provider_status("alpaca_sip", "quota_exhausted", "upstream quota", db=db, now=moment)
     mark_provider_status("alpaca_sip", "available", db=db, now=moment)
     assert (
         provider_usage_status(db=db, now=moment)["alpaca_sip"]["quota_state"] == "quota_exhausted"
@@ -395,6 +402,51 @@ def test_provider_request_budget_and_cross_process_pacing_are_durable(tmp_path):
     assert provider_usage_status(db=db, now=moment)["alpaca_sip"]["requests_used"] == 2
     reset_provider_status("alpaca_sip", db=db, now=moment)
     assert provider_usage_status(db=db, now=moment)["alpaca_sip"]["quota_state"] == "available"
+
+
+def test_schema_v10_failure_rolls_back_and_succeeds_on_retry(tmp_path, monkeypatch):
+    db = tmp_path / "daily.sqlite3"
+    update_settings({}, db=db)
+    with sqlite3.connect(db) as conn:
+        conn.execute("DROP TABLE daily_acquisition_provider_usage")
+        conn.execute("ALTER TABLE daily_acquisition_settings DROP COLUMN provider_limits")
+        conn.execute("PRAGMA user_version=9")
+
+    original_index = storage_db.SCHEMA_V10_INDEX
+    monkeypatch.setattr(
+        storage_db,
+        "SCHEMA_V10_INDEX",
+        "CREATE INDEX daily_acquisition_provider_usage_date "
+        "ON daily_acquisition_provider_usage(missing_column)",
+    )
+    with pytest.raises(storage_db.StorageError, match="v10"):
+        storage_db._write_connection(db)
+
+    with sqlite3.connect(db) as check:
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert (
+            check.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='daily_acquisition_provider_usage'"
+            ).fetchone()
+            is None
+        )
+        assert "provider_limits" not in {
+            row[1] for row in check.execute("PRAGMA table_info(daily_acquisition_settings)")
+        }
+
+    monkeypatch.setattr(storage_db, "SCHEMA_V10_INDEX", original_index)
+    conn = storage_db._write_connection(db)
+    conn.close()
+    with sqlite3.connect(db) as check:
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert (
+            check.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='daily_acquisition_provider_usage'"
+            ).fetchone()
+            is not None
+        )
 
 
 @pytest.mark.parametrize(

@@ -60,6 +60,7 @@ from finintel.market_data.index_history import (
 )
 from finintel.market_data.provider import (
     ProviderAccessDenied,
+    ProviderBudgetExhausted,
     ProviderError,
     ProviderRateLimited,
     ProviderUnavailable,
@@ -576,7 +577,8 @@ class DailyAcquisitionScheduler:
             blocked_providers = {
                 provider
                 for provider, usage in provider_usage_status().items()
-                if usage.get("quota_state") in {"quota_exhausted", "auth_failed"}
+                if usage.get("quota_state")
+                in {"budget_exhausted", "quota_exhausted", "auth_failed"}
             }
             latest_by_provider = {provider: latest_sessions(provider) for provider in PROVIDERS}
             latest_eligible_session = latest_expected_session()
@@ -761,9 +763,16 @@ class DailyAcquisitionScheduler:
                 raise
             except (ProviderRateLimited, ProviderAccessDenied) as exc:
                 blocked_providers.add("fred")
+                state = (
+                    "budget_exhausted"
+                    if isinstance(exc, ProviderBudgetExhausted)
+                    else "quota_exhausted"
+                    if isinstance(exc, ProviderRateLimited)
+                    else "auth_failed"
+                )
                 mark_provider_status(
                     "fred",
-                    "quota_exhausted" if isinstance(exc, ProviderRateLimited) else "auth_failed",
+                    state,
                     str(exc),
                 )
                 last_error = exc
@@ -911,11 +920,16 @@ class DailyAcquisitionScheduler:
                 except (ProviderRateLimited, ProviderAccessDenied) as exc:
                     last_error = exc
                     blocked_providers.add(selected)
+                    state = (
+                        "budget_exhausted"
+                        if isinstance(exc, ProviderBudgetExhausted)
+                        else "quota_exhausted"
+                        if isinstance(exc, ProviderRateLimited)
+                        else "auth_failed"
+                    )
                     mark_provider_status(
                         selected,
-                        "quota_exhausted"
-                        if isinstance(exc, ProviderRateLimited)
-                        else "auth_failed",
+                        state,
                         str(exc),
                     )
                     append_provider_error(

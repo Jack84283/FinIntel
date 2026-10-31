@@ -37,6 +37,10 @@ class ProviderRateLimited(ProviderError):
     """Provider quota hit: do not retry automatically."""
 
 
+class ProviderBudgetExhausted(ProviderRateLimited):
+    """The local daily request budget was exhausted before an HTTP request."""
+
+
 class ProviderAccessDenied(ProviderError):
     """Provider rejected credentials or entitlement: stop requests immediately."""
 

@@ -254,7 +254,7 @@ CREATE TABLE IF NOT EXISTS daily_acquisition_lock (
 # Provider request accounting is metadata only. It never stores credentials or
 # response payloads; the scheduler uses it to reserve a request slot before a
 # provider HTTP call and to make quota/throttle state visible after restart.
-SCHEMA_V10 = """
+SCHEMA_V10_TABLE = """
 CREATE TABLE IF NOT EXISTS daily_acquisition_provider_usage (
     provider TEXT NOT NULL,
     usage_date TEXT NOT NULL,
@@ -265,9 +265,14 @@ CREATE TABLE IF NOT EXISTS daily_acquisition_provider_usage (
     updated_at TEXT NOT NULL,
     PRIMARY KEY(provider, usage_date)
 );
+"""
+
+SCHEMA_V10_INDEX = """
 CREATE INDEX IF NOT EXISTS daily_acquisition_provider_usage_date
     ON daily_acquisition_provider_usage(usage_date, provider);
 """
+
+SCHEMA_V10 = SCHEMA_V10_TABLE + SCHEMA_V10_INDEX
 
 
 class StorageError(Exception):
@@ -490,7 +495,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
                     "ALTER TABLE daily_acquisition_settings ADD COLUMN provider_limits TEXT "
                     "NOT NULL DEFAULT '{}'"
                 )
-            conn.executescript(SCHEMA_V10)
+            # Do not use executescript here: sqlite3 implicitly commits before
+            # executing a script, which would make this migration non-atomic.
+            conn.execute(SCHEMA_V10_TABLE)
+            conn.execute(SCHEMA_V10_INDEX)
             conn.execute("PRAGMA user_version = 10")
             conn.commit()
         except sqlite3.Error as exc:

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from finintel.main import app
 from finintel.market_data.provider import (
+    ProviderBudgetExhausted,
     ProviderPayloadInvalid,
     ProviderRateLimited,
     parse_alpha_vantage_daily,
@@ -108,6 +109,21 @@ def test_quota_is_not_retried_and_does_not_create_db(tmp_path, monkeypatch):
     assert db.exists()
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 0
+
+
+def test_local_budget_failure_is_reported_separately_from_provider_quota(tmp_path, monkeypatch):
+    db, calls = _configure(
+        tmp_path,
+        monkeypatch,
+        provider_error=ProviderBudgetExhausted("Local daily provider budget exhausted"),
+    )
+    with TestClient(app) as client:
+        response = client.post(API, headers=HEADERS, json={"symbol": "IBM"})
+    assert response.status_code == 429
+    assert calls == [("IBM", "compact")]
+    from finintel.market_data.daily_acquisition_store import provider_usage_status
+
+    assert provider_usage_status(db=db)["alpha_vantage"]["quota_state"] == "budget_exhausted"
 
 
 def test_missing_key_blocks_provider_and_returns_safe_status(tmp_path, monkeypatch):

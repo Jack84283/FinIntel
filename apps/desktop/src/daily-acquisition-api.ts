@@ -308,7 +308,7 @@ export async function controlDailyAcquisition(jobId: string, action: "pause" | "
 
 export async function searchDailyHistory(query: string, providerValue: string, statusValue: string, kindValue: string, executionDate: string, offset: number, limit = 20): Promise<DailyHistoryPage> {
   const params = new URLSearchParams({ q: query, provider: providerValue, status: statusValue, kind: kindValue, execution_date: executionDate, offset: String(offset), limit: String(limit) });
-  const result = record(await read("/api/v1/daily-acquisition/history?" + params, "daily_acquisition_history", { q: query, provider: providerValue, status: statusValue, kind: kindValue, execution_date: executionDate, offset, limit }));
+  const result = record(await read("/api/v1/daily-acquisition/history?" + params, "daily_acquisition_history", { q: query, provider: providerValue, status: statusValue, kind: kindValue, executionDate, offset, limit }));
   if (!Number.isSafeInteger(result.total) || result.limit !== limit || result.offset !== offset || !Array.isArray(result.items)) throw new Error("Invalid daily acquisition history.");
   return { items: result.items.map(job), total: result.total as number, limit, offset };
 }

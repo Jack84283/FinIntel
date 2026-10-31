@@ -17,6 +17,7 @@ from finintel.market_data.provider import (
     SYMBOL_PATTERN,
     AlphaVantageDailyProvider,
     ProviderAccessDenied,
+    ProviderBudgetExhausted,
     ProviderError,
     ProviderRateLimited,
 )
@@ -64,9 +65,16 @@ def acquire_and_store(
         except (ProviderRateLimited, ProviderAccessDenied) as exc:
             from finintel.market_data.daily_acquisition_store import mark_provider_status
 
+            state = (
+                "budget_exhausted"
+                if isinstance(exc, ProviderBudgetExhausted)
+                else "quota_exhausted"
+                if isinstance(exc, ProviderRateLimited)
+                else "auth_failed"
+            )
             mark_provider_status(
                 provider,
-                "quota_exhausted" if isinstance(exc, ProviderRateLimited) else "auth_failed",
+                state,
                 str(exc),
             )
             raise

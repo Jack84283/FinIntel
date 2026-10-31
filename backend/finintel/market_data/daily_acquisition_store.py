@@ -244,7 +244,7 @@ def reserve_provider_request(
     conservative for provider quotas and avoids duplicate request bursts after
     restart. A zero daily budget means unlimited for that provider.
     """
-    from finintel.market_data.provider import ProviderRateLimited
+    from finintel.market_data.provider import ProviderBudgetExhausted, ProviderRateLimited
 
     path = db if db is not None else database_path()
     settings = get_settings(db=path)
@@ -291,7 +291,7 @@ def reserve_provider_request(
             # Commit the durable exhaustion marker before raising. The caller
             # may restart immediately and must not receive another slot.
             conn.commit()
-            raise ProviderRateLimited(message)
+            raise ProviderBudgetExhausted(message)
 
         previous = None
         if row and row["last_request_at"]:
@@ -372,14 +372,15 @@ def mark_provider_status(
                 (provider, usage_date),
             ).fetchone()
             if (
+                existing
+                and existing["quota_state"] == "budget_exhausted"
+                and state != "budget_exhausted"
+            ):
+                return
+            if (
                 state == "available"
                 and existing
-                and existing["quota_state"]
-                in {
-                    "budget_exhausted",
-                    "quota_exhausted",
-                    "auth_failed",
-                }
+                and existing["quota_state"] in {"quota_exhausted", "auth_failed"}
             ):
                 return
             conn.execute(
@@ -449,6 +450,23 @@ def provider_usage_status(
     finally:
         if conn is not None:
             conn.close()
+
+
+def latest_successful_trading_session(*, db: Path | None = None) -> str | None:
+    """Return the latest session persisted by a completed acquisition job."""
+    conn = _read_connection(db if db is not None else database_path())
+    if conn is None:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT MAX(i.last_session) AS last_session "
+            "FROM daily_acquisition_items i "
+            "JOIN daily_acquisition_jobs j ON j.id=i.job_id "
+            "WHERE j.status='completed' AND i.status='completed' AND i.last_session IS NOT NULL"
+        ).fetchone()
+        return row["last_session"] if row else None
+    finally:
+        conn.close()
 
 
 def _job_row(row) -> dict[str, object] | None:
