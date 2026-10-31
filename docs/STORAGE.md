@@ -24,11 +24,13 @@ all tables in one explicit transaction; unknown or future versions stop
 without trying to destroy data. Future schema changes must add migration
 steps rather than reinitializing the database.
 
-The current schema version is 10. Version 10 adds durable daily-acquisition
-provider request usage and quota/throttling state. It is metadata only: API
-credentials, provider payloads, and private financial information are not
-stored in the request ledger. Existing price, import, membership, and backup
-tables are preserved by additive migration.
+The current schema version is 11. Version 10 adds durable daily-acquisition
+provider request usage and quota/throttling state. Version 11 adds the
+source-backed index capability catalog and append-only index ingestion runs.
+These are metadata only: API credentials, provider payloads, and private
+financial information are not stored in the request ledger or index metadata.
+Existing price, import, membership, index observations, and backup tables are
+preserved by additive migration.
 
 ## Correctness and precedence
 The importer verifies a real local JSON file (not a symlink, <=25 MiB),

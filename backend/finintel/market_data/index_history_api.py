@@ -1,7 +1,8 @@
 """Read-only index level APIs and an explicitly authorized FRED acquisition."""
 
 import threading
-from typing import Literal
+from datetime import date
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
@@ -34,9 +35,16 @@ class IndexCatalogRecord(BaseModel):
     fred_series: str
     provider: Literal["fred"]
     source_url: str
+    series_type: Literal["price", "volatility"]
+    frequency: Literal["daily"]
+    currency: str | None
+    units: Literal["index_points"]
+    licensing_note: str
+    known_history_limit: str
     sessions: int
     first_session: str | None
     last_session: str | None
+    coverage_updated_at: str | None
     data_kind: Literal["daily_close_only"]
 
 
@@ -68,16 +76,24 @@ def get_index_history_catalog() -> list[dict[str, object]]:
 
 @router.get("/{code}/daily", response_model=IndexHistoryResponse)
 def get_index_daily_closes(
-    code: IndexCode, limit: int = Query(default=4000, ge=1, le=10000)
+    code: IndexCode,
+    limit: int = Query(default=4000, ge=1, le=10000),
+    start: Annotated[date | None, Query()] = None,
+    end: Annotated[date | None, Query()] = None,
 ) -> dict[str, object]:
     try:
-        return read_index_closes(code, limit=limit)
+        return read_index_closes(code, limit=limit, start=start, end=end)
     except StorageError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post("/{code}/acquire")
-def download_index_daily_closes(code: IndexCode, request: Request) -> dict[str, object]:
+def download_index_daily_closes(
+    code: IndexCode,
+    request: Request,
+    start: Annotated[date | None, Query()] = None,
+    end: Annotated[date | None, Query()] = None,
+) -> dict[str, object]:
     """Never call FRED on page load; only explicit trusted native desktop action."""
     _require_managed(request)
     if not _FETCH_LOCK.acquire(blocking=False):
@@ -87,7 +103,9 @@ def download_index_daily_closes(code: IndexCode, request: Request) -> dict[str, 
             # This endpoint is an explicit individual download. Reset only the
             # persisted FRED failure marker; request counts and budgets remain.
             reset_provider_status("fred")
-            return acquire_index_closes(code)
+            if start is None and end is None:
+                return acquire_index_closes(code)
+            return acquire_index_closes(code, start=start, end=end)
         except ProviderRateLimited as exc:
             raise HTTPException(status_code=429, detail=str(exc)) from exc
         except (ProviderAccessDenied, ProviderUnavailable) as exc:

@@ -62,6 +62,8 @@ def _validated(path: Path, *, version: bool = True) -> dict[str, object]:
                     "action_events",
                     "index_memberships",
                     "index_daily_closes",
+                    "index_series_catalog",
+                    "index_ingestion_runs",
                 )
                 if table in tables
             }
@@ -175,6 +177,9 @@ def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, obje
                     "symbol_catalog",
                     "action_events",
                     "index_memberships",
+                    "index_daily_closes",
+                    "index_series_catalog",
+                    "index_ingestion_runs",
                 )
                 if table in tables
             }
@@ -252,6 +257,22 @@ def _merge(staging: Path, source: Path) -> None:
                     "close=excluded.close,retrieved_at=excluded.retrieved_at,"
                     "source_url=excluded.source_url "
                     "WHERE excluded.retrieved_at > index_daily_closes.retrieved_at"
+                )
+                dest.execute(
+                    "INSERT OR IGNORE INTO index_series_catalog "
+                    "SELECT * FROM incoming.index_series_catalog"
+                )
+                dest.execute(
+                    "INSERT INTO index_ingestion_runs("
+                    "index_code,provider,requested_start,requested_end,retrieved_at,source_url,"
+                    "payload_sha256,first_session,last_session,observations,inserted,updated,unchanged) "
+                    "SELECT r.index_code,r.provider,r.requested_start,r.requested_end,r.retrieved_at,"
+                    "r.source_url,r.payload_sha256,r.first_session,r.last_session,r.observations,"
+                    "r.inserted,r.updated,r.unchanged FROM incoming.index_ingestion_runs r "
+                    "WHERE NOT EXISTS (SELECT 1 FROM index_ingestion_runs current "
+                    "WHERE current.index_code=r.index_code AND current.provider=r.provider "
+                    "AND current.retrieved_at=r.retrieved_at "
+                    "AND current.payload_sha256=r.payload_sha256)"
                 )
                 dest.execute(
                     "INSERT INTO action_events("

@@ -12,6 +12,9 @@ describe("local index history API", () => {
     const catalog = INDEX_CODES.map((code) => ({
       code, name: code === "SP500" ? "S&P 500" : code, fred_series: code,
       provider: "fred", source_url: "https://fred.stlouisfed.org/series/" + code,
+      series_type: code === "VIX" ? "volatility" : "price", frequency: "daily",
+      currency: null, units: "index_points", licensing_note: "FRED terms apply",
+      known_history_limit: "Provider coverage", coverage_updated_at: null,
       sessions: 0, first_session: null, last_session: null, data_kind: "daily_close_only",
     }));
     const request = fakeFetch(catalog);

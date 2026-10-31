@@ -12,4 +12,14 @@ Indexes are represented only by `{session_date, close}` observations. The index 
 
 The selected instrument is held in the desktop session state. The default is used only when there is no previous selection. Navigation from Data Acquisition or Action History passes an explicit equity selection and overrides the default; returning to Market through the sidebar preserves the current selection. Reloading local data refreshes catalogs and history without replacing the selection.
 
-Index downloads remain explicit actions in Data Acquisition. Provider credentials and acquisition behavior are unchanged.
+Index downloads remain explicit actions in Data Acquisition. The index catalog
+reports provider, series type, frequency, units, licensing notes, known history
+limits, and the actual locally stored coverage. The date inputs send an
+explicit bounded FRED request (`cosd`/`coed`); leaving them blank requests the
+provider's full available window. Repeated or overlapping imports are
+idempotent, while each validated provider response is retained as an ingestion
+run with its request range and payload revision hash.
+
+FRED remains the only enabled index provider in this slice. Close-only index
+levels are never converted into synthetic OHLCV data, and a FRED response that
+falls outside the requested range is rejected before SQLite changes.

@@ -9,9 +9,16 @@ export type IndexCatalogRecord = {
   fred_series: string;
   provider: "fred";
   source_url: string;
+  series_type: "price" | "volatility";
+  frequency: "daily";
+  currency: string | null;
+  units: "index_points";
+  licensing_note: string;
+  known_history_limit: string;
   sessions: number;
   first_session: string | null;
   last_session: string | null;
+  coverage_updated_at: string | null;
   data_kind: "daily_close_only";
 };
 
@@ -50,6 +57,14 @@ function validCode(value: unknown): value is IndexCode {
   return typeof value === "string" && INDEX_CODES.some(code => code === value);
 }
 
+function validDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day;
+}
+
 function parseCatalog(value: unknown): IndexCatalogRecord[] {
   if (!Array.isArray(value) || value.length > INDEX_CODES.length) {
     throw new Error("Invalid index catalog.");
@@ -59,9 +74,15 @@ function parseCatalog(value: unknown): IndexCatalogRecord[] {
     if (!validCode(row.code) || typeof row.name !== "string" ||
         typeof row.fred_series !== "string" || typeof row.source_url !== "string" ||
         row.provider !== "fred" || row.data_kind !== "daily_close_only" ||
+        (row.series_type !== "price" && row.series_type !== "volatility") ||
+        row.frequency !== "daily" ||
+        !(row.currency === null || typeof row.currency === "string") ||
+        row.units !== "index_points" || typeof row.licensing_note !== "string" ||
+        typeof row.known_history_limit !== "string" ||
         !Number.isSafeInteger(row.sessions) || (row.sessions as number) < 0 ||
         !(row.first_session === null || typeof row.first_session === "string") ||
-        !(row.last_session === null || typeof row.last_session === "string")) {
+        !(row.last_session === null || typeof row.last_session === "string") ||
+        !(row.coverage_updated_at === null || typeof row.coverage_updated_at === "string")) {
       throw new Error("Invalid index catalog record.");
     }
     return item as IndexCatalogRecord;
@@ -108,11 +129,21 @@ export async function readIndexHistory(code: IndexCode, limit = 250): Promise<In
   return { ...record, observations } as IndexHistory;
 }
 
-export async function acquireIndexHistory(code: IndexCode): Promise<IndexImportResult> {
+export async function acquireIndexHistory(
+  code: IndexCode,
+  start?: string,
+  end?: string,
+): Promise<IndexImportResult> {
   if (!validCode(code) || !isTauri()) {
     throw new Error("Index downloads require the managed desktop.");
   }
-  const raw = assertRecord(await invoke("index_history_acquire", { code }));
+  if ((start !== undefined && !validDate(start)) || (end !== undefined && !validDate(end)) ||
+      (start !== undefined && end !== undefined && start > end)) {
+    throw new Error("Invalid index history date range.");
+  }
+  const raw = assertRecord(await invoke("index_history_acquire", {
+    code, start: start ?? null, end: end ?? null,
+  }));
   if (raw.code !== code || raw.status !== "stored" || raw.provider !== "fred" ||
       !Number.isSafeInteger(raw.sessions) || !Number.isSafeInteger(raw.inserted) ||
       typeof raw.last_session !== "string") {

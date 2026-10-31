@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import HistoricalBatch
 from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -274,6 +274,112 @@ CREATE INDEX IF NOT EXISTS daily_acquisition_provider_usage_date
 
 SCHEMA_V10 = SCHEMA_V10_TABLE + SCHEMA_V10_INDEX
 
+# Index capabilities are persisted separately from observations so the UI can
+# distinguish provider coverage from locally downloaded rows. The nullable
+# coverage bounds are filled from validated observations after an import.
+SCHEMA_V11_CATALOG_TABLE = """
+CREATE TABLE IF NOT EXISTS index_series_catalog (
+    index_code TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    official_name TEXT NOT NULL,
+    series_type TEXT NOT NULL CHECK(series_type IN ('price', 'volatility')),
+    frequency TEXT NOT NULL CHECK(frequency = 'daily'),
+    currency TEXT,
+    units TEXT NOT NULL CHECK(units = 'index_points'),
+    source_url TEXT NOT NULL,
+    earliest_available TEXT,
+    latest_available TEXT,
+    coverage_updated_at TEXT,
+    licensing_note TEXT NOT NULL,
+    known_history_limit TEXT NOT NULL,
+    PRIMARY KEY(index_code, provider)
+);
+"""
+
+SCHEMA_V11_INGESTION_TABLE = """
+CREATE TABLE IF NOT EXISTS index_ingestion_runs (
+    id INTEGER PRIMARY KEY,
+    index_code TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    requested_start TEXT,
+    requested_end TEXT,
+    retrieved_at TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    payload_sha256 TEXT NOT NULL,
+    first_session TEXT NOT NULL,
+    last_session TEXT NOT NULL,
+    observations INTEGER NOT NULL CHECK(observations > 0),
+    inserted INTEGER NOT NULL CHECK(inserted >= 0),
+    updated INTEGER NOT NULL CHECK(updated >= 0),
+    unchanged INTEGER NOT NULL CHECK(unchanged >= 0)
+);
+"""
+
+SCHEMA_V11_INDEX = """
+CREATE INDEX IF NOT EXISTS index_ingestion_runs_series_time
+    ON index_ingestion_runs(index_code, provider, retrieved_at DESC, id DESC);
+"""
+
+# Keep this seed data in the storage migration so a read-only API can expose a
+# truthful capability catalog without mutating a user's database on first read.
+INDEX_SERIES_CATALOG_SEED = (
+    (
+        "SP500",
+        "fred",
+        "S&P 500",
+        "price",
+        None,
+        "index_points",
+        "https://fred.stlouisfed.org/series/SP500",
+        "FRED terms apply; verify permitted use before redistribution.",
+        "FRED determines the available daily observation window; no local history cap.",
+    ),
+    (
+        "DJIA",
+        "fred",
+        "Dow Jones Industrial Average",
+        "price",
+        None,
+        "index_points",
+        "https://fred.stlouisfed.org/series/DJIA",
+        "FRED terms apply; verify permitted use before redistribution.",
+        "FRED determines the available daily observation window; no local history cap.",
+    ),
+    (
+        "NASDAQCOM",
+        "fred",
+        "Nasdaq Composite",
+        "price",
+        None,
+        "index_points",
+        "https://fred.stlouisfed.org/series/NASDAQCOM",
+        "FRED terms apply; verify permitted use before redistribution.",
+        "FRED determines the available daily observation window; no local history cap.",
+    ),
+    (
+        "NDX",
+        "fred",
+        "Nasdaq-100",
+        "price",
+        None,
+        "index_points",
+        "https://fred.stlouisfed.org/series/NASDAQ100",
+        "FRED terms apply; verify permitted use before redistribution.",
+        "FRED determines the available daily observation window; no local history cap.",
+    ),
+    (
+        "VIX",
+        "fred",
+        "Cboe VIX",
+        "volatility",
+        None,
+        "index_points",
+        "https://fred.stlouisfed.org/series/VIXCLS",
+        "FRED terms apply; verify permitted use before redistribution.",
+        "FRED determines the available daily observation window; no local history cap.",
+    ),
+)
+
 
 class StorageError(Exception):
     """Safe failure message for local CLI or API consumers."""
@@ -302,7 +408,7 @@ def _ensure_version(conn: sqlite3.Connection, *, allow_missing: bool) -> bool:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == 0 and allow_missing:
         return False
-    if version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, SCHEMA_VERSION):
+    if version < 1 or version > SCHEMA_VERSION:
         raise StorageError(
             "SQLite schema version is unsupported; expected version "
             + str(SCHEMA_VERSION)
@@ -505,6 +611,26 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if conn.in_transaction:
                 conn.rollback()
             raise StorageError("Unable to migrate daily acquisition storage to v10") from exc
+        version = 10
+    if version == 10:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(SCHEMA_V11_CATALOG_TABLE)
+            conn.execute(SCHEMA_V11_INGESTION_TABLE)
+            conn.execute(SCHEMA_V11_INDEX)
+            conn.executemany(
+                "INSERT OR IGNORE INTO index_series_catalog("
+                "index_code,provider,official_name,series_type,frequency,currency,units,"
+                "source_url,licensing_note,known_history_limit) "
+                "VALUES (?, ?, ?, ?, 'daily', ?, ?, ?, ?, ?)",
+                INDEX_SERIES_CATALOG_SEED,
+            )
+            conn.execute("PRAGMA user_version = 11")
+            conn.commit()
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate index capability storage to v11") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:

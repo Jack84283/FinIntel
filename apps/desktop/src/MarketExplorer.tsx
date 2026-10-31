@@ -220,9 +220,16 @@ export function MarketExplorer({ initialSelection, onSelectionChange, onOpenAcqu
       fred_series: selection.code,
       provider: "fred",
       source_url: "",
+      series_type: selection.code === "VIX" ? "volatility" : "price",
+      frequency: "daily",
+      currency: null,
+      units: "index_points",
+      licensing_note: "",
+      known_history_limit: "",
       sessions: 0,
       first_session: null,
       last_session: null,
+      coverage_updated_at: null,
       data_kind: "daily_close_only",
     } }
     : { kind: "equity", item: { symbol: selection.symbol, provider: selection.provider, frequency: "1d", adjustment: "raw_unadjusted", data_kind: "historical_eod", sessions: 0, first_session: null, last_session: null } };

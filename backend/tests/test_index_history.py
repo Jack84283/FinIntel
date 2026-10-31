@@ -20,6 +20,7 @@ from finintel.market_data.index_history import (
     acquire_index_closes,
     fetch_fred_index,
     index_catalog,
+    index_request_url,
     parse_fred_csv,
     read_index_closes,
     store_index_closes,
@@ -82,6 +83,48 @@ def test_mocked_source_fetch_uses_fixed_host_and_series():
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         rows = fetch_fred_index("SP500", client=client)
     assert len(rows) == 2
+
+
+def test_bounded_fetch_uses_fred_range_and_persists_provenance(tmp_path):
+    seen: list[httpx.URL] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url)
+        return httpx.Response(200, content=csv_bytes())
+
+    start = date(2026, 10, 21)
+    end = date(2026, 10, 23)
+    db = tmp_path / "bounded.sqlite3"
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = acquire_index_closes("SP500", client=client, db=db, start=start, end=end)
+
+    assert seen[0].params.get("id") == "SP500"
+    assert seen[0].params.get("cosd") == "2026-10-21"
+    assert seen[0].params.get("coed") == "2026-10-23"
+    assert result["request_url"] == index_request_url("SP500", start, end)
+    assert result["request_start"] == "2026-10-21"
+    assert result["request_end"] == "2026-10-23"
+    catalog = index_catalog(db=db)
+    assert catalog[0]["code"] == "SP500"
+    assert catalog[0]["series_type"] == "price"
+    assert catalog[0]["frequency"] == "daily"
+    assert catalog[0]["units"] == "index_points"
+    assert catalog[0]["first_session"] == "2026-10-21"
+    assert catalog[0]["last_session"] == "2026-10-23"
+    assert read_index_closes("SP500", start=start, end=end, db=db)["observations"]
+    with sqlite3.connect(db) as conn:
+        run = conn.execute(
+            "SELECT requested_start,requested_end,observations,inserted,updated,unchanged "
+            "FROM index_ingestion_runs"
+        ).fetchone()
+    assert run == ("2026-10-21", "2026-10-23", 2, 2, 0, 0)
+
+
+def test_range_validation_rejects_future_and_reversed_requests():
+    with pytest.raises(IndexHistoryError, match="start date"):
+        index_request_url("SP500", date(2026, 10, 23), date(2026, 10, 21))
+    with pytest.raises(IndexHistoryError, match="future"):
+        index_request_url("SP500", date(2099, 1, 1), None)
 
 
 @pytest.mark.parametrize(
@@ -152,7 +195,7 @@ def test_import_idempotency_and_exact_provenance(tmp_path):
     assert read_index_closes("SP500", db=db)["observations"][-1]["close"] == "6012.50"
     assert index_catalog(db=db)[0]["sessions"] == 2
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
         assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 0
 
 
@@ -193,7 +236,7 @@ def test_version_six_migrates_without_erasing_equity_data(tmp_path):
     result = store_index_closes("VIX", [("2026-10-23", "21.25")], db=db)
     assert result["inserted"] == 1
     with sqlite3.connect(db) as check:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 11
         assert check.execute("SELECT symbol FROM instruments").fetchone()[0] == "AAPL"
     assert list((db.parent / "backups").glob("finintel-pre-restore-*.sqlite3"))
 
