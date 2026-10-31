@@ -15,7 +15,9 @@ from finintel.market_data.daily_acquisition_store import (
     get_job,
     get_latest_job,
     get_settings,
+    latest_successful_trading_session,
     list_history,
+    provider_usage_status,
 )
 from finintel.market_data.daily_scheduler import DailyAcquisitionScheduler, next_scheduled_execution
 from finintel.storage.db import StorageError
@@ -36,6 +38,13 @@ class DailySettingsRequest(BaseModel):
     retry_attempts: int | None = Field(default=None, ge=1, le=5)
     retry_backoff_seconds: float | None = Field(default=None, ge=0, le=300)
     catch_up_limit: int | None = Field(default=None, ge=1, le=30)
+    provider_limits: (
+        dict[
+            Literal["alpaca_sip", "tiingo", "alpha_vantage"],
+            dict[str, int],
+        ]
+        | None
+    ) = None
 
 
 def scheduler() -> DailyAcquisitionScheduler:
@@ -116,6 +125,7 @@ def _status_payload() -> dict[str, object]:
         (str(item["last_session"]) for item in items if item.get("last_session")),
         default=None,
     )
+    last_successful_session = latest_successful_trading_session()
     return {
         "status": status,
         "enabled": bool(settings["enabled"]),
@@ -142,8 +152,11 @@ def _status_payload() -> dict[str, object]:
         "updated": current.get("updated", 0),
         "unchanged": current.get("unchanged", 0),
         "retry_count": current.get("retry_count", 0),
+        "duration_ms": current.get("duration_ms"),
         "job_duration_ms": current.get("duration_ms"),
         "last_updated_trading_session": last_updated,
+        "last_successful_trading_session": last_successful_session,
+        "provider_quota": provider_usage_status(),
         "provider_errors": current.get("provider_errors", []),
         "index_results": current.get("index_results", {}),
         "job_id": current.get("id"),
@@ -240,12 +253,19 @@ def daily_acquisition_history(
     provider: str = Query(default="", max_length=40),
     status: str = Query(default="", max_length=20),
     kind: str = Query(default="", max_length=20),
+    execution_date: str = Query(default="", max_length=10),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, object]:
     try:
         return list_history(
-            query=q, provider=provider, status=status, kind=kind, limit=limit, offset=offset
+            query=q,
+            provider=provider,
+            status=status,
+            kind=kind,
+            execution_date=execution_date,
+            limit=limit,
+            offset=offset,
         )
     except (StorageError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

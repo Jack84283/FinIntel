@@ -63,6 +63,7 @@ export function DailyAcquisitionPanel() {
     if (!status || status.total_instruments === 0) return 0;
     return Math.round(((status.completed_instruments + status.failed_instruments + status.incomplete_instruments) / status.total_instruments) * 100);
   }, [status]);
+  const quota = useMemo(() => Object.entries(status?.provider_quota ?? {}).filter(([provider]) => providerName[provider as DailyProvider]), [status]);
 
   const action = async (kind: "run" | "pause" | "resume" | "cancel" | "retry-failed") => {
     try {
@@ -141,8 +142,22 @@ export function DailyAcquisitionPanel() {
           <span>{t("Last run")}: {status?.last_execution_time ?? "—"}</span>
           <span>{t("Next run")}: {status?.next_scheduled_execution ?? "—"}</span>
           <span>{t("Current instrument")}: {status?.current_instrument ?? "—"}</span>
+          <span>{t("Elapsed")}: {status?.duration_ms === null || status?.duration_ms === undefined ? "—" : `${Math.round(status.duration_ms / 1000)}s`}</span>
+          <span>{t("Last successful trading session")}: {status?.last_successful_trading_session ?? "—"}</span>
           <span>{t("Last updated trading session")}: {status?.last_updated_trading_session ?? "—"}</span>
         </div>
+        {quota.length > 0 && <div className="rounded-md border border-border bg-background/40 p-3 text-xs text-muted-foreground">
+          <div className="mb-1 font-medium text-foreground">{t("Provider quota and throttling")}</div>
+          <div className="grid gap-1 sm:grid-cols-3">
+            {quota.map(([provider, usage]) => <span key={provider} className={usage.quota_state === "available" ? "" : "text-destructive"}>
+              {providerName[provider as DailyProvider]}: {usage.requests_used} / {usage.daily_request_budget || "∞"} · {t(usage.quota_state)}
+            </span>)}
+          </div>
+        </div>}
+        {(status?.provider_errors.length ?? 0) > 0 && <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+          <div className="mb-1 font-medium">{t("Recent acquisition errors")}</div>
+          <ul className="space-y-1">{status?.provider_errors.slice(-3).map((error, index) => <li key={`${String(error.recorded_at ?? "error")}-${index}`}>{String(error.provider ?? "provider")}: {String(error.message ?? "Unknown provider error")}</li>)}</ul>
+        </div>}
         <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-3">
           <Button type="button" size="sm" onClick={() => void action("run")} disabled={active || !status}><Zap aria-hidden="true" />{t("Run Now")}</Button>
           <Button type="button" size="sm" variant="secondary" onClick={() => void action("pause")} disabled={!active || status?.status === "paused" || !jobId}><Pause aria-hidden="true" />{t("Pause")}</Button>

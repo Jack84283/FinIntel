@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from finintel.market_data.acquisition import acquire_and_store, key_configured
 from finintel.market_data.alpaca import alpaca_configured
+from finintel.market_data.daily_acquisition_store import reset_provider_status
 from finintel.market_data.provider import (
     SYMBOL_PATTERN,
     ProviderError,
@@ -309,6 +310,10 @@ def _acquire_market_data_impl(payload: AcquisitionRequest, request: Request) -> 
         raise HTTPException(status_code=409, detail="An acquisition is already in progress")
     try:
         try:
+            # This is an explicit user action. Clear only the selected
+            # provider's recoverable upstream failure marker; request counts
+            # and local daily-budget enforcement remain durable in SQLite.
+            reset_provider_status(payload.provider)
             return acquire_and_store(
                 payload.symbol,
                 outputsize=payload.outputsize,

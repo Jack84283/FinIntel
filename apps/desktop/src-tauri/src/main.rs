@@ -736,6 +736,18 @@ async fn daily_acquisition_settings() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
+async fn daily_acquisition_job(job_id: String) -> Result<serde_json::Value, String> {
+    if job_id.len() != 32 || !job_id.chars().all(|value| value.is_ascii_hexdigit()) {
+        return Err("Invalid daily acquisition job ID.".to_string());
+    }
+    read_backend(
+        &format!("/api/v1/daily-acquisition/jobs/{job_id}"),
+        &[],
+    )
+    .await
+}
+
+#[tauri::command]
 async fn daily_acquisition_save_settings(
     settings: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
@@ -793,10 +805,12 @@ async fn daily_acquisition_history(
     provider: String,
     status: String,
     kind: String,
+    execution_date: String,
     limit: u8,
     offset: u32,
 ) -> Result<serde_json::Value, String> {
     if q.len() > 80 || provider.len() > 40 || status.len() > 20 || kind.len() > 20
+        || execution_date.len() > 10
         || limit == 0 || limit > 100
     {
         return Err("Invalid daily acquisition history query.".to_string());
@@ -808,6 +822,7 @@ async fn daily_acquisition_history(
             ("provider", provider),
             ("status", status),
             ("kind", kind),
+            ("execution_date", execution_date),
             ("limit", limit.to_string()),
             ("offset", offset.to_string()),
         ],
@@ -955,6 +970,7 @@ fn main() {
             index_history_acquire,
             daily_acquisition_status,
             daily_acquisition_settings,
+            daily_acquisition_job,
             daily_acquisition_save_settings,
             daily_acquisition_run,
             daily_acquisition_pause,

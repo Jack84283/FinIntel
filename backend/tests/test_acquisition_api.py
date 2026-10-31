@@ -4,10 +4,13 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from finintel.main import app
 from finintel.market_data.provider import (
+    ProviderAccessDenied,
+    ProviderBudgetExhausted,
     ProviderPayloadInvalid,
     ProviderRateLimited,
     parse_alpha_vantage_daily,
@@ -108,6 +111,91 @@ def test_quota_is_not_retried_and_does_not_create_db(tmp_path, monkeypatch):
     assert db.exists()
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    ("upstream_status", "provider_error", "expected_response", "expected_state"),
+    (
+        (429, ProviderRateLimited("HTTP 429 quota response"), 429, "quota_exhausted"),
+        (401, ProviderAccessDenied("HTTP 401 authentication response"), 400, "auth_failed"),
+        (403, ProviderAccessDenied("HTTP 403 authentication response"), 400, "auth_failed"),
+    ),
+)
+def test_explicit_equity_retry_recovers_after_provider_failure(
+    tmp_path, monkeypatch, upstream_status, provider_error, expected_response, expected_state
+):
+    db, failed_calls = _configure(tmp_path, monkeypatch, provider_error=provider_error)
+    from finintel.market_data.daily_acquisition_store import (
+        mark_provider_status,
+        provider_usage_status,
+        update_settings,
+    )
+
+    with TestClient(app) as client:
+        failed = client.post(API, headers=HEADERS, json={"symbol": "IBM"})
+
+    assert failed.status_code == expected_response
+    assert failed_calls == [("IBM", "compact")]
+    assert provider_usage_status(db=db)["alpha_vantage"]["quota_state"] == expected_state
+
+    # A corrected credential/provider response is retried through the explicit
+    # API. The recovery reset must not disturb another provider's marker.
+    mark_provider_status("tiingo", "auth_failed", "unrelated provider", db=db)
+    update_settings(
+        {
+            "provider_limits": {
+                "alpha_vantage": {"requests_per_minute": 180, "daily_request_budget": 25}
+            }
+        },
+        db=db,
+    )
+    _, recovered_calls = _configure(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        recovered = client.post(API, headers=HEADERS, json={"symbol": "IBM"})
+
+    assert recovered.status_code == 200
+    assert recovered_calls == [("IBM", "compact")]
+    usage = provider_usage_status(db=db)
+    assert usage["alpha_vantage"]["quota_state"] == "available"
+    assert usage["alpha_vantage"]["requests_used"] == 2
+    assert usage["tiingo"]["quota_state"] == "auth_failed"
+    assert upstream_status in {401, 403, 429}
+
+
+def test_scheduled_equity_acquisition_does_not_clear_provider_failure(tmp_path, monkeypatch):
+    db, calls = _configure(tmp_path, monkeypatch)
+    from finintel.market_data.acquisition import acquire_and_store
+    from finintel.market_data.daily_acquisition_store import (
+        mark_provider_status,
+        provider_request_guard,
+        provider_usage_status,
+    )
+
+    mark_provider_status("alpha_vantage", "quota_exhausted", "scheduled failure", db=db)
+    with pytest.raises(ProviderRateLimited):
+        acquire_and_store(
+            "IBM",
+            provider="alpha_vantage",
+            request_guard=provider_request_guard("alpha_vantage", db=db),
+        )
+
+    assert calls == []
+    assert provider_usage_status(db=db)["alpha_vantage"]["quota_state"] == "quota_exhausted"
+
+
+def test_local_budget_failure_is_reported_separately_from_provider_quota(tmp_path, monkeypatch):
+    db, calls = _configure(
+        tmp_path,
+        monkeypatch,
+        provider_error=ProviderBudgetExhausted("Local daily provider budget exhausted"),
+    )
+    with TestClient(app) as client:
+        response = client.post(API, headers=HEADERS, json={"symbol": "IBM"})
+    assert response.status_code == 429
+    assert calls == [("IBM", "compact")]
+    from finintel.market_data.daily_acquisition_store import provider_usage_status
+
+    assert provider_usage_status(db=db)["alpha_vantage"]["quota_state"] == "budget_exhausted"
 
 
 def test_missing_key_blocks_provider_and_returns_safe_status(tmp_path, monkeypatch):

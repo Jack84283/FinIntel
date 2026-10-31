@@ -1,8 +1,13 @@
 """No-network tests for calendar-aware scheduling and monitoring."""
 
+import threading
 from datetime import UTC, date, datetime
 
+import pytest
+
+from finintel.market_data import daily_scheduler
 from finintel.market_data.daily_scheduler import (
+    DailyAcquisitionScheduler,
     automatic_schedule_dates,
     due_date,
     expected_missing_sessions,
@@ -153,3 +158,109 @@ def test_status_round_trip(tmp_path):
     assert status(path)["status"] == "never_run"
     save(path, {"status": "complete", "last_completed_date": "2026-10-28"})
     assert status(path)["last_completed_date"] == "2026-10-28"
+
+
+def test_explicit_manual_and_retry_recovery_resets_fred(monkeypatch):
+    settings = {
+        "primary_provider": "alpaca_sip",
+        "secondary_provider": "tiingo",
+    }
+    reset_calls = []
+    launched = []
+    monkeypatch.setattr("finintel.market_data.daily_scheduler.get_settings", lambda: settings)
+    monkeypatch.setattr("finintel.market_data.daily_scheduler.get_active_job", lambda: None)
+    monkeypatch.setattr(
+        "finintel.market_data.daily_scheduler.reset_provider_status",
+        lambda provider: reset_calls.append(provider),
+    )
+    monkeypatch.setattr(
+        "finintel.market_data.daily_scheduler.instruments", lambda _provider: ["AAPL"]
+    )
+    monkeypatch.setattr(
+        "finintel.market_data.daily_scheduler.create_job", lambda **_: {"id": "manual-job"}
+    )
+    monkeypatch.setattr("finintel.market_data.daily_scheduler.get_job", lambda *_: None)
+    monkeypatch.setattr(
+        "finintel.market_data.daily_scheduler.retry_failed_job",
+        lambda _job_id: {
+            "id": "retry-job",
+            "provider": "alpha_vantage",
+            "secondary_provider": None,
+            "items": [
+                {"kind": "equity", "provider": "tiingo"},
+                {"kind": "index", "provider": "fred"},
+            ],
+        },
+    )
+    scheduler = DailyAcquisitionScheduler()
+    monkeypatch.setattr(scheduler, "_launch", lambda job_id: launched.append(job_id))
+
+    assert scheduler.trigger_manual()["id"] == "manual-job"
+    assert scheduler.retry_failed("old-job")["id"] == "retry-job"
+
+    assert reset_calls == [
+        "alpaca_sip",
+        "fred",
+        "tiingo",
+        "alpha_vantage",
+        "tiingo",
+        "fred",
+    ]
+    assert launched == ["manual-job", "retry-job"]
+
+
+def test_scheduled_request_guard_stops_before_http_on_cancellation(monkeypatch):
+    scheduler = DailyAcquisitionScheduler()
+    lease_lost = threading.Event()
+    monkeypatch.setattr(
+        daily_scheduler,
+        "reserve_provider_request",
+        lambda _provider: {"wait_seconds": 60},
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_wait_request_slot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(daily_scheduler._AcquisitionStopped()),
+    )
+
+    with pytest.raises(daily_scheduler._AcquisitionStopped):
+        scheduler._request_guard("alpaca_sip", "job-id", lease_lost)()
+
+
+def test_scheduled_request_guard_revalidates_after_pause(monkeypatch):
+    scheduler = DailyAcquisitionScheduler()
+    lease_lost = threading.Event()
+    reservations = []
+    paused = iter((True, False))
+    monkeypatch.setattr(
+        daily_scheduler,
+        "reserve_provider_request",
+        lambda provider: reservations.append(provider) or {"wait_seconds": 0},
+    )
+    monkeypatch.setattr(scheduler, "_wait_request_slot", lambda *_args, **_kwargs: next(paused))
+
+    scheduler._request_guard("alpaca_sip", "job-id", lease_lost)()
+
+    assert reservations == ["alpaca_sip", "alpaca_sip"]
+
+
+def test_scheduled_shutdown_propagates_out_of_index_handler(monkeypatch):
+    scheduler = DailyAcquisitionScheduler()
+    scheduler._stop.set()
+    monkeypatch.setattr(daily_scheduler, "set_item_running", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        daily_scheduler,
+        "reserve_provider_request",
+        lambda _provider: {"wait_seconds": 0},
+    )
+
+    with pytest.raises(daily_scheduler._AcquisitionStopped) as caught:
+        scheduler._run_index(
+            "job-id",
+            "SP500",
+            {"retry_attempts": 1, "retry_backoff_seconds": 0},
+            "owner",
+            threading.Event(),
+        )
+
+    assert caught.value.shutdown is True

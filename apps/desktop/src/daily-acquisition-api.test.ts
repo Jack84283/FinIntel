@@ -40,12 +40,27 @@ describe("daily acquisition API parsing", () => {
       last_execution_time: null,
       last_successful_execution: null,
       next_scheduled_execution: "2026-11-03T01:00:00+00:00",
+      duration_ms: 2500,
+      job_duration_ms: 2500,
       last_updated_trading_session: null,
+      provider_quota: {
+        alpaca_sip: {
+          requests_used: 25,
+          daily_request_budget: 25,
+          requests_per_minute: 5,
+          quota_state: "budget_exhausted",
+          quota_message: "Local daily budget exhausted",
+          last_request_at: "2026-11-03T01:00:00+00:00",
+          usage_date: "2026-11-03",
+        },
+      },
       job_id: null,
       job: idleJob,
     });
     expect(status.status).toBe("idle");
     expect(status.job.items).toEqual([]);
+    expect(status.duration_ms).toBe(2500);
+    expect(status.provider_quota.alpaca_sip.quota_state).toBe("budget_exhausted");
   });
 
   it("rejects malformed settings instead of trusting backend JSON", () => {

@@ -1,6 +1,7 @@
 """Tiingo raw daily prices adapter. Token is sent only in HTTP headers."""
 
 import json
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from urllib.parse import quote
@@ -11,6 +12,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import DailyOHLCV, HistoricalBatch
 from finintel.market_data.provider import (
     SYMBOL_PATTERN,
+    ProviderAccessDenied,
     ProviderError,
     ProviderPayloadInvalid,
     ProviderRateLimited,
@@ -56,11 +58,17 @@ def parse_prices(data: bytes) -> list[DailyOHLCV]:
 
 
 class TiingoDailyProvider:
-    def __init__(self, *, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        client: httpx.Client | None = None,
+        request_guard: Callable[[], None] | None = None,
+    ) -> None:
         self._token = get_secret("tiingo", "api_key").strip()
         if not self._token:
             raise ProviderError("Configure FININTEL_TIINGO_API_KEY in the Python backend")
         self._client = client
+        self._request_guard = request_guard
 
     def fetch_daily(
         self, symbol: str, *, period: str = "10y", start_date: date | None = None
@@ -101,6 +109,8 @@ class TiingoDailyProvider:
 
     def _request(self, client: httpx.Client, url: str, params: dict[str, str]) -> list[DailyOHLCV]:
         try:
+            if self._request_guard is not None:
+                self._request_guard()
             response = client.get(
                 url,
                 params=params,
@@ -115,7 +125,7 @@ class TiingoDailyProvider:
         if response.status_code == 429:
             raise ProviderRateLimited("Tiingo request quota reached")
         if response.status_code in (401, 403):
-            raise ProviderError("Tiingo authentication or access denied")
+            raise ProviderAccessDenied("Tiingo authentication or access denied")
         if response.status_code == 404:
             raise ProviderError("Tiingo does not have this ticker")
         if response.status_code != 200:

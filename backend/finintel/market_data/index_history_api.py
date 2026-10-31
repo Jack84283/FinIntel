@@ -6,11 +6,17 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
 
+from finintel.market_data.daily_acquisition_store import reset_provider_status
 from finintel.market_data.index_history import (
     IndexHistoryError,
     acquire_index_closes,
     index_catalog,
     read_index_closes,
+)
+from finintel.market_data.provider import (
+    ProviderAccessDenied,
+    ProviderRateLimited,
+    ProviderUnavailable,
 )
 from finintel.settings.api import _require_managed
 from finintel.storage.db import StorageError
@@ -78,7 +84,14 @@ def download_index_daily_closes(code: IndexCode, request: Request) -> dict[str, 
         raise HTTPException(status_code=409, detail="Index acquisition already running")
     try:
         try:
+            # This endpoint is an explicit individual download. Reset only the
+            # persisted FRED failure marker; request counts and budgets remain.
+            reset_provider_status("fred")
             return acquire_index_closes(code)
+        except ProviderRateLimited as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except (ProviderAccessDenied, ProviderUnavailable) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         except IndexHistoryError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except StorageError as exc:
