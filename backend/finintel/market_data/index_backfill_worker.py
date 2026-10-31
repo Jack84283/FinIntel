@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
+import tempfile
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -62,16 +64,53 @@ def _save(path: Path, state: dict[str, object]) -> None:
     if path.is_symlink():
         raise OSError("Refusing to overwrite a symlink checkpoint")
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary: Path | None = None
+    fd: int | None = None
     try:
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        raw_fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+        )
+        fd = raw_fd
+        temporary = Path(temporary_name)
+        if stat.S_ISLNK(os.lstat(temporary).st_mode):
+            raise OSError("Refusing to write through a symlink checkpoint temporary")
+        os.fchmod(fd, 0o600)
+        handle = os.fdopen(fd, "w", encoding="utf-8")
+        fd = None
+        with handle:
             json.dump(state, handle, sort_keys=True)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        if fd is not None:
+            os.close(fd)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _default_state_path(db: Path, code: str) -> Path:
+    return db.with_suffix("." + code.lower() + ".index-backfill.json")
+
+
+def _database_identity(path: Path) -> dict[str, object]:
+    resolved = path.expanduser().resolve(strict=False)
+    identity: dict[str, object] = {
+        "path": str(resolved),
+        "device": None,
+        "inode": None,
+        "ctime_ns": None,
+    }
+    try:
+        metadata = resolved.stat()
+    except FileNotFoundError:
+        return identity
+    identity.update(
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+        ctime_ns=metadata.st_ctime_ns,
+    )
+    return identity
 
 
 def _load(
@@ -81,6 +120,7 @@ def _load(
     start: date,
     end: date,
     chunk_days: int,
+    database_identity: dict[str, object],
 ) -> dict[str, object]:
     if path.exists():
         state = json.loads(path.read_text(encoding="utf-8"))
@@ -95,6 +135,21 @@ def _load(
         }
         if any(state.get(key) != value for key, value in expected.items()):
             raise ValueError("Existing index backfill checkpoint does not match this request")
+        saved_identity = state.get("database_identity")
+        if not isinstance(saved_identity, dict):
+            raise ValueError("Existing index backfill checkpoint has no database identity")
+        if saved_identity != database_identity:
+            completed = state.get("completed_ranges", [])
+            if not (
+                isinstance(completed, list)
+                and not completed
+                and saved_identity.get("path") == database_identity.get("path")
+                and saved_identity.get("device") is None
+                and saved_identity.get("inode") is None
+                and database_identity.get("inode") is not None
+            ):
+                raise ValueError("Existing index backfill checkpoint belongs to another database")
+            state["database_identity"] = database_identity
         if not isinstance(state.get("completed_ranges", []), list):
             raise TypeError("Index backfill checkpoint has invalid completed ranges")
         try:
@@ -109,6 +164,7 @@ def _load(
         "start": start.isoformat(),
         "end": end.isoformat(),
         "chunk_days": chunk_days,
+        "database_identity": database_identity,
         "next_start": start.isoformat(),
         "completed_ranges": [],
         "last_status": "created",
@@ -140,7 +196,7 @@ def _next_end(start: date, end: date, chunk_days: int) -> date:
 def run(
     *,
     code: str,
-    state_path: Path,
+    state_path: Path | None = None,
     db: Path | None = None,
     start: date | None = None,
     end: date | None = None,
@@ -155,6 +211,9 @@ def run(
     first = start or DEFAULT_START
     last = end or datetime.now(UTC).date()
     _validate_range(first, last)
+    effective_db = db or database_path()
+    state_path = state_path or _default_state_path(effective_db, code)
+    identity = _database_identity(effective_db)
 
     lock_path = state_path.with_suffix(state_path.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -168,6 +227,7 @@ def run(
             start=first,
             end=last,
             chunk_days=chunk_days,
+            database_identity=identity,
         )
         while True:
             next_start = date.fromisoformat(str(state["next_start"]))
@@ -188,7 +248,7 @@ def run(
             try:
                 result = acquire(
                     code,
-                    db=db,
+                    db=effective_db,
                     start=next_start,
                     end=next_end,
                     allow_empty=True,
@@ -218,6 +278,7 @@ def run(
                 }
             )
             state["next_start"] = (next_end + timedelta(days=1)).isoformat()
+            state["database_identity"] = _database_identity(effective_db)
             state["current_range"] = None
             state["last_status"] = "stored" if result.get("status") == "stored" else "empty"
             state.pop("last_error", None)
@@ -254,14 +315,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", type=Path, default=None)
     parser.add_argument("--once", action="store_true", help="Process one chunk and exit")
     args = parser.parse_args(argv)
-    state_path = args.state_path or database_path().with_suffix(
-        "." + args.code.lower() + ".index-backfill.json"
-    )
+    effective_db = args.db or database_path()
+    state_path = args.state_path or _default_state_path(effective_db, args.code)
     try:
         return run(
             code=args.code,
             state_path=state_path,
-            db=args.db,
+            db=effective_db,
             start=args.start,
             end=args.end,
             chunk_days=args.chunk_days,

@@ -1,6 +1,7 @@
 """Offline tests for resumable bounded FRED index backfills."""
 
 import json
+import os
 from datetime import date
 
 from finintel.market_data import index_backfill_worker
@@ -126,3 +127,87 @@ def test_checkpoint_rejects_changed_range_or_chunk_size(tmp_path):
         assert "does not match" in str(exc)
     else:
         raise AssertionError("Changed backfill parameters must reject the checkpoint")
+
+
+def test_checkpoint_rejects_database_replacement_after_completed_chunks(tmp_path):
+    db = tmp_path / "market.sqlite3"
+    checkpoint = tmp_path / "sp500.json"
+
+    def acquire(_code, **kwargs):
+        kwargs["db"].write_bytes(b"first database")
+        return {"status": "stored", "sessions": 1}
+
+    args = {
+        "code": "SP500",
+        "state_path": checkpoint,
+        "db": db,
+        "start": date(2020, 1, 1),
+        "end": date(2020, 1, 1),
+        "once": True,
+        "acquire": acquire,
+    }
+    assert index_backfill_worker.run(**args) == 0
+
+    replacement = tmp_path / "replacement.sqlite3"
+    replacement.write_bytes(b"replacement database")
+    replacement.replace(db)
+
+    try:
+        index_backfill_worker.run(**args)
+    except ValueError as exc:
+        assert "another database" in str(exc)
+    else:
+        raise AssertionError("A replaced database must not reuse a completed checkpoint")
+
+
+def test_default_checkpoint_path_uses_explicit_database(tmp_path, monkeypatch):
+    db = tmp_path / "custom.sqlite3"
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(index_backfill_worker, "run", fake_run)
+    assert (
+        index_backfill_worker.main(
+            [
+                "--code",
+                "SP500",
+                "--db",
+                str(db),
+                "--start",
+                "2020-01-01",
+                "--end",
+                "2020-01-01",
+            ]
+        )
+        == 0
+    )
+    assert captured["db"] == db
+    assert captured["state_path"] == db.with_suffix(".sp500.index-backfill.json")
+
+
+def test_checkpoint_rejects_symlinked_temporary_file(tmp_path, monkeypatch):
+    protected = tmp_path / "protected.txt"
+    protected.write_text("do not truncate")
+    temporary = tmp_path / ".checkpoint.json.injected.tmp"
+    temporary.symlink_to(protected)
+    fd = os.open(protected, os.O_RDWR)
+    monkeypatch.setattr(
+        index_backfill_worker.tempfile,
+        "mkstemp",
+        lambda **_kwargs: (fd, str(temporary)),
+    )
+
+    try:
+        index_backfill_worker._save(
+            tmp_path / "checkpoint.json",
+            {"status": "safe"},
+        )
+    except OSError as exc:
+        assert "temporary" in str(exc)
+    else:
+        raise AssertionError("A symlinked checkpoint temporary must be rejected")
+    assert protected.read_text() == "do not truncate"
+    assert not temporary.exists()
