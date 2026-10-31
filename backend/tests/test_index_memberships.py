@@ -20,17 +20,57 @@ from finintel.storage.db import _write_connection
 
 def test_multiple_indexes_and_as_of_removals(tmp_path):
     db = tmp_path / "indices.sqlite"
-    load_membership("SP500", "2026-10-01", "source-sp500-01", ["AAPL", "MSFT"], db=db)
-    load_membership("NDX", "2026-10-01", "source-ndx-01", ["AAPL", "GOOG"], db=db)
-    load_membership("DJIA", "2026-10-01", "source-djia-01", ["AAPL"], db=db)
-    load_membership("RUT", "2026-10-01", "source-rut-01", ["PLTR"], db=db)
+    load_membership(
+        "SP500",
+        "2026-10-01",
+        "source-sp500-01",
+        ["AAPL", "MSFT"],
+        db=db,
+        expected_count=2,
+        source_kind="verified_public",
+    )
+    load_membership(
+        "NDX",
+        "2026-10-01",
+        "source-ndx-01",
+        ["AAPL", "GOOG"],
+        db=db,
+        expected_count=2,
+        source_kind="verified_public",
+    )
+    load_membership(
+        "DJIA",
+        "2026-10-01",
+        "source-djia-01",
+        ["AAPL"],
+        db=db,
+        expected_count=1,
+        source_kind="verified_public",
+    )
+    load_membership(
+        "RUT",
+        "2026-10-01",
+        "source-rut-01",
+        ["PLTR"],
+        db=db,
+        expected_count=1,
+        source_kind="verified_public",
+    )
     earlier = symbol_index_memberships("AAPL", as_of="2026-10-01", db=db)
     assert {x["code"] for x in earlier["indexes"] if x["is_member"] is True} == {
         "SP500",
         "NDX",
         "DJIA",
     }
-    load_membership("SP500", "2026-10-15", "source-sp500-15", ["MSFT"], db=db)
+    load_membership(
+        "SP500",
+        "2026-10-15",
+        "source-sp500-15",
+        ["MSFT"],
+        db=db,
+        expected_count=1,
+        source_kind="verified_public",
+    )
     now = symbol_index_memberships("AAPL", as_of="2026-10-23", db=db)
     flags = {x["code"]: x["is_member"] for x in now["indexes"]}
     assert flags == {"SP500": False, "DJIA": True, "NDX": True, "RUT": False}
@@ -57,8 +97,24 @@ def test_multiple_indexes_and_as_of_removals(tmp_path):
 
 def test_multiple_index_badges_and_unknown_symbols(tmp_path):
     db = tmp_path / "idx.sqlite"
-    load_membership("SP500", "2026-10-01", "sample-sp", ["AAPL", "MSFT"], db=db)
-    load_membership("NDX", "2026-10-01", "sample-ndx", ["AAPL"], db=db)
+    load_membership(
+        "SP500",
+        "2026-10-01",
+        "sample-sp",
+        ["AAPL", "MSFT"],
+        db=db,
+        expected_count=2,
+        source_kind="verified_public",
+    )
+    load_membership(
+        "NDX",
+        "2026-10-01",
+        "sample-ndx",
+        ["AAPL"],
+        db=db,
+        expected_count=1,
+        source_kind="verified_public",
+    )
     result = index_constituents("SP500", as_of="2026-10-20", query="AAPL", db=db)
     assert result["total"] == 1
     assert result["items"][0]["member_indexes"] == ["NDX", "SP500"]
@@ -72,7 +128,15 @@ def test_multiple_index_badges_and_unknown_symbols(tmp_path):
 
 def test_search_pagination_and_literal_wildcards(tmp_path):
     db = tmp_path / "idx.sqlite"
-    load_membership("SP500", "2026-10-01", "demo", ["AAPL", "MSFT", "META"], db=db)
+    load_membership(
+        "SP500",
+        "2026-10-01",
+        "demo",
+        ["AAPL", "MSFT", "META"],
+        db=db,
+        expected_count=3,
+        source_kind="verified_public",
+    )
     page = index_constituents("SP500", query="M", offset=1, limit=1, db=db)
     assert page["total"] == 2
     assert len(page["items"]) == 1
@@ -84,8 +148,24 @@ def test_search_pagination_and_literal_wildcards(tmp_path):
 
 def test_effective_membership_changes_are_dated_and_paginated(tmp_path):
     db = tmp_path / "changes.sqlite"
-    load_membership("SP500", "2026-10-01", "source-01", ["AAPL", "MSFT"], db=db)
-    load_membership("SP500", "2026-10-15", "source-15", ["MSFT", "NVDA"], db=db)
+    load_membership(
+        "SP500",
+        "2026-10-01",
+        "source-01",
+        ["AAPL", "MSFT"],
+        db=db,
+        expected_count=2,
+        source_kind="verified_public",
+    )
+    load_membership(
+        "SP500",
+        "2026-10-15",
+        "source-15",
+        ["MSFT", "NVDA"],
+        db=db,
+        expected_count=2,
+        source_kind="verified_public",
+    )
 
     page = membership_changes(
         "SP500",
@@ -117,7 +197,15 @@ def test_effective_membership_changes_are_dated_and_paginated(tmp_path):
 
 def test_invalid_source_duplicate_symbol_and_known_etf_are_rejected(tmp_path):
     db = tmp_path / "idx.sqlite"
-    load_membership("SP500", "2026-10-01", "good", ["AAPL"], db=db)
+    load_membership(
+        "SP500",
+        "2026-10-01",
+        "good",
+        ["AAPL"],
+        db=db,
+        expected_count=1,
+        source_kind="verified_public",
+    )
     with pytest.raises(ValueError, match="unique"):
         load_membership("SP500", "2026-10-01", "bad", ["AAPL", "aapl"], db=db)
     with pytest.raises(ValueError, match="expected"):
@@ -149,6 +237,50 @@ def test_proxy_snapshot_exposes_incomplete_provenance_without_calling_it_officia
     assert entry["confidence"] == "low"
 
 
+def test_uncertain_snapshot_keeps_absent_membership_unknown(tmp_path):
+    db = tmp_path / "uncertain.sqlite"
+    load_membership("SP500", "2026-10-01", "unverified csv", ["AAPL"], db=db)
+    entry = list_indexes(as_of="2026-10-02", db=db)[0]
+    assert entry["source_kind"] == "unknown"
+    assert entry["validation_status"] == "unknown"
+    assert entry["availability_status"] == "unverified"
+    memberships_by_index = {
+        row["code"]: row["is_member"]
+        for row in symbol_index_memberships("AAPL", as_of="2026-10-02", db=db)["indexes"]
+    }
+    assert memberships_by_index["SP500"] is True
+    absent = {
+        row["code"]: row["is_member"]
+        for row in symbol_index_memberships("MSFT", as_of="2026-10-02", db=db)["indexes"]
+    }
+    assert absent["SP500"] is None
+
+
+def test_uncertain_membership_changes_are_not_reported_as_verified(tmp_path):
+    db = tmp_path / "uncertain-changes.sqlite"
+    load_membership(
+        "SP500",
+        "2026-10-01",
+        "proxy-01",
+        ["AAPL"],
+        db=db,
+        source_expected_count=2,
+        source_kind="fund_derived_proxy",
+    )
+    load_membership(
+        "SP500",
+        "2026-10-15",
+        "proxy-15",
+        ["MSFT"],
+        db=db,
+        source_expected_count=2,
+        source_kind="fund_derived_proxy",
+    )
+    result = membership_changes("SP500", from_as_of="2026-10-01", to_as_of="2026-10-20", db=db)
+    assert result["status"] == "uncertain"
+    assert {item["change"] for item in result["items"]} == {"added", "removed"}
+
+
 def test_v12_migration_backfills_membership_metadata_without_new_download(tmp_path):
     db = tmp_path / "v12.sqlite"
     conn = _write_connection(db)
@@ -173,25 +305,72 @@ def test_v12_migration_backfills_membership_metadata_without_new_download(tmp_pa
     assert metadata == ("unknown", "2026-10-01", 1, 1, "unknown", "unverified")
 
 
-def test_backup_merge_reconciles_persisted_membership_counts(tmp_path):
+def test_backup_merge_keeps_existing_effective_snapshot_intact(tmp_path):
     source = tmp_path / "source.sqlite"
     target = tmp_path / "target.sqlite"
-    load_membership("SP500", "2026-10-01", "source", ["AAPL"], db=source)
-    load_membership("SP500", "2026-10-01", "target", ["MSFT"], db=target)
+    load_membership(
+        "SP500",
+        "2026-10-01",
+        "source proxy",
+        ["AAPL"],
+        db=source,
+        source_expected_count=1,
+        source_kind="fund_derived_proxy",
+    )
+    load_membership(
+        "SP500",
+        "2026-10-01",
+        "target",
+        ["MSFT"],
+        db=target,
+        expected_count=1,
+        source_kind="official_licensed",
+    )
     snapshot = create_backup(db=source)
 
     restore_backup(snapshot["id"], "merge", db=target)
     with sqlite3.connect(target) as check:
         assert check.execute(
-            "SELECT member_count,validation_status FROM index_membership_snapshots "
+            "SELECT source_kind,member_count,validation_status FROM index_membership_snapshots "
             "WHERE index_code='SP500' AND as_of='2026-10-01'"
-        ).fetchone() == (2, "incomplete")
+        ).fetchone() == ("official_licensed", 1, "complete")
         assert (
             check.execute(
-                "SELECT COUNT(*) FROM index_memberships WHERE index_code='SP500'"
+                "SELECT symbol FROM index_memberships WHERE index_code='SP500'"
             ).fetchone()[0]
-            == 2
+            == "MSFT"
         )
+
+
+def test_backup_merge_preserves_official_and_proxy_snapshots_as_distinct_dates(tmp_path):
+    source = tmp_path / "proxy.sqlite"
+    target = tmp_path / "official.sqlite"
+    load_membership(
+        "SP500",
+        "2026-10-15",
+        "proxy",
+        ["AAPL"],
+        db=source,
+        source_expected_count=1,
+        source_kind="fund_derived_proxy",
+    )
+    load_membership(
+        "SP500",
+        "2026-10-01",
+        "official",
+        ["MSFT"],
+        db=target,
+        expected_count=1,
+        source_kind="official_licensed",
+    )
+    snapshot = create_backup(db=source)
+
+    restore_backup(snapshot["id"], "merge", db=target)
+    with sqlite3.connect(target) as check:
+        assert check.execute(
+            "SELECT as_of,source_kind FROM index_membership_snapshots "
+            "WHERE index_code='SP500' ORDER BY as_of"
+        ).fetchall() == [("2026-10-01", "official_licensed"), ("2026-10-15", "fund_derived_proxy")]
 
 
 def test_v5_migration_preserves_old_index_snapshots(tmp_path):
@@ -258,8 +437,24 @@ def test_read_api_date_filter_avoids_lookahead_and_does_not_write(tmp_path, monk
 def test_changes_api_returns_dated_additions_and_removals(tmp_path, monkeypatch):
     db = tmp_path / "api-changes.sqlite"
     monkeypatch.setenv("FININTEL_DB_PATH", str(db))
-    load_membership("SP500", "2026-10-01", "source-01", ["AAPL", "MSFT"], db=db)
-    load_membership("SP500", "2026-10-15", "source-15", ["MSFT", "NVDA"], db=db)
+    load_membership(
+        "SP500",
+        "2026-10-01",
+        "source-01",
+        ["AAPL", "MSFT"],
+        db=db,
+        expected_count=2,
+        source_kind="verified_public",
+    )
+    load_membership(
+        "SP500",
+        "2026-10-15",
+        "source-15",
+        ["MSFT", "NVDA"],
+        db=db,
+        expected_count=2,
+        source_kind="verified_public",
+    )
     with TestClient(app) as client:
         response = client.get(
             "/api/v1/market-data/indexes/SP500/changes?"

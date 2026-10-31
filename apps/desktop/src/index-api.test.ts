@@ -80,6 +80,7 @@ describe("index membership API contracts", () => {
     }));
     const changes = await fetchMembershipChanges("SP500", "2026-10-01", "2026-10-20");
     expect(changes.items[0].change).toBe("added");
+    expect(changes.status).toBe("available");
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("from_as_of=2026-10-01"), { cache: "no-store" });
   });
 });

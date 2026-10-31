@@ -93,7 +93,7 @@ class MembershipChangePage(BaseModel):
     to_snapshot_as_of: str | None
     from_source: str | None
     to_source: str | None
-    status: Literal["available", "unknown"]
+    status: Literal["available", "uncertain", "unknown"]
     total: int
     limit: int
     offset: int

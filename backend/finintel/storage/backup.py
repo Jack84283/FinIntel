@@ -252,34 +252,50 @@ def _merge(staging: Path, source: Path) -> None:
                 dest.execute(
                     "INSERT OR IGNORE INTO symbol_catalog SELECT * FROM incoming.symbol_catalog"
                 )
+                # Membership snapshots are indivisible source claims. If the
+                # destination already has any rows for an index/effective date,
+                # keep that destination snapshot intact rather than combining
+                # it with a potentially incompatible source or proxy list.
+                dest.execute(
+                    "CREATE TEMP TABLE _membership_merge_new AS "
+                    "SELECT incoming.index_code,incoming.as_of "
+                    "FROM incoming.index_memberships incoming "
+                    "GROUP BY incoming.index_code,incoming.as_of "
+                    "HAVING NOT EXISTS (SELECT 1 FROM index_memberships current "
+                    "WHERE current.index_code=incoming.index_code "
+                    "AND current.as_of=incoming.as_of)"
+                )
                 dest.execute(
                     "INSERT OR IGNORE INTO index_memberships "
-                    "SELECT * FROM incoming.index_memberships"
+                    "SELECT incoming.* FROM incoming.index_memberships incoming "
+                    "JOIN _membership_merge_new allowed ON allowed.index_code=incoming.index_code "
+                    "AND allowed.as_of=incoming.as_of"
                 )
                 if "index_membership_snapshots" in incoming_tables:
                     dest.execute(
-                        "INSERT INTO index_membership_snapshots("
+                        "INSERT OR IGNORE INTO index_membership_snapshots("
                         "index_code,as_of,source,source_kind,source_as_of,expected_count,"
                         "member_count,validation_status,availability_status,confidence,imported_at) "
-                        "SELECT index_code,as_of,source,source_kind,source_as_of,expected_count,"
-                        "member_count,validation_status,availability_status,confidence,imported_at "
-                        "FROM incoming.index_membership_snapshots WHERE 1 "
-                        "ON CONFLICT(index_code,as_of) DO UPDATE SET source=excluded.source,"
-                        "source_kind=excluded.source_kind,source_as_of=excluded.source_as_of,"
-                        "expected_count=excluded.expected_count,member_count=excluded.member_count,"
-                        "validation_status=excluded.validation_status,"
-                        "availability_status=excluded.availability_status,"
-                        "confidence=excluded.confidence,imported_at=excluded.imported_at "
-                        "WHERE excluded.imported_at >= index_membership_snapshots.imported_at"
+                        "SELECT incoming.index_code,incoming.as_of,incoming.source,"
+                        "incoming.source_kind,incoming.source_as_of,incoming.expected_count,"
+                        "incoming.member_count,incoming.validation_status,"
+                        "incoming.availability_status,incoming.confidence,incoming.imported_at "
+                        "FROM incoming.index_membership_snapshots incoming "
+                        "JOIN _membership_merge_new allowed ON allowed.index_code=incoming.index_code "
+                        "AND allowed.as_of=incoming.as_of"
                     )
                 else:
                     dest.execute(
                         "INSERT OR IGNORE INTO index_membership_snapshots("
                         "index_code,as_of,source,source_kind,source_as_of,expected_count,"
                         "member_count,validation_status,availability_status,confidence,imported_at) "
-                        "SELECT index_code,as_of,MAX(source),'unknown',as_of,COUNT(*),COUNT(*),"
+                        "SELECT incoming.index_code,incoming.as_of,MAX(incoming.source),'unknown',"
+                        "incoming.as_of,COUNT(*),COUNT(*),"
                         "'unknown','unverified','unknown',datetime('now') "
-                        "FROM index_memberships GROUP BY index_code,as_of"
+                        "FROM incoming.index_memberships incoming "
+                        "JOIN _membership_merge_new allowed ON allowed.index_code=incoming.index_code "
+                        "AND allowed.as_of=incoming.as_of "
+                        "GROUP BY incoming.index_code,incoming.as_of"
                     )
                 # A merge may add rows to an already-known snapshot. Reconcile
                 # the persisted counts/statuses with the rows that actually

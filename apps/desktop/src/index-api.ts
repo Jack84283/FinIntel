@@ -67,7 +67,7 @@ export interface MembershipChangePage {
   to_snapshot_as_of: string | null;
   from_source: string | null;
   to_source: string | null;
-  status: "available" | "unknown";
+  status: "available" | "uncertain" | "unknown";
   total: number;
   limit: number;
   offset: number;
@@ -217,7 +217,7 @@ export async function fetchMembershipChanges(
       typeof result.from_requested_as_of !== "string" || typeof result.to_requested_as_of !== "string" ||
       !nullableString(result.from_snapshot_as_of) || !nullableString(result.to_snapshot_as_of) ||
       !nullableString(result.from_source) || !nullableString(result.to_source) ||
-      (result.status !== "available" && result.status !== "unknown") ||
+      (result.status !== "available" && result.status !== "uncertain" && result.status !== "unknown") ||
       !Number.isSafeInteger(result.total) || (result.total as number) < 0 || result.limit !== limit ||
       result.offset !== offset || !Array.isArray(result.items) || result.items.length > limit) {
     throw new Error("Malformed index membership change page.");

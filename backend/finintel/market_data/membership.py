@@ -54,7 +54,7 @@ def load_membership(
     db: Path | None = None,
     expected_count: int | None = None,
     source_expected_count: int | None = None,
-    source_kind: str = "verified_public",
+    source_kind: str = "unknown",
     confidence: str | None = None,
     names: dict[str, str] | None = None,
 ) -> int:
@@ -127,14 +127,20 @@ def load_membership(
                 if source_expected_count is not None
                 else expected_count
                 if expected_count is not None
-                else len(tickers)
+                else None
             )
-            validation_status = "complete" if expected_members == len(tickers) else "incomplete"
+            validation_status = (
+                "unknown"
+                if expected_members is None
+                else "complete"
+                if expected_members == len(tickers)
+                else "incomplete"
+            )
             if source_kind == "fund_derived_proxy":
                 availability_status = "proxy_only"
             elif validation_status == "incomplete":
                 availability_status = "incomplete"
-            elif source_kind == "unknown":
+            elif validation_status == "unknown" or source_kind == "unknown":
                 availability_status = "unverified"
             else:
                 availability_status = "available"
@@ -197,6 +203,14 @@ def _legacy_metadata(source: str, member_count: int, as_of: str) -> dict[str, ob
         "availability_status": "proxy_only" if proxy else "unverified",
         "confidence": "low" if proxy else "unknown",
     }
+
+
+def _authoritative_snapshot(record: dict[str, object]) -> bool:
+    return (
+        record.get("source_kind") in {"official_licensed", "verified_public"}
+        and record.get("validation_status") == "complete"
+        and record.get("availability_status") == "available"
+    )
 
 
 def _latest(conn: sqlite3.Connection, code: str, when: str) -> dict[str, object] | None:
@@ -392,7 +406,13 @@ def membership_changes(
             "to_snapshot_as_of": after["as_of"] if after else None,
             "from_source": before["source"] if before else None,
             "to_source": after["source"] if after else None,
-            "status": "available" if before and after else "unknown",
+            "status": (
+                "unknown"
+                if not before or not after
+                else "available"
+                if _authoritative_snapshot(before) and _authoritative_snapshot(after)
+                else "uncertain"
+            ),
             "total": 0,
             "limit": limit,
             "offset": offset,
@@ -479,8 +499,7 @@ def symbol_index_memberships(
                         True
                         if (entry["code"], entry["snapshot_as_of"]) in recorded
                         else None
-                        if entry["snapshot_as_of"] is None
-                        or (entry["source"] or "").find("; incomplete:") >= 0
+                        if not _authoritative_snapshot(entry)
                         else False
                     ),
                 }
@@ -514,7 +533,7 @@ def main() -> None:
     parser.add_argument("--source", required=True, help="Independently verified source reference")
     parser.add_argument("--csv", type=Path, required=True, help="CSV with a symbol header")
     parser.add_argument("--expected-count", type=int, help="Source-reported security count")
-    parser.add_argument("--source-kind", choices=sorted(SOURCE_KINDS), default="verified_public")
+    parser.add_argument("--source-kind", choices=sorted(SOURCE_KINDS), default="unknown")
     parser.add_argument("--confidence", choices=sorted(CONFIDENCE_LEVELS))
     args = parser.parse_args()
     if not args.csv.is_file() or args.csv.stat().st_size > 1_000_000:

@@ -73,6 +73,9 @@ Optional `--expected-count NUMBER` guards against a short/partial source export.
 Use **the security count provided by that specific dated source**, never a
 hard-coded assumption that SP500 must contain exactly 500 securities: multiple
 share classes can mean a different securities count from the index name.
+The import defaults to `unknown` source kind and unknown completeness. Pass an
+explicit `--source-kind` and source-reported `--expected-count` only when the
+source evidence supports those claims.
 A valid import replaces only the **specified index and effective date**,
 transactionally, while preserving other dates and indexes. Duplicate symbols,
 invalid source identifiers, and known non-stock catalog entries are rejected.
@@ -131,9 +134,10 @@ GET /api/v1/market-data/indexes/symbol/AAPL/memberships?as_of=2026-10-23
 ```
 
 The changes endpoint compares the latest available snapshots on or before the
-two requested dates and returns `added`/`removed` records. If either side has
-no local snapshot, it returns `status: "unknown"` rather than claiming that no
-changes occurred.
+two requested dates and returns `added`/`removed` records. It returns
+`status: "available"` only for complete official/public snapshots,
+`status: "uncertain"` for incomplete, proxy, or unverified snapshots, and
+`status: "unknown"` when either side has no local snapshot.
 
 Both Tauri desktop and the Vite development client use the same typed
 responses through their existing local transports. No external API calls
