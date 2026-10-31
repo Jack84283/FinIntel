@@ -53,11 +53,15 @@ def _parse_date(value: str) -> date:
 
 
 def _validate_range(start: date, end: date) -> None:
-    today = datetime.now(UTC).date()
+    today = _today()
     if start > end:
         raise ValueError("Index backfill start date must not be after the end date")
     if end > today:
         raise ValueError("Index backfill dates cannot be in the future")
+
+
+def _today() -> date:
+    return datetime.now(UTC).date()
 
 
 def _save(path: Path, state: dict[str, object]) -> None:
@@ -96,6 +100,29 @@ def _save(path: Path, state: dict[str, object]) -> None:
 
 def _default_state_path(db: Path, code: str) -> Path:
     return db.with_suffix("." + code.lower() + ".index-backfill.json")
+
+
+def _saved_checkpoint_end(path: Path, *, code: str, start: date, chunk_days: int) -> date | None:
+    """Reuse an omitted end date only for a matching checkpoint configuration."""
+    if not path.is_file() or path.is_symlink():
+        return None
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        return None
+    if (
+        raw.get("version") != CHECKPOINT_VERSION
+        or raw.get("code") != code
+        or raw.get("start") != start.isoformat()
+        or raw.get("chunk_days") != chunk_days
+    ):
+        return None
+    saved_end = raw.get("end")
+    if not isinstance(saved_end, str):
+        return None
+    try:
+        return date.fromisoformat(saved_end)
+    except ValueError as exc:
+        raise ValueError("Existing index backfill checkpoint has an invalid end date") from exc
 
 
 def _database_identity(path: Path) -> dict[str, object]:
@@ -212,11 +239,22 @@ def run(
     if not 1 <= chunk_days <= MAX_CHUNK_DAYS:
         raise ValueError(f"chunk_days must be between 1 and {MAX_CHUNK_DAYS}")
     first = start or DEFAULT_START
-    last = end or datetime.now(UTC).date()
-    _validate_range(first, last)
     effective_db = db or database_path()
     state_path = state_path or _default_state_path(effective_db, code)
     identity = _database_identity(effective_db)
+    if end is None:
+        last = (
+            _saved_checkpoint_end(
+                state_path,
+                code=code,
+                start=first,
+                chunk_days=chunk_days,
+            )
+            or _today()
+        )
+    else:
+        last = end
+    _validate_range(first, last)
 
     lock_path = state_path.with_suffix(state_path.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)

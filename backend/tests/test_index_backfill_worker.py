@@ -248,3 +248,32 @@ def test_checkpoint_survives_ordinary_sqlite_writes(tmp_path):
         conn.execute("INSERT INTO observations VALUES ('later')")
 
     assert index_backfill_worker.run(**args) == 0
+
+
+def test_omitted_end_reuses_checkpoint_on_the_following_day(tmp_path, monkeypatch):
+    current_day = [date(2026, 10, 31)]
+    monkeypatch.setattr(index_backfill_worker, "_today", lambda: current_day[0])
+    calls = []
+
+    def acquire(_code, **kwargs):
+        calls.append((kwargs["start"], kwargs["end"]))
+        return {"status": "stored", "sessions": 1}
+
+    checkpoint = tmp_path / "sp500.json"
+    args = {
+        "code": "SP500",
+        "state_path": checkpoint,
+        "start": date(2020, 1, 1),
+        "chunk_days": 3650,
+        "once": True,
+        "acquire": acquire,
+    }
+    assert index_backfill_worker.run(**args) == 0
+    saved = json.loads(checkpoint.read_text())
+    assert saved["end"] == "2026-10-31"
+
+    current_day[0] = date(2026, 11, 1)
+    assert index_backfill_worker.run(**args) == 0
+    assert saved["end"] == "2026-10-31"
+    assert calls[0][1] == date(2026, 10, 31)
+    assert len(calls) == 1
