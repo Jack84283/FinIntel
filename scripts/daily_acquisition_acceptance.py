@@ -36,6 +36,7 @@ DEFAULT_SYMBOL = "AAPL"
 DEFAULT_INDEX = "SP500"
 EQUITY_PROVIDERS = ("alpaca_sip", "tiingo", "alpha_vantage")
 INDEX_CODES = ("SP500", "DJIA", "NASDAQCOM", "NDX", "VIX")
+DESKTOP_PLATFORMS = ("macos", "windows", "linux")
 REPORT_VERSION = 1
 
 
@@ -65,6 +66,48 @@ def _check(
     }
 
 
+def _checks_verdict(checks: list[dict[str, object]]) -> str:
+    statuses = [check["status"] for check in checks]
+    if "fail" in statuses:
+        return "fail"
+    if any(status in ("blocked", "not_run") for status in statuses):
+        return "review"
+    return "pass"
+
+
+def _acceptance_matrix(
+    live_results: dict[str, dict[str, object]],
+) -> list[dict[str, object]]:
+    """Return every required production check, including omitted checks."""
+    matrix: list[dict[str, object]] = []
+    for provider in (*EQUITY_PROVIDERS, "fred"):
+        result = live_results.get(provider)
+        matrix.append(
+            {
+                "id": "provider." + provider,
+                "category": "real_provider",
+                "status": result["status"] if result else "not_run",
+                "summary": (
+                    result["summary"]
+                    if result
+                    else "Provider was not selected for this acceptance run."
+                ),
+                "evidence": result.get("evidence", {}) if result else {},
+            }
+        )
+    for platform_name in DESKTOP_PLATFORMS:
+        matrix.append(
+            {
+                "id": "desktop." + platform_name,
+                "category": "packaged_desktop",
+                "status": "not_run",
+                "summary": "No clean installed-desktop evidence was supplied.",
+                "evidence": {},
+            }
+        )
+    return matrix
+
+
 def _database_path(value: Path | None) -> tuple[Path, bool]:
     """Return a new database path and whether the harness owns its directory."""
     if value is None:
@@ -78,6 +121,55 @@ def _database_path(value: Path | None) -> tuple[Path, bool]:
         raise ValueError("Acceptance --db-path must not already exist")
     candidate.parent.mkdir(parents=True, exist_ok=True)
     return candidate, False
+
+
+def _known_database_paths() -> set[Path]:
+    paths = {(ROOT / "data" / "finintel.sqlite3").resolve()}
+    configured = os.environ.get("FININTEL_DB_PATH")
+    if configured:
+        paths.add(Path(configured).expanduser().resolve())
+    for directory in (ROOT / "data", ROOT / "data" / "backups"):
+        if directory.is_dir():
+            for pattern in ("*.db", "*.sqlite", "*.sqlite3", "*.db-*", "*.sqlite*"):
+                paths.update(item.resolve() for item in directory.glob(pattern))
+    return paths
+
+
+def _validate_output_path(output: Path, database_paths: set[Path]) -> Path:
+    candidate = output.expanduser().resolve()
+    database_suffixes = {".db", ".sqlite", ".sqlite3", ".wal", ".shm", ".journal"}
+    if candidate in database_paths or candidate.suffix.lower() in database_suffixes:
+        raise ValueError("Refusing to write an acceptance report over a SQLite path")
+    if candidate.exists() and candidate.is_file():
+        with candidate.open("rb") as stream:
+            if stream.read(16) == b"SQLite format 3\x00":
+                raise ValueError(
+                    "Refusing to replace an existing SQLite database with a report"
+                )
+    return candidate
+
+
+def _atomic_write_report(output: Path, report: dict[str, object]) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=output.parent,
+            prefix="." + output.name + ".",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_name = temporary.name
+            json.dump(report, temporary, indent=2)
+            temporary.write("\n")
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, output)
+    finally:
+        if temporary_name:
+            Path(temporary_name).unlink(missing_ok=True)
 
 
 @contextmanager
@@ -132,6 +224,12 @@ def _synthetic_batch():
 
 
 def _sqlite_evidence(db: Path) -> dict[str, object]:
+    if not db.is_file():
+        return {
+            "integrity_check": "not_run",
+            "duplicate_price_keys": 0,
+            "duplicate_index_keys": 0,
+        }
     with sqlite3.connect(db) as connection:
         integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
         duplicate_prices = connection.execute(
@@ -151,6 +249,75 @@ def _sqlite_evidence(db: Path) -> dict[str, object]:
             "duplicate_price_keys": duplicate_prices,
             "duplicate_index_keys": duplicate_indexes,
         }
+
+
+def _coverage_evidence(db: Path) -> dict[str, object]:
+    if not db.is_file():
+        return {"equity": [], "indexes": []}
+    with sqlite3.connect(db) as connection:
+        equity = [
+            dict(
+                zip(
+                    ("symbol", "provider", "sessions", "first_session", "last_session"),
+                    row,
+                )
+            )
+            for row in connection.execute(
+                "SELECT s.symbol,s.provider,COUNT(*),MIN(p.session_date),MAX(p.session_date) "
+                "FROM series s JOIN daily_prices p ON p.series_id=s.id "
+                "GROUP BY s.symbol,s.provider ORDER BY s.symbol,s.provider"
+            )
+        ]
+        indexes = [
+            dict(
+                zip(
+                    ("code", "provider", "sessions", "first_session", "last_session"),
+                    row,
+                )
+            )
+            for row in connection.execute(
+                "SELECT index_code,provider,COUNT(*),MIN(session_date),MAX(session_date) "
+                "FROM index_daily_closes GROUP BY index_code,provider "
+                "ORDER BY index_code,provider"
+            )
+        ]
+    return {"equity": equity, "indexes": indexes}
+
+
+def _market_data_counts(db: Path) -> dict[str, int]:
+    if not db.is_file():
+        return {"daily_prices": 0, "index_daily_closes": 0}
+    with sqlite3.connect(db) as connection:
+        return {
+            "daily_prices": connection.execute(
+                "SELECT COUNT(*) FROM daily_prices"
+            ).fetchone()[0],
+            "index_daily_closes": connection.execute(
+                "SELECT COUNT(*) FROM index_daily_closes"
+            ).fetchone()[0],
+        }
+
+
+def _live_storage_check(db: Path) -> dict[str, object]:
+    evidence = {**_sqlite_evidence(db), "coverage": _coverage_evidence(db)}
+    rows = [*evidence["coverage"]["equity"], *evidence["coverage"]["indexes"]]
+    if not rows:
+        status = "blocked"
+        summary = "No live provider acquisition produced stored observations."
+    else:
+        status = (
+            "pass"
+            if evidence["integrity_check"] == "ok"
+            and evidence["duplicate_price_keys"] == 0
+            and evidence["duplicate_index_keys"] == 0
+            and all(
+                row["sessions"] > 0 and row["first_session"] <= row["last_session"]
+                for row in rows
+            )
+            else "fail"
+        )
+        summary = "Live SQLite integrity, duplicate-key, and coverage checks completed."
+    return {"status": status, "summary": summary, "evidence": evidence}
 
 
 def _run_synthetic(db: Path) -> list[dict[str, object]]:
@@ -472,17 +639,19 @@ def _live_index(db: Path, codes: list[str]) -> dict[str, object]:
 
 def _report(
     mode: str,
-    db: Path,
-    checks: list[dict[str, object]],
+    synthetic_db: Path,
+    live_db: Path | None,
+    synthetic_checks: list[dict[str, object]],
+    live_checks: list[dict[str, object]],
+    live_results: dict[str, dict[str, object]],
     started_at: datetime,
 ) -> dict[str, object]:
-    statuses = [check["status"] for check in checks]
-    if "fail" in statuses:
-        verdict = "fail"
-    elif any(status in ("blocked", "not_run") for status in statuses):
-        verdict = "review"
-    else:
-        verdict = "pass"
+    synthetic_verdict = _checks_verdict(synthetic_checks)
+    matrix = _acceptance_matrix(live_results)
+    production_verdict = (
+        "not_run" if mode != "live" else _checks_verdict(live_checks + matrix)
+    )
+    verdict = "synthetic_" + synthetic_verdict if mode != "live" else production_verdict
     return {
         "report_version": REPORT_VERSION,
         "run": {
@@ -491,14 +660,23 @@ def _report(
             "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "platform": platform.platform(),
             "python": platform.python_version(),
-            "database": "temporary disposable SQLite database"
-            if db.parent.name.startswith("finintel-daily-acceptance-")
-            else "explicit disposable SQLite path",
+            "synthetic_database": str(synthetic_db),
+            "live_database": str(live_db) if live_db else None,
             "automatic_daily_acquisition_enabled": False,
             "credentials_logged": False,
         },
         "verdict": verdict,
-        "checks": checks,
+        "synthetic_acceptance": {
+            "verdict": synthetic_verdict,
+            "checks": synthetic_checks,
+        },
+        "production_acceptance": {
+            "verdict": production_verdict,
+            "checks": live_checks,
+            "matrix": matrix,
+        },
+        "checks": synthetic_checks + live_checks,
+        "acceptance_matrix": matrix,
     }
 
 
@@ -506,7 +684,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("synthetic", "live"), default="synthetic")
     parser.add_argument(
-        "--db-path", type=Path, help="New disposable SQLite path; it must not exist"
+        "--db-path",
+        type=Path,
+        help="New disposable SQLite path for this mode; it must not exist",
+    )
+    parser.add_argument(
+        "--synthetic-db-path",
+        type=Path,
+        help="New disposable SQLite path for synthetic checks; it must not exist",
+    )
+    parser.add_argument(
+        "--live-db-path",
+        type=Path,
+        help="New disposable SQLite path for live checks; it must not exist",
     )
     parser.add_argument(
         "--output", type=Path, default=Path("data/daily-acquisition-acceptance.json")
@@ -515,47 +705,129 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--symbol", action="append")
     parser.add_argument("--index", dest="indexes", action="append", choices=INDEX_CODES)
     args = parser.parse_args(argv)
+    if args.db_path and (args.synthetic_db_path or args.live_db_path):
+        parser.error(
+            "--db-path cannot be combined with --synthetic-db-path or --live-db-path"
+        )
     if args.mode == "live" and not (args.provider or args.indexes):
         args.provider = list(EQUITY_PROVIDERS)
         args.indexes = [DEFAULT_INDEX]
+    synthetic_path = args.synthetic_db_path
+    live_path = args.live_db_path
+    if args.db_path:
+        if args.mode == "live":
+            live_path = args.db_path
+        else:
+            synthetic_path = args.db_path
+    output = args.output
+    try:
+        output = _validate_output_path(
+            output,
+            _known_database_paths()
+            | {
+                path.expanduser().resolve()
+                for path in (synthetic_path, live_path)
+                if path is not None
+            },
+        )
+    except (OSError, ValueError) as exc:
+        print("Acceptance harness failed:", _redact_message(exc), file=sys.stderr)
+        return 1
     started_at = datetime.now(UTC)
 
     try:
-        with _disposable_database(args.db_path) as db:
-            checks = _run_synthetic(db)
-            if args.mode == "live":
-                for provider in args.provider or []:
-                    result = _live_equity(db, provider, args.symbol or [DEFAULT_SYMBOL])
-                    checks.append(
+        with _disposable_database(synthetic_path) as synthetic_db:
+            synthetic_checks = _run_synthetic(synthetic_db)
+            if args.mode != "live":
+                report = _report(
+                    args.mode,
+                    synthetic_db,
+                    None,
+                    synthetic_checks,
+                    [],
+                    {},
+                    started_at,
+                )
+            else:
+                with _disposable_database(live_path) as live_db:
+                    live_checks: list[dict[str, object]] = []
+                    initial_counts = _market_data_counts(live_db)
+                    live_checks.append(
                         _check(
-                            "live-equity-" + provider,
-                            result["status"],
-                            result["summary"],
-                            result["evidence"],
+                            "live-database-start-empty",
+                            "pass"
+                            if initial_counts["daily_prices"] == 0
+                            and initial_counts["index_daily_closes"] == 0
+                            else "fail",
+                            "Live acceptance starts without synthetic market observations.",
+                            initial_counts,
                         )
                     )
-                if args.indexes:
-                    result = _live_index(db, args.indexes)
-                    checks.append(
+                    live_results: dict[str, dict[str, object]] = {}
+                    for provider in args.provider or []:
+                        result = _live_equity(
+                            live_db, provider, args.symbol or [DEFAULT_SYMBOL]
+                        )
+                        live_results[provider] = result
+                        live_checks.append(
+                            _check(
+                                "live-equity-" + provider,
+                                result["status"],
+                                result["summary"],
+                                result["evidence"],
+                            )
+                        )
+                    if args.indexes:
+                        result = _live_index(live_db, args.indexes)
+                        live_results["fred"] = result
+                        live_checks.append(
+                            _check(
+                                "live-index-fred",
+                                result["status"],
+                                result["summary"],
+                                result["evidence"],
+                            )
+                        )
+                    storage = _live_storage_check(live_db)
+                    live_checks.append(
                         _check(
-                            "live-index-fred",
-                            result["status"],
-                            result["summary"],
-                            result["evidence"],
+                            "live-sqlite-integrity-coverage",
+                            storage["status"],
+                            storage["summary"],
+                            storage["evidence"],
                         )
                     )
-            report = _report(args.mode, db, checks, started_at)
+                    report = _report(
+                        args.mode,
+                        synthetic_db,
+                        live_db,
+                        synthetic_checks,
+                        live_checks,
+                        live_results,
+                        started_at,
+                    )
     except (OSError, ValueError, sqlite3.Error) as exc:
         print("Acceptance harness failed:", _redact_message(exc), file=sys.stderr)
         return 1
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    print(f"Acceptance report: {args.output}")
+    try:
+        _atomic_write_report(output, report)
+    except OSError as exc:
+        print("Acceptance harness failed:", _redact_message(exc), file=sys.stderr)
+        return 1
+    print(f"Acceptance report: {output}")
     print("Verdict:", str(report["verdict"]).upper())
     for check in report["checks"]:
         print(f"{str(check['status']).upper():8} {check['id']}: {check['summary']}")
-    return {"pass": 0, "review": 2, "fail": 1}[str(report["verdict"])]
+    return {
+        "synthetic_pass": 0,
+        "synthetic_review": 2,
+        "synthetic_fail": 1,
+        "pass": 0,
+        "review": 2,
+        "fail": 1,
+        "not_run": 2,
+    }[str(report["verdict"])]
 
 
 if __name__ == "__main__":

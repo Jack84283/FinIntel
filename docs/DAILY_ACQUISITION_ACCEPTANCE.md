@@ -8,8 +8,9 @@ provider credentials or platforms passed.
 ## Safety rules
 
 - Automatic daily acquisition stays disabled. The harness does not enable it.
-- Every run uses a newly created SQLite database. The default is a temporary
-  directory; `--db-path` is accepted only when the target file does not exist.
+- Every run uses newly created SQLite databases. Live mode always gets a
+  database separate from synthetic checks; the default is a temporary
+  directory, and explicit paths must not already exist.
 - The harness refuses `data/finintel.sqlite3` and does not read the normal user
   database, backups, or downloaded snapshots.
 - Provider keys are read only through the existing credential adapters. They
@@ -42,6 +43,10 @@ python scripts/daily_acquisition_acceptance.py --mode live \
   --symbol AAPL --index SP500 \
   --output /private/tmp/finintel-live-acceptance.json
 ```
+
+Use `--synthetic-db-path` and `--live-db-path` when both databases must be
+retained for inspection. `--db-path` is a compatibility shorthand for the
+selected mode and is the live database when `--mode live` is used.
 
 Omit providers that are not configured. If a provider has no credentials, an
 invalid entitlement, a local budget exhaustion, an upstream quota response, or
@@ -79,7 +84,8 @@ acceptance. Until a platform is exercised manually, record it as `not_run`.
 ## Report interpretation
 
 The JSON report contains `pass`, `fail`, `blocked`, or `not_run` for each check.
-The overall verdict is `PASS` only when every recorded check passes; `REVIEW`
-means manual work is blocked or not run; `FAIL` means a check produced an
-unexpected defect. Keep reports containing live evidence outside Git unless
-they have been reviewed for private data and provider terms.
+Synthetic success is reported as `synthetic_pass` and does not certify
+production acceptance. A live report is `PASS` only when every provider and
+packaged-desktop matrix entry passes; omitted or unperformed entries keep it at
+`REVIEW`, while a defect produces `FAIL`. Keep reports containing live evidence
+outside Git unless they have been reviewed for private data and provider terms.
