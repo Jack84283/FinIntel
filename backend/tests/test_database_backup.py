@@ -78,7 +78,7 @@ def test_manual_backup_only(tmp_path):
     assert len(list_backups(db=path)) == 1
     inspected = inspect_backup(manual["id"], db=path)
     assert inspected["counts"]["instruments"] == 1
-    assert inspected["schema_version"] == 13
+    assert inspected["schema_version"] == 14
     # The UI preview stays lightweight even for tens of millions of price rows.
     assert "daily_prices" not in inspected["counts"]
     assert manual["reason"] == "manual"

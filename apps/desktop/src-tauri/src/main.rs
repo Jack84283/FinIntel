@@ -338,8 +338,8 @@ async fn validation_status() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 async fn validation_start(checks: Vec<String>) -> Result<serde_json::Value, String> {
-    const ALLOWED: [&str; 5] = ["coverage", "integrity", "corporate", "provider", "performance"];
-    if checks.is_empty() || checks.len() > 5
+    const ALLOWED: [&str; 6] = ["coverage", "integrity", "corporate", "provider", "performance", "quality"];
+    if checks.is_empty() || checks.len() > 6
         || checks.iter().any(|check| !ALLOWED.contains(&check.as_str()))
     {
         return Err("Invalid validation checks.".to_string());

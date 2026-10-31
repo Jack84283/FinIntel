@@ -12,6 +12,7 @@ const options: { id: ValidationCheck; label: string; detail: string }[] = [
   { id: "corporate", label: "P1 · Corporate-action screening", detail: "Potential split-like jumps; not confirmed corporate actions" },
   { id: "provider", label: "P1 · Provider consistency", detail: "Compare overlapping dates with identical adjustment labels" },
   { id: "performance", label: "P2 · Query performance", detail: "Report time spent reading series and slowest queries" },
+  { id: "quality", label: "P0 · Durable quality findings", detail: "Persist redacted anomaly candidates for review; observations are never changed" },
 ];
 
 export function DataValidationPage() {
@@ -81,7 +82,7 @@ export function DataValidationPage() {
   };
   return (
     <section className="space-y-2" aria-labelledby="validation-title">
-      <PageHeader id="validation-title" breadcrumb={t("FinIntel / Data & Operations")} title={t("Data Validation")} subtitle={t("Run read-only quality checks on locally stored historical market data.")} />
+      <PageHeader id="validation-title" breadcrumb={t("FinIntel / Data & Operations")} title={t("Data Validation")} subtitle={t("Run local quality checks and record reviewable candidates; stored observations are never changed.")} />
       <Card>
         <CardHeader>
           <CardTitle>{t("Validation checks")}</CardTitle>
@@ -149,7 +150,7 @@ export function DataValidationPage() {
                 ["Series", metric("coverage", "series_count")],
                 ["Price records", metric("integrity", "price_rows")],
                 ["Integrity issues", String(Object.values((results.integrity?.issues ?? {}) as Record<string, number>).reduce((a, b) => a + (typeof b === "number" ? b : 0), 0))],
-                ["XNYS session gap candidates", metric("coverage", "xnys_internal_gap_candidates")],
+                ["Quality candidates", metric("quality", "finding_count")],
               ].map(([label, value]) => <div className="rounded-md border border-border p-3" key={label}>
                 <p className="text-xs text-muted-foreground">{t(label)}</p><p className="mt-1 text-xl font-semibold tabular-nums">{value}</p>
               </div>)}
@@ -171,6 +172,10 @@ export function DataValidationPage() {
             {results.provider && <div className="space-y-2"><h3 className="font-semibold">{t("P1 · Provider comparisons")}</h3>
               <p className="text-sm">{t("Compared pairs:")} {metric("provider", "cross_provider_pairs_compared")} · {t("Differences over 1%:")} {metric("provider", "cross_provider_close_divergences_over_1pct")}</p>
               {detailTable("provider", "cross_provider_comparisons", ["symbol", "overlap_sessions", "close_divergence_over_1pct"], "Provider differences")}
+            </div>}
+            {results.quality && <div className="space-y-2"><h3 className="font-semibold">{t("P0 · Durable quality findings")}</h3>
+              <p className="text-sm text-muted-foreground">{t("Candidates are persisted with evidence and review state; no prices are changed.")} {t("Total candidates:")} {metric("quality", "finding_count")}.</p>
+              {detailTable("quality", "examples", ["code", "provider", "session_date", "finding_type", "severity", "confidence", "rule"], "Quality candidates")}
             </div>}
             {results.performance && <div className="space-y-2"><h3 className="font-semibold">{t("P2 · Performance")}</h3>
               <p className="text-sm">{t("Diagnostic runtime:")} {metric("performance", "elapsed_seconds")} {t("seconds")}</p>

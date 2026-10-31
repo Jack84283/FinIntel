@@ -1,6 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
-export type ValidationCheck = "coverage" | "integrity" | "corporate" | "provider" | "performance";
+export type ValidationCheck = "coverage" | "integrity" | "corporate" | "provider" | "performance" | "quality";
 export interface ValidationJob {
   id?: string;
   checks?: ValidationCheck[];

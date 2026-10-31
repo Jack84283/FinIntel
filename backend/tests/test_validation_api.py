@@ -20,6 +20,7 @@ def test_validation_start_and_result(monkeypatch, tmp_path):
     db.touch()
     monkeypatch.setattr(validation_api, "database_path", lambda: db)
     monkeypatch.setattr(validation_api, "validate", lambda path: {"price_rows": 2, "issues": {}})
+    monkeypatch.setattr(validation_api, "run_quality_scan", lambda path: {"finding_count": 0})
     with validation_api._lock:
         validation_api._job = None
     client = managed_client(monkeypatch)
@@ -62,7 +63,7 @@ def test_reference_action_explicit(monkeypatch, tmp_path):
     )
 
 
-def test_all_five_checks_run_and_return_expected_sections(monkeypatch, tmp_path):
+def test_all_six_checks_run_and_return_expected_sections(monkeypatch, tmp_path):
     db = tmp_path / "prices.sqlite3"
     db.touch()
     monkeypatch.setattr(validation_api, "database_path", lambda: db)
@@ -97,6 +98,11 @@ def test_all_five_checks_run_and_return_expected_sections(monkeypatch, tmp_path)
         "benchmark",
         lambda path: {"all_acceptance_targets_met": True, "sample_count": 1},
     )
+    monkeypatch.setattr(
+        validation_api,
+        "run_quality_scan",
+        lambda path: {"status": "completed", "finding_count": 0, "examples": []},
+    )
     with validation_api._lock:
         validation_api._job = None
     client = managed_client(monkeypatch)
@@ -114,6 +120,7 @@ def test_all_five_checks_run_and_return_expected_sections(monkeypatch, tmp_path)
         "corporate",
         "provider",
         "performance",
+        "quality",
         "limitations",
     }
     assert status["results"]["coverage"]["xnys_internal_gap_candidates"] == 0

@@ -296,7 +296,7 @@ def test_v12_migration_backfills_membership_metadata_without_new_download(tmp_pa
     migrated = _write_connection(db)
     migrated.close()
     with sqlite3.connect(db) as check:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 14
         assert check.execute("SELECT COUNT(*) FROM index_memberships").fetchone()[0] == 1
         metadata = check.execute(
             "SELECT source_kind,source_as_of,expected_count,member_count,"
@@ -392,7 +392,7 @@ def test_v5_migration_preserves_old_index_snapshots(tmp_path):
     conn.close()
     load_membership("NDX", "2026-10-02", "added", ["AAPL"], db=db)
     with sqlite3.connect(db) as check:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 14
         assert check.execute("SELECT COUNT(*) FROM index_memberships").fetchone()[0] == 2
     assert {x["index_code"] for x in memberships("AAPL", db=db)} == {"SP500", "NDX"}
 

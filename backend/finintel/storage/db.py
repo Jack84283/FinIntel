@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import HistoricalBatch
 from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -344,6 +344,51 @@ CREATE TABLE IF NOT EXISTS index_membership_snapshots (
 SCHEMA_V13_MEMBERSHIP_INDEX = """
 CREATE INDEX IF NOT EXISTS index_membership_snapshots_source
     ON index_membership_snapshots(index_code, as_of DESC, source_kind);
+"""
+
+# Quality findings are additive review metadata. They never replace or mutate
+# observations, acquisition history, index coverage, or membership snapshots.
+SCHEMA_V14_QUALITY_TABLE = """
+CREATE TABLE IF NOT EXISTS data_quality_findings (
+    id INTEGER PRIMARY KEY,
+    instrument_kind TEXT NOT NULL CHECK(instrument_kind IN ('equity', 'index')),
+    code TEXT NOT NULL,
+    series_id INTEGER REFERENCES series(id) ON DELETE SET NULL,
+    provider TEXT NOT NULL,
+    session_date TEXT,
+    finding_type TEXT NOT NULL CHECK(finding_type IN (
+        'missing_session', 'price_anomaly', 'ohlcv_anomaly',
+        'provider_divergence', 'duplicate', 'stale_observation'
+    )),
+    severity TEXT NOT NULL CHECK(severity IN ('info', 'warning', 'error')),
+    confidence TEXT NOT NULL CHECK(confidence IN ('low', 'medium', 'high')),
+    rule TEXT NOT NULL,
+    evidence_json TEXT NOT NULL,
+    fingerprint TEXT NOT NULL UNIQUE,
+    review_state TEXT NOT NULL DEFAULT 'candidate' CHECK(
+        review_state IN ('candidate', 'confirmed', 'rejected', 'accepted_correction')
+    ),
+    resolution_note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+SCHEMA_V14_QUALITY_INDEX = """
+CREATE INDEX IF NOT EXISTS data_quality_findings_filter
+ON data_quality_findings(review_state, finding_type, provider, session_date);
+CREATE INDEX IF NOT EXISTS data_quality_findings_series
+ON data_quality_findings(series_id, code, session_date);
+CREATE TABLE IF NOT EXISTS data_quality_reviews (
+    id INTEGER PRIMARY KEY,
+    finding_id INTEGER NOT NULL REFERENCES data_quality_findings(id) ON DELETE CASCADE,
+    from_state TEXT NOT NULL,
+    to_state TEXT NOT NULL,
+    note TEXT,
+    reviewed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS data_quality_reviews_finding
+ON data_quality_reviews(finding_id, reviewed_at DESC, id DESC);
 """
 
 # Keep this seed data in the storage migration so a read-only API can expose a
@@ -751,6 +796,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if conn.in_transaction:
                 conn.rollback()
             raise StorageError("Unable to migrate index membership metadata to v13") from exc
+        version = 13
+    if version == 13:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(SCHEMA_V14_QUALITY_TABLE)
+            for statement in SCHEMA_V14_QUALITY_INDEX.split(";"):
+                statement = statement.strip()
+                if statement:
+                    conn.execute(statement)
+            conn.execute("PRAGMA user_version = 14")
+            conn.commit()
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to initialize data-quality storage v14") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:
