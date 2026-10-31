@@ -37,6 +37,7 @@ def test_daily_status_defaults_and_settings_are_local_only(tmp_path, monkeypatch
         assert payload["scheduled_execution_time"] == "20:30"
         assert payload["job"]["id"] is None
         assert isinstance(payload["next_scheduled_execution"], str)
+        assert payload["duration_ms"] is None
         assert "provider_quota" in payload
         assert payload["provider_quota"]["alpaca_sip"]["requests_used"] == 0
 

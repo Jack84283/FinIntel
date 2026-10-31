@@ -1,7 +1,7 @@
 import { PageHeader } from "./PageHeader";
 import { useLocale } from "./localization";
 import { useNotify } from "./notifications";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { BarChart3, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import type { ImportRecord } from "./market";
 import type { MarketSelection } from "./DataAcquisitionPage";
 import type { AcquisitionProvider } from "./market-acquisition-api";
 import { fetchDailyJob, searchDailyHistory, type DailyJob } from "./daily-acquisition-api";
+import { isCurrentDetailRequest } from "./action-history-state";
 
 /** Read-only history of successful persisted imports. No events are fabricated. */
 export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?: MarketSelection) => void }) {
@@ -139,6 +140,7 @@ function DailyJobHistory() {
   const [total, setTotal] = useState(0);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detail, setDetail] = useState<DailyJob | null>(null);
+  const detailRequestRef = useRef(0);
   const pageSize = 20;
 
   useEffect(() => {
@@ -164,13 +166,19 @@ function DailyJobHistory() {
   const toggleDetails = (jobId: string | null) => {
     if (!jobId) return;
     if (expanded === jobId) {
+      detailRequestRef.current += 1;
       setExpanded(null);
       setDetail(null);
       return;
     }
+    const requestId = detailRequestRef.current + 1;
+    detailRequestRef.current = requestId;
     setExpanded(jobId);
     setDetail(null);
-    void fetchDailyJob(jobId).then(setDetail).catch((reason: unknown) => {
+    void fetchDailyJob(jobId).then((result) => {
+      if (isCurrentDetailRequest(detailRequestRef.current, requestId)) setDetail(result);
+    }).catch((reason: unknown) => {
+      if (!isCurrentDetailRequest(detailRequestRef.current, requestId)) return;
       setError(reason instanceof Error ? reason.message : String(reason));
       notify(t("Daily acquisition job details could not be loaded."), "error");
     });
@@ -220,6 +228,7 @@ function DailyJobHistory() {
               <th scope="col" className="px-3 py-2 text-right">{t("Duration")}</th>
               <th scope="col" className="px-3 py-2 text-right">{t("Completed / Failed / Incomplete / Pending")}</th>
               <th scope="col" className="px-3 py-2 text-right">{t("New / Updated / Unchanged")}</th>
+              <th scope="col" className="px-3 py-2 text-right">{t("Instrument details")}</th>
             </tr></thead>
             <tbody>{items.map((item) => <Fragment key={item.id}>
               <tr className="border-t border-border">
@@ -229,9 +238,10 @@ function DailyJobHistory() {
                 <td className="px-3 py-2"><Badge variant={item.status === "completed" ? "success" : item.status === "failed" || item.status === "partial" ? "destructive" : "outline"}>{t(item.status)}</Badge></td>
                 <td className="px-3 py-2 text-right">{item.duration_ms === null ? "—" : `${Math.round(item.duration_ms / 1000)}s`}</td>
                 <td className="px-3 py-2 text-right">{item.completed_instruments} / {item.failed_instruments} / {item.incomplete_instruments} / {item.pending_instruments}</td>
+                <td className="px-3 py-2 text-right">{item.inserted} / {item.updated} / {item.unchanged}</td>
                 <td className="px-3 py-2 text-right"><Button type="button" size="sm" variant="ghost" onClick={() => toggleDetails(item.id)}>{expanded === item.id ? t("Hide details") : t("Instrument details")}</Button></td>
               </tr>
-              {expanded === item.id && <tr className="border-t border-border bg-muted/20"><td colSpan={7} className="px-3 py-3">
+              {expanded === item.id && <tr className="border-t border-border bg-muted/20"><td colSpan={8} className="px-3 py-3">
                 {!detail && <span className="text-muted-foreground">{t("Loading instrument details…")}</span>}
                 {detail && <div className="space-y-2">
                   {detail.last_error && <p className="text-destructive">{detail.last_error}</p>}

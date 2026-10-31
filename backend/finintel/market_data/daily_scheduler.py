@@ -37,14 +37,15 @@ from finintel.market_data.daily_acquisition_store import (
     get_settings,
     heartbeat,
     job_control,
-    mark_provider_status,
     list_automatic_jobs,
+    mark_provider_status,
     merge_job_items,
+    provider_request_guard,
     provider_usage_status,
     record_item,
     release_lock,
-    reserve_provider_request,
     requeue_job,
+    reset_provider_status,
     resumable_job,
     retry_failed_job,
     set_current_instrument,
@@ -460,6 +461,9 @@ class DailyAcquisitionScheduler:
         active = get_active_job()
         if active is not None:
             raise RuntimeError("A daily acquisition job is already active")
+        reset_provider_status(str(settings["primary_provider"]))
+        if isinstance(settings["secondary_provider"], str):
+            reset_provider_status(str(settings["secondary_provider"]))
         job = create_job(
             kind="manual",
             provider=str(settings["primary_provider"]),
@@ -491,6 +495,10 @@ class DailyAcquisitionScheduler:
         return result
 
     def retry_failed(self, job_id: str) -> dict[str, object] | None:
+        settings = get_settings()
+        reset_provider_status(str(settings["primary_provider"]))
+        if isinstance(settings["secondary_provider"], str):
+            reset_provider_status(str(settings["secondary_provider"]))
         result = retry_failed_job(job_id)
         if result and result.get("id"):
             self._launch(str(result["id"]))
@@ -570,9 +578,7 @@ class DailyAcquisitionScheduler:
                 for provider, usage in provider_usage_status().items()
                 if usage.get("quota_state") in {"quota_exhausted", "auth_failed"}
             }
-            latest_by_provider = {
-                provider: latest_sessions(provider) for provider in PROVIDERS
-            }
+            latest_by_provider = {provider: latest_sessions(provider) for provider in PROVIDERS}
             latest_eligible_session = latest_expected_session()
             scheduled_session = (
                 date.fromisoformat(str(job["schedule_date"])) if job.get("schedule_date") else None
@@ -703,15 +709,7 @@ class DailyAcquisitionScheduler:
     @staticmethod
     def _request_guard(provider: str):
         """Reserve a durable request slot before each provider HTTP request."""
-
-        def reserve() -> None:
-            reservation = reserve_provider_request(provider)
-            wait_seconds = float(reservation.get("wait_seconds", 0.0))
-            if wait_seconds > 0:
-                time.sleep(wait_seconds)
-            mark_provider_status(provider, "available")
-
-        return reserve
+        return provider_request_guard(provider)
 
     def _run_index(
         self,
@@ -771,7 +769,12 @@ class DailyAcquisitionScheduler:
                 last_error = exc
                 append_provider_error(
                     job_id,
-                    {**_safe_error(exc), "provider": "fred", "instrument": code, "quota": isinstance(exc, ProviderRateLimited)},
+                    {
+                        **_safe_error(exc),
+                        "provider": "fred",
+                        "instrument": code,
+                        "quota": isinstance(exc, ProviderRateLimited),
+                    },
                     owner_token=owner,
                 )
                 break
@@ -857,7 +860,9 @@ class DailyAcquisitionScheduler:
         incomplete_result: tuple[str, dict[str, object], int] | None = None
         for selected in providers:
             last_session = latest_by_provider.get(selected, {}).get(symbol)
-            start = last_session - timedelta(days=overlap) if last_session and overlap else last_session
+            start = (
+                last_session - timedelta(days=overlap) if last_session and overlap else last_session
+            )
             for attempt in range(attempts):
                 if self._should_stop(job_id, lease_lost=lease_lost):
                     return
@@ -908,7 +913,9 @@ class DailyAcquisitionScheduler:
                     blocked_providers.add(selected)
                     mark_provider_status(
                         selected,
-                        "quota_exhausted" if isinstance(exc, ProviderRateLimited) else "auth_failed",
+                        "quota_exhausted"
+                        if isinstance(exc, ProviderRateLimited)
+                        else "auth_failed",
                         str(exc),
                     )
                     append_provider_error(

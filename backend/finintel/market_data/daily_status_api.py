@@ -37,10 +37,13 @@ class DailySettingsRequest(BaseModel):
     retry_attempts: int | None = Field(default=None, ge=1, le=5)
     retry_backoff_seconds: float | None = Field(default=None, ge=0, le=300)
     catch_up_limit: int | None = Field(default=None, ge=1, le=30)
-    provider_limits: dict[
-        Literal["alpaca_sip", "tiingo", "alpha_vantage"],
-        dict[str, int],
-    ] | None = None
+    provider_limits: (
+        dict[
+            Literal["alpaca_sip", "tiingo", "alpha_vantage"],
+            dict[str, int],
+        ]
+        | None
+    ) = None
 
 
 def scheduler() -> DailyAcquisitionScheduler:
@@ -155,6 +158,7 @@ def _status_payload() -> dict[str, object]:
         "updated": current.get("updated", 0),
         "unchanged": current.get("unchanged", 0),
         "retry_count": current.get("retry_count", 0),
+        "duration_ms": current.get("duration_ms"),
         "job_duration_ms": current.get("duration_ms"),
         "last_updated_trading_session": last_updated,
         "last_successful_trading_session": last_successful_session,

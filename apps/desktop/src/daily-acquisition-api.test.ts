@@ -40,12 +40,15 @@ describe("daily acquisition API parsing", () => {
       last_execution_time: null,
       last_successful_execution: null,
       next_scheduled_execution: "2026-11-03T01:00:00+00:00",
+      duration_ms: 2500,
+      job_duration_ms: 2500,
       last_updated_trading_session: null,
       job_id: null,
       job: idleJob,
     });
     expect(status.status).toBe("idle");
     expect(status.job.items).toEqual([]);
+    expect(status.duration_ms).toBe(2500);
   });
 
   it("rejects malformed settings instead of trusting backend JSON", () => {

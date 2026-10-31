@@ -206,11 +206,30 @@ def acquire_index_closes(
     request_guard: Callable[[], None] | None = None,
 ) -> dict[str, object]:
     # Explicit user action only. No periodic downloads.
-    return store_index_closes(
-        code,
-        fetch_fred_index(code, client=client, request_guard=request_guard),
-        db=db,
-    )
+    if request_guard is None:
+        from finintel.market_data.daily_acquisition_store import provider_request_guard
+
+        request_guard = provider_request_guard("fred", db=db)
+    try:
+        result = store_index_closes(
+            code,
+            fetch_fred_index(code, client=client, request_guard=request_guard),
+            db=db,
+        )
+    except (ProviderRateLimited, ProviderAccessDenied) as exc:
+        from finintel.market_data.daily_acquisition_store import mark_provider_status
+
+        mark_provider_status(
+            "fred",
+            "quota_exhausted" if isinstance(exc, ProviderRateLimited) else "auth_failed",
+            str(exc),
+            db=db,
+        )
+        raise
+    from finintel.market_data.daily_acquisition_store import mark_provider_status
+
+    mark_provider_status("fred", "available", db=db)
+    return result
 
 
 def index_catalog(*, db: Path | None = None) -> list[dict[str, object]]:

@@ -7,7 +7,9 @@ observations continue to use the existing transactional import paths.
 from __future__ import annotations
 
 import json
+import math
 import re
+import time
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -58,8 +60,10 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _iso(value: datetime | None) -> str | None:
-    return value.astimezone(UTC).isoformat(timespec="seconds") if value else None
+def _iso(value: datetime | None, *, precise: bool = False) -> str | None:
+    if value is None:
+        return None
+    return value.astimezone(UTC).isoformat(timespec="microseconds" if precise else "seconds")
 
 
 def _json(value: str | None, fallback: object) -> object:
@@ -75,14 +79,12 @@ def _provider_limits(value: object) -> dict[str, dict[str, int]]:
     """Normalize stored/provider-supplied request policies without mutation."""
     if not isinstance(value, dict):
         value = {}
-    result = {
-        provider: dict(limits) for provider, limits in DEFAULT_PROVIDER_LIMITS.items()
-    }
+    result = {provider: dict(limits) for provider, limits in DEFAULT_PROVIDER_LIMITS.items()}
     for provider, raw in value.items():
         if provider not in PROVIDERS:
             raise ValueError(f"provider_limits contains unsupported provider: {provider}")
         if not isinstance(raw, dict):
-            raise ValueError(f"provider_limits.{provider} must be an object")
+            raise TypeError(f"provider_limits.{provider} must be an object")
         result[provider].update(raw)
     for provider, limits in result.items():
         requests_per_minute = limits.get("requests_per_minute")
@@ -98,16 +100,15 @@ def _provider_limits(value: object) -> dict[str, dict[str, int]]:
             or not isinstance(daily_request_budget, int)
             or not 0 <= daily_request_budget <= 1000000
         ):
-            raise ValueError(
-                f"provider_limits.{provider}.daily_request_budget must be 0-1000000"
-            )
+            raise ValueError(f"provider_limits.{provider}.daily_request_budget must be 0-1000000")
     return result
 
 
 def _settings_row(row) -> dict[str, object]:
     if row is None:
         return {**DEFAULT_SETTINGS, "provider_limits": _provider_limits(DEFAULT_PROVIDER_LIMITS)}
-    raw_limits = _json(row["provider_limits"] if "provider_limits" in row.keys() else None, {})
+    row_columns = row.keys()
+    raw_limits = _json(row["provider_limits"] if "provider_limits" in row_columns else None, {})
     return {
         "enabled": bool(row["enabled"]),
         "schedule_time": row["schedule_time"],
@@ -186,8 +187,7 @@ def update_settings(values: dict[str, object], *, db: Path | None = None) -> dic
         requested = dict(values)
         if isinstance(requested.get("provider_limits"), dict):
             requested_limits = {
-                provider: dict(limits)
-                for provider, limits in current["provider_limits"].items()
+                provider: dict(limits) for provider, limits in current["provider_limits"].items()
             }
             for provider, limits in requested["provider_limits"].items():
                 if isinstance(limits, dict):
@@ -251,53 +251,69 @@ def reserve_provider_request(
     policy = _provider_policy(provider, settings)
     current = (now or _now()).astimezone(UTC)
     usage_date = current.date().isoformat()
-    interval_seconds = 60.0 / int(policy["requests_per_minute"])
+    interval_microseconds = math.ceil(60_000_000 / int(policy["requests_per_minute"]))
     conn = _write_connection(path)
     try:
-        with conn:
-            row = conn.execute(
-                "SELECT * FROM daily_acquisition_provider_usage "
-                "WHERE provider=? AND usage_date=?",
-                (provider, usage_date),
-            ).fetchone()
-            request_count = int(row["request_count"]) if row else 0
-            budget = int(policy["daily_request_budget"])
-            if budget and request_count >= budget:
-                message = f"{provider} local daily request budget exhausted"
-                if row:
-                    conn.execute(
-                        "UPDATE daily_acquisition_provider_usage SET quota_state='budget_exhausted', "
-                        "quota_message=?, updated_at=? WHERE provider=? AND usage_date=?",
-                        (message, _iso(current), provider, usage_date),
-                    )
-                else:
-                    conn.execute(
-                        "INSERT INTO daily_acquisition_provider_usage "
-                        "(provider,usage_date,request_count,quota_state,quota_message,updated_at) "
-                        "VALUES (?, ?, 0, 'budget_exhausted', ?, ?)",
-                        (provider, usage_date, message, _iso(current)),
-                    )
-                raise ProviderRateLimited(message)
+        # A deferred transaction can allow two processes to read the same slot
+        # before either attempts its first write. BEGIN IMMEDIATE serializes
+        # reservations across processes before the read.
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT * FROM daily_acquisition_provider_usage WHERE provider=? AND usage_date=?",
+            (provider, usage_date),
+        ).fetchone()
+        request_count = int(row["request_count"]) if row else 0
+        budget = int(policy["daily_request_budget"])
+        current_state = row["quota_state"] if row else "available"
+        if current_state == "auth_failed":
+            from finintel.market_data.provider import ProviderAccessDenied
 
-            previous = None
-            if row and row["last_request_at"]:
-                try:
-                    previous = datetime.fromisoformat(row["last_request_at"])
-                except ValueError:
-                    previous = None
-            slot = max(current, (previous + timedelta(seconds=interval_seconds)) if previous else current)
-            wait_seconds = max(0.0, (slot - current).total_seconds())
-            new_count = request_count + 1
-            state = "throttled" if wait_seconds > 0.001 else "available"
-            conn.execute(
-                "INSERT INTO daily_acquisition_provider_usage "
-                "(provider,usage_date,request_count,last_request_at,quota_state,quota_message,updated_at) "
-                "VALUES (?, ?, ?, ?, ?, NULL, ?) "
-                "ON CONFLICT(provider,usage_date) DO UPDATE SET request_count=excluded.request_count, "
-                "last_request_at=excluded.last_request_at, quota_state=excluded.quota_state, "
-                "quota_message=NULL, updated_at=excluded.updated_at",
-                (provider, usage_date, new_count, _iso(slot), state, _iso(current)),
-            )
+            conn.rollback()
+            raise ProviderAccessDenied(row["quota_message"] or f"{provider} authentication failed")
+        if current_state == "quota_exhausted":
+            conn.rollback()
+            raise ProviderRateLimited(row["quota_message"] or f"{provider} quota exhausted")
+        if budget and request_count >= budget:
+            message = f"{provider} local daily request budget exhausted"
+            if row:
+                conn.execute(
+                    "UPDATE daily_acquisition_provider_usage SET quota_state='budget_exhausted', "
+                    "quota_message=?, updated_at=? WHERE provider=? AND usage_date=?",
+                    (message, _iso(current), provider, usage_date),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO daily_acquisition_provider_usage "
+                    "(provider,usage_date,request_count,quota_state,quota_message,updated_at) "
+                    "VALUES (?, ?, 0, 'budget_exhausted', ?, ?)",
+                    (provider, usage_date, message, _iso(current)),
+                )
+            # Commit the durable exhaustion marker before raising. The caller
+            # may restart immediately and must not receive another slot.
+            conn.commit()
+            raise ProviderRateLimited(message)
+
+        previous = None
+        if row and row["last_request_at"]:
+            try:
+                previous = datetime.fromisoformat(row["last_request_at"])
+            except ValueError:
+                previous = None
+        interval = timedelta(microseconds=interval_microseconds)
+        slot = max(current, (previous + interval) if previous else current)
+        wait_seconds = max(0.0, (slot - current).total_seconds())
+        new_count = request_count + 1
+        state = "throttled" if wait_seconds > 0 else "available"
+        conn.execute(
+            "INSERT INTO daily_acquisition_provider_usage "
+            "(provider,usage_date,request_count,last_request_at,quota_state,quota_message,updated_at) "
+            "VALUES (?, ?, ?, ?, ?, NULL, ?) "
+            "ON CONFLICT(provider,usage_date) DO UPDATE SET request_count=excluded.request_count, "
+            "last_request_at=excluded.last_request_at, quota_state=excluded.quota_state, "
+            "quota_message=NULL, updated_at=excluded.updated_at",
+            (provider, usage_date, new_count, _iso(slot, precise=True), state, _iso(current)),
+        )
+        conn.commit()
         return {
             "provider": provider,
             "usage_date": usage_date,
@@ -306,8 +322,24 @@ def reserve_provider_request(
             "wait_seconds": wait_seconds,
             "quota_state": state,
         }
+    except Exception:
+        if conn.in_transaction:
+            conn.rollback()
+        raise
     finally:
         conn.close()
+
+
+def provider_request_guard(provider: str, *, db: Path | None = None):
+    """Create the shared request hook used by scheduled and manual acquisition."""
+
+    def reserve() -> None:
+        reservation = reserve_provider_request(provider, db=db)
+        wait_seconds = float(reservation.get("wait_seconds", 0.0))
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+
+    return reserve
 
 
 @serialized_storage_write
@@ -320,7 +352,13 @@ def mark_provider_status(
     now: datetime | None = None,
 ) -> None:
     """Persist safe quota/auth state for monitoring and restart recovery."""
-    if state not in {"available", "throttled", "quota_exhausted", "auth_failed"}:
+    if state not in {
+        "available",
+        "throttled",
+        "budget_exhausted",
+        "quota_exhausted",
+        "auth_failed",
+    }:
         raise ValueError("Invalid provider quota state")
     path = db if db is not None else database_path()
     current = (now or _now()).astimezone(UTC)
@@ -328,6 +366,22 @@ def mark_provider_status(
     conn = _write_connection(path)
     try:
         with conn:
+            existing = conn.execute(
+                "SELECT quota_state FROM daily_acquisition_provider_usage "
+                "WHERE provider=? AND usage_date=?",
+                (provider, usage_date),
+            ).fetchone()
+            if (
+                state == "available"
+                and existing
+                and existing["quota_state"]
+                in {
+                    "budget_exhausted",
+                    "quota_exhausted",
+                    "auth_failed",
+                }
+            ):
+                return
             conn.execute(
                 "INSERT INTO daily_acquisition_provider_usage "
                 "(provider,usage_date,request_count,quota_state,quota_message,updated_at) "
@@ -340,16 +394,42 @@ def mark_provider_status(
         conn.close()
 
 
-def provider_usage_status(*, db: Path | None = None) -> dict[str, dict[str, object]]:
+@serialized_storage_write
+def reset_provider_status(
+    provider: str, *, db: Path | None = None, now: datetime | None = None
+) -> None:
+    """Clear a persisted provider failure after an explicit user action."""
+    path = db if db is not None else database_path()
+    current = (now or _now()).astimezone(UTC)
+    conn = _write_connection(path)
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE daily_acquisition_provider_usage SET quota_state='available', "
+                "quota_message=NULL, updated_at=? WHERE provider=? AND usage_date=?",
+                (_iso(current), provider, current.date().isoformat()),
+            )
+    finally:
+        conn.close()
+
+
+def provider_usage_status(
+    *, db: Path | None = None, now: datetime | None = None
+) -> dict[str, dict[str, object]]:
     """Return current-day request usage without exposing provider credentials."""
     path = db if db is not None else database_path()
     settings = get_settings(db=path)
-    usage_date = _now().date().isoformat()
+    current = (now or _now()).astimezone(UTC)
+    usage_date = current.date().isoformat()
     conn = _read_connection(path)
-    rows = [] if conn is None else conn.execute(
-        "SELECT * FROM daily_acquisition_provider_usage WHERE usage_date=?",
-        (usage_date,),
-    ).fetchall()
+    rows = (
+        []
+        if conn is None
+        else conn.execute(
+            "SELECT * FROM daily_acquisition_provider_usage WHERE usage_date=?",
+            (usage_date,),
+        ).fetchall()
+    )
     try:
         by_provider = {row["provider"]: row for row in rows}
         result: dict[str, dict[str, object]] = {}
