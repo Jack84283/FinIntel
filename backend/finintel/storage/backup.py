@@ -64,6 +64,7 @@ def _validated(path: Path, *, version: bool = True) -> dict[str, object]:
                     "index_daily_closes",
                     "index_series_catalog",
                     "index_ingestion_runs",
+                    "index_membership_snapshots",
                 )
                 if table in tables
             }
@@ -180,6 +181,7 @@ def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, obje
                     "index_daily_closes",
                     "index_series_catalog",
                     "index_ingestion_runs",
+                    "index_membership_snapshots",
                 )
                 if table in tables
             }
@@ -194,6 +196,12 @@ def _merge(staging: Path, source: Path) -> None:
         dest.execute("PRAGMA foreign_keys = ON")
         dest.execute("ATTACH DATABASE ? AS incoming", (str(source.resolve()),))
         try:
+            incoming_tables = {
+                row[0]
+                for row in dest.execute(
+                    "SELECT name FROM incoming.sqlite_master WHERE type='table'"
+                )
+            }
             with dest:
                 dest.execute("INSERT OR IGNORE INTO instruments SELECT * FROM incoming.instruments")
                 dest.execute(
@@ -247,6 +255,57 @@ def _merge(staging: Path, source: Path) -> None:
                 dest.execute(
                     "INSERT OR IGNORE INTO index_memberships "
                     "SELECT * FROM incoming.index_memberships"
+                )
+                if "index_membership_snapshots" in incoming_tables:
+                    dest.execute(
+                        "INSERT INTO index_membership_snapshots("
+                        "index_code,as_of,source,source_kind,source_as_of,expected_count,"
+                        "member_count,validation_status,availability_status,confidence,imported_at) "
+                        "SELECT index_code,as_of,source,source_kind,source_as_of,expected_count,"
+                        "member_count,validation_status,availability_status,confidence,imported_at "
+                        "FROM incoming.index_membership_snapshots WHERE 1 "
+                        "ON CONFLICT(index_code,as_of) DO UPDATE SET source=excluded.source,"
+                        "source_kind=excluded.source_kind,source_as_of=excluded.source_as_of,"
+                        "expected_count=excluded.expected_count,member_count=excluded.member_count,"
+                        "validation_status=excluded.validation_status,"
+                        "availability_status=excluded.availability_status,"
+                        "confidence=excluded.confidence,imported_at=excluded.imported_at "
+                        "WHERE excluded.imported_at >= index_membership_snapshots.imported_at"
+                    )
+                else:
+                    dest.execute(
+                        "INSERT OR IGNORE INTO index_membership_snapshots("
+                        "index_code,as_of,source,source_kind,source_as_of,expected_count,"
+                        "member_count,validation_status,availability_status,confidence,imported_at) "
+                        "SELECT index_code,as_of,MAX(source),'unknown',as_of,COUNT(*),COUNT(*),"
+                        "'unknown','unverified','unknown',datetime('now') "
+                        "FROM index_memberships GROUP BY index_code,as_of"
+                    )
+                # A merge may add rows to an already-known snapshot. Reconcile
+                # the persisted counts/statuses with the rows that actually
+                # survived the conflict rules instead of leaving stale metadata.
+                dest.execute(
+                    "UPDATE index_membership_snapshots SET member_count=("
+                    "SELECT COUNT(*) FROM index_memberships m WHERE "
+                    "m.index_code=index_membership_snapshots.index_code AND "
+                    "m.as_of=index_membership_snapshots.as_of), "
+                    "validation_status=CASE "
+                    "WHEN source_kind='unknown' OR expected_count IS NULL THEN 'unknown' "
+                    "WHEN expected_count=(SELECT COUNT(*) FROM index_memberships m WHERE "
+                    "m.index_code=index_membership_snapshots.index_code AND "
+                    "m.as_of=index_membership_snapshots.as_of) THEN 'complete' "
+                    "ELSE 'incomplete' END, "
+                    "availability_status=CASE "
+                    "WHEN source_kind='fund_derived_proxy' THEN 'proxy_only' "
+                    "WHEN source_kind='unknown' THEN 'unverified' "
+                    "WHEN expected_count IS NULL OR expected_count<>(SELECT COUNT(*) "
+                    "FROM index_memberships m WHERE "
+                    "m.index_code=index_membership_snapshots.index_code AND "
+                    "m.as_of=index_membership_snapshots.as_of) THEN 'incomplete' "
+                    "ELSE 'available' END "
+                    "WHERE EXISTS (SELECT 1 FROM index_memberships m WHERE "
+                    "m.index_code=index_membership_snapshots.index_code AND "
+                    "m.as_of=index_membership_snapshots.as_of)"
                 )
                 dest.execute(
                     "INSERT INTO index_daily_closes("

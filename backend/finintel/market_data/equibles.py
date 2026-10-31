@@ -139,6 +139,9 @@ def acquire_index(code: str) -> dict:
         source,
         symbols,
         expected_count=len(symbols),
+        source_expected_count=first["constituentCount"],
+        source_kind="fund_derived_proxy",
+        confidence="low",
         names=names,
     )
     return {

@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import HistoricalBatch
 from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -318,6 +318,32 @@ CREATE TABLE IF NOT EXISTS index_ingestion_runs (
 SCHEMA_V11_INDEX = """
 CREATE INDEX IF NOT EXISTS index_ingestion_runs_series_time
     ON index_ingestion_runs(index_code, provider, retrieved_at DESC, id DESC);
+"""
+
+SCHEMA_V13_MEMBERSHIP_TABLE = """
+CREATE TABLE IF NOT EXISTS index_membership_snapshots (
+    index_code TEXT NOT NULL CHECK(index_code IN ('SP500', 'DJIA', 'NDX', 'RUT')),
+    as_of TEXT NOT NULL,
+    source TEXT NOT NULL,
+    source_kind TEXT NOT NULL CHECK(source_kind IN (
+        'official_licensed', 'verified_public', 'fund_derived_proxy', 'unknown'
+    )),
+    source_as_of TEXT NOT NULL,
+    expected_count INTEGER CHECK(expected_count IS NULL OR expected_count > 0),
+    member_count INTEGER NOT NULL CHECK(member_count >= 0),
+    validation_status TEXT NOT NULL CHECK(validation_status IN ('complete', 'incomplete', 'unknown')),
+    availability_status TEXT NOT NULL CHECK(availability_status IN (
+        'available', 'incomplete', 'proxy_only', 'unverified'
+    )),
+    confidence TEXT NOT NULL CHECK(confidence IN ('high', 'medium', 'low', 'unknown')),
+    imported_at TEXT NOT NULL,
+    PRIMARY KEY(index_code, as_of)
+);
+"""
+
+SCHEMA_V13_MEMBERSHIP_INDEX = """
+CREATE INDEX IF NOT EXISTS index_membership_snapshots_source
+    ON index_membership_snapshots(index_code, as_of DESC, source_kind);
 """
 
 # Keep this seed data in the storage migration so a read-only API can expose a
@@ -698,6 +724,33 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if conn.in_transaction:
                 conn.rollback()
             raise StorageError("Unable to migrate index provenance storage to v12") from exc
+        version = 12
+    if version == 12:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(SCHEMA_V13_MEMBERSHIP_TABLE)
+            conn.execute(SCHEMA_V13_MEMBERSHIP_INDEX)
+            conn.execute(
+                "INSERT OR IGNORE INTO index_membership_snapshots("
+                "index_code,as_of,source,source_kind,source_as_of,expected_count,member_count,"
+                "validation_status,availability_status,confidence,imported_at) "
+                "SELECT index_code,as_of,MAX(source),"
+                "CASE WHEN MAX(source) LIKE 'Equibles / ETF holdings proxy;%' "
+                "THEN 'fund_derived_proxy' ELSE 'unknown' END,"
+                "as_of,COUNT(*),COUNT(*),"
+                "CASE WHEN MAX(source) LIKE '%; incomplete:%' THEN 'incomplete' ELSE 'unknown' END,"
+                "CASE WHEN MAX(source) LIKE 'Equibles / ETF holdings proxy;%' THEN 'proxy_only' "
+                "WHEN MAX(source) LIKE '%; incomplete:%' THEN 'incomplete' ELSE 'unverified' END,"
+                "CASE WHEN MAX(source) LIKE 'Equibles / ETF holdings proxy;%' THEN 'low' "
+                "ELSE 'unknown' END,datetime('now') "
+                "FROM index_memberships GROUP BY index_code,as_of"
+            )
+            conn.execute("PRAGMA user_version = 13")
+            conn.commit()
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate index membership metadata to v13") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:

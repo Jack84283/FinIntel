@@ -475,6 +475,29 @@ async fn index_stock_memberships(
     ).await
 }
 
+#[tauri::command]
+async fn index_membership_changes(
+    code: String,
+    from_as_of: String,
+    to_as_of: String,
+    q: String,
+    limit: u8,
+    offset: u32,
+) -> Result<serde_json::Value, String> {
+    if !valid_index(&code) || !valid_date(&from_as_of) || !valid_date(&to_as_of) ||
+       q.len() > 80 || q.chars().any(|c| c.is_control()) || limit == 0 || limit > 100 {
+        return Err("Invalid index change query.".to_string());
+    }
+    let params = vec![
+        ("from_as_of", from_as_of),
+        ("to_as_of", to_as_of),
+        ("q", q),
+        ("limit", limit.to_string()),
+        ("offset", offset.to_string()),
+    ];
+    read_backend(&format!("/api/v1/market-data/indexes/{code}/changes"), &params).await
+}
+
 fn valid_credential_path(provider: &str, field: &str) -> bool {
     matches!(
         (provider, field),
@@ -1032,7 +1055,8 @@ fn main() {
             daily_acquisition_history,
             index_catalog,
             index_constituents,
-            index_stock_memberships
+            index_stock_memberships,
+            index_membership_changes
         ])
         .build(tauri::generate_context!())
         .expect("failed to build FinIntel")

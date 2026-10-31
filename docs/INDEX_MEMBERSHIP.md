@@ -58,6 +58,7 @@ Run, from the repository root in the installed backend virtual environment:
 python -m finintel.market_data.membership \
   --index SP500 --as-of 2026-10-23 \
   --source 'authorized-vendor/export-2026-10-23' \
+  --source-kind official_licensed --confidence high \
   --csv /private/sp500.csv
 
 python -m finintel.market_data.membership \
@@ -81,6 +82,13 @@ Index Constituents**. It supports index selection, ticker/company search,
 paging, an as-of date, and membership badges that show a ticker's overlap
 across different indexes. A stock-level lookup shows `Included`,
 `Not in snapshot`, or `Unknown` separately for each index.
+
+Every imported snapshot also records its source kind (`official_licensed`,
+`verified_public`, or `fund_derived_proxy`), source as-of date, expected
+constituent count, observed member count, validation status, availability, and
+confidence. The UI keeps a fund-derived proxy visibly separate from an official
+or verified-public list. Existing snapshots upgraded from older databases are
+marked `unknown`/`unverified` rather than being presented as newly validated.
 
 ## Historical semantics and limitations
 
@@ -118,8 +126,14 @@ Reference source/product pages (not APIs for automatic ingestion):
 ```text
 GET /api/v1/market-data/indexes?as_of=2026-10-23
 GET /api/v1/market-data/indexes/SP500/constituents?as_of=2026-10-23&q=APP&limit=50&offset=0
+GET /api/v1/market-data/indexes/SP500/changes?from_as_of=2026-01-01&to_as_of=2026-10-23&q=APP&limit=50&offset=0
 GET /api/v1/market-data/indexes/symbol/AAPL/memberships?as_of=2026-10-23
 ```
+
+The changes endpoint compares the latest available snapshots on or before the
+two requested dates and returns `added`/`removed` records. If either side has
+no local snapshot, it returns `status: "unknown"` rather than claiming that no
+changes occurred.
 
 Both Tauri desktop and the Vite development client use the same typed
 responses through their existing local transports. No external API calls
@@ -127,10 +141,13 @@ are made from the index membership UI.
 
 ## Schema and tests
 
-SQLite schema v6 extends the existing v5 `index_memberships` table from
-SP500/DJIA to SP500/DJIA/NDX/RUT without deleting historical snapshots.
-The migration occurs on the first **authorized local database write**
+SQLite schema v13 adds the `index_membership_snapshots` provenance table while
+retaining the dated `index_memberships` rows. It supports SP500/DJIA/NDX/RUT
+without deleting historical snapshots. The migration occurs on the first
+**authorized local database write**
 (e.g. a normal import); read operations themselves do not migrate the DB.
+The migration backfills metadata from existing membership rows conservatively,
+so legacy records remain unverified until their source completeness is known.
 
 ```bash
 python -m pytest backend/tests/test_index_memberships.py backend/tests/test_batch_membership.py -q

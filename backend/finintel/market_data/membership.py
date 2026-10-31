@@ -26,6 +26,13 @@ INDEX_NAMES = {
     "RUT": "Russell 2000",
 }
 MAX_SYMBOLS = 5000
+SOURCE_KINDS = {
+    "official_licensed",
+    "verified_public",
+    "fund_derived_proxy",
+    "unknown",
+}
+CONFIDENCE_LEVELS = {"high", "medium", "low", "unknown"}
 
 
 def _as_of(value: str | None) -> str:
@@ -46,6 +53,9 @@ def load_membership(
     *,
     db: Path | None = None,
     expected_count: int | None = None,
+    source_expected_count: int | None = None,
+    source_kind: str = "verified_public",
+    confidence: str | None = None,
     names: dict[str, str] | None = None,
 ) -> int:
     """Atomically replace exactly one index/date snapshot; retain all other dates."""
@@ -54,6 +64,10 @@ def load_membership(
     effective_date = _as_of(as_of)
     if not source or len(source) > 200 or any(ord(c) < 32 for c in source):
         raise ValueError("Provide a safe, independently verifiable source reference")
+    if source_kind not in SOURCE_KINDS:
+        raise ValueError("Invalid membership source kind")
+    if confidence is not None and confidence not in CONFIDENCE_LEVELS:
+        raise ValueError("Invalid membership confidence")
     tickers = [symbol.strip().upper() for symbol in symbols]
     if (
         not tickers
@@ -64,6 +78,10 @@ def load_membership(
         raise ValueError("Membership must contain unique valid stock tickers")
     if expected_count is not None and (expected_count < 1 or expected_count != len(tickers)):
         raise ValueError("Snapshot does not match the source's expected constituent count")
+    if source_expected_count is not None and (
+        source_expected_count < 1 or source_expected_count < len(tickers)
+    ):
+        raise ValueError("Snapshot exceeds the source's declared constituent count")
     if names is not None and (
         set(names) != set(tickers)
         or any(
@@ -88,12 +106,13 @@ def load_membership(
             if any(row["asset_type"] != "Stock" for row in rows):
                 raise ValueError("Index constituent list includes a known non-stock instrument")
         with conn:
+            imported_at = datetime.now(UTC).isoformat(timespec="microseconds")
             if names is not None:
                 conn.executemany(
                     "INSERT OR IGNORE INTO symbol_catalog "
                     "(symbol, name, asset_type, exchange, source, updated_at) "
                     "VALUES (?, ?, 'Stock', '', 'equibles_proxy', ?)",
-                    ((symbol, names[symbol], datetime.now(UTC).isoformat()) for symbol in tickers),
+                    ((symbol, names[symbol], imported_at) for symbol in tickers),
                 )
             conn.execute(
                 "DELETE FROM index_memberships WHERE index_code=? AND as_of=?",
@@ -102,6 +121,56 @@ def load_membership(
             conn.executemany(
                 "INSERT INTO index_memberships(index_code,symbol,as_of,source) VALUES (?,?,?,?)",
                 ((index_code, symbol, effective_date, source) for symbol in sorted(tickers)),
+            )
+            expected_members = (
+                source_expected_count
+                if source_expected_count is not None
+                else expected_count
+                if expected_count is not None
+                else len(tickers)
+            )
+            validation_status = "complete" if expected_members == len(tickers) else "incomplete"
+            if source_kind == "fund_derived_proxy":
+                availability_status = "proxy_only"
+            elif validation_status == "incomplete":
+                availability_status = "incomplete"
+            elif source_kind == "unknown":
+                availability_status = "unverified"
+            else:
+                availability_status = "available"
+            resolved_confidence = (
+                confidence
+                or {
+                    "official_licensed": "high",
+                    "verified_public": "medium",
+                    "fund_derived_proxy": "low",
+                    "unknown": "unknown",
+                }[source_kind]
+            )
+            conn.execute(
+                "INSERT INTO index_membership_snapshots("
+                "index_code,as_of,source,source_kind,source_as_of,expected_count,member_count,"
+                "validation_status,availability_status,confidence,imported_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(index_code,as_of) DO UPDATE SET source=excluded.source,"
+                "source_kind=excluded.source_kind,source_as_of=excluded.source_as_of,"
+                "expected_count=excluded.expected_count,member_count=excluded.member_count,"
+                "validation_status=excluded.validation_status,"
+                "availability_status=excluded.availability_status,confidence=excluded.confidence,"
+                "imported_at=excluded.imported_at",
+                (
+                    index_code,
+                    effective_date,
+                    source,
+                    source_kind,
+                    effective_date,
+                    expected_members,
+                    len(tickers),
+                    validation_status,
+                    availability_status,
+                    resolved_confidence,
+                    imported_at,
+                ),
             )
         return len(tickers)
     except sqlite3.IntegrityError as exc:
@@ -116,15 +185,60 @@ def load_membership(
         conn.close()
 
 
-def _latest(conn: sqlite3.Connection, code: str, when: str) -> tuple[str, str, int] | None:
+def _legacy_metadata(source: str, member_count: int, as_of: str) -> dict[str, object]:
+    proxy = source.startswith("Equibles / ETF holdings proxy;")
+    incomplete = "; incomplete:" in source
+    return {
+        "source_kind": "fund_derived_proxy" if proxy else "unknown",
+        "source_as_of": as_of,
+        "expected_count": member_count,
+        "member_count": member_count,
+        "validation_status": "incomplete" if incomplete else "unknown",
+        "availability_status": "proxy_only" if proxy else "unverified",
+        "confidence": "low" if proxy else "unknown",
+    }
+
+
+def _latest(conn: sqlite3.Connection, code: str, when: str) -> dict[str, object] | None:
+    metadata_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='index_membership_snapshots'"
+    ).fetchone()
+    if metadata_table:
+        row = conn.execute(
+            "SELECT m.as_of,MAX(m.source) AS source,COUNT(*) AS total,"
+            "s.source_kind,s.source_as_of,s.expected_count,s.member_count,"
+            "s.validation_status,s.availability_status,s.confidence "
+            "FROM index_memberships m LEFT JOIN index_membership_snapshots s "
+            "ON s.index_code=m.index_code AND s.as_of=m.as_of "
+            "WHERE m.index_code=? AND m.as_of=("
+            "SELECT MAX(as_of) FROM index_memberships WHERE index_code=? AND as_of<=?) "
+            "GROUP BY m.as_of,s.source_kind,s.source_as_of,s.expected_count,s.member_count,"
+            "s.validation_status,s.availability_status,s.confidence",
+            (code, code, when),
+        ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        if result["source_kind"] is None:
+            result.update(_legacy_metadata(result["source"], result["total"], result["as_of"]))
+        else:
+            result["member_count"] = result["member_count"] or result["total"]
+        return result
     row = conn.execute(
-        "SELECT as_of, MAX(source) AS source, COUNT(*) AS total "
+        "SELECT as_of,MAX(source) AS source,COUNT(*) AS total "
         "FROM index_memberships WHERE index_code=? AND as_of=("
         "SELECT MAX(as_of) FROM index_memberships WHERE index_code=? AND as_of<=?) "
         "GROUP BY as_of",
         (code, code, when),
     ).fetchone()
-    return (row["as_of"], row["source"], row["total"]) if row else None
+    if not row:
+        return None
+    return {
+        "as_of": row["as_of"],
+        "source": row["source"],
+        "total": row["total"],
+        **_legacy_metadata(row["source"], row["total"], row["as_of"]),
+    }
 
 
 def list_indexes(*, as_of: str | None = None, db: Path | None = None) -> list[dict]:
@@ -138,9 +252,15 @@ def list_indexes(*, as_of: str | None = None, db: Path | None = None) -> list[di
                 "code": code,
                 "name": name,
                 "requested_as_of": when,
-                "snapshot_as_of": record[0] if record else None,
-                "source": record[1] if record else None,
-                "members": record[2] if record else None,
+                "snapshot_as_of": record["as_of"] if record else None,
+                "source": record["source"] if record else None,
+                "members": record["member_count"] if record else None,
+                "source_kind": record["source_kind"] if record else None,
+                "source_as_of": record["source_as_of"] if record else None,
+                "expected_count": record["expected_count"] if record else None,
+                "validation_status": record["validation_status"] if record else None,
+                "availability_status": record["availability_status"] if record else "not_imported",
+                "confidence": record["confidence"] if record else None,
                 "status": "available" if record else "not_imported",
             }
             for code, name in INDEX_NAMES.items()
@@ -177,9 +297,15 @@ def index_constituents(
             "code": code,
             "name": INDEX_NAMES[code],
             "requested_as_of": when,
-            "snapshot_as_of": record[0] if record else None,
-            "source": record[1] if record else None,
-            "snapshot_members": record[2] if record else None,
+            "snapshot_as_of": record["as_of"] if record else None,
+            "source": record["source"] if record else None,
+            "snapshot_members": record["member_count"] if record else None,
+            "source_kind": record["source_kind"] if record else None,
+            "source_as_of": record["source_as_of"] if record else None,
+            "expected_count": record["expected_count"] if record else None,
+            "validation_status": record["validation_status"] if record else None,
+            "availability_status": record["availability_status"] if record else "not_imported",
+            "confidence": record["confidence"] if record else None,
             "total": 0,
             "limit": limit,
             "offset": offset,
@@ -188,7 +314,7 @@ def index_constituents(
         if not record:
             return result
         filter_sql = ""
-        args = [code, record[0]]
+        args = [code, record["as_of"]]
         if query.strip():
             pattern = _matching_pattern(query.strip())
             filter_sql = " AND (m.symbol LIKE ? ESCAPE '!' OR c.name LIKE ? ESCAPE '!')"
@@ -226,6 +352,97 @@ def index_constituents(
                     other.setdefault(row["symbol"], set()).add(row["index_code"])
         result["items"] = [
             {**item, "member_indexes": sorted(other.get(item["symbol"], {code}))} for item in items
+        ]
+        return result
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def membership_changes(
+    code: str,
+    *,
+    from_as_of: str,
+    to_as_of: str,
+    query: str = "",
+    limit: int = 50,
+    offset: int = 0,
+    db: Path | None = None,
+) -> dict:
+    """Compare two effective snapshots without treating missing data as no change."""
+    if code not in INDEX_NAMES:
+        raise ValueError("Unknown index")
+    if len(query) > 80 or not 1 <= limit <= 100 or offset < 0:
+        raise ValueError("Invalid index membership change search")
+    start = _as_of(from_as_of)
+    end = _as_of(to_as_of)
+    if start > end:
+        raise ValueError("Change range must end on or after its start date")
+    conn = _read_connection(db if db is not None else database_path())
+    try:
+        version = conn.execute("PRAGMA user_version").fetchone()[0] if conn else 0
+        before = _latest(conn, code, start) if conn is not None and version >= 5 else None
+        after = _latest(conn, code, end) if conn is not None and version >= 5 else None
+        result = {
+            "code": code,
+            "name": INDEX_NAMES[code],
+            "from_requested_as_of": start,
+            "to_requested_as_of": end,
+            "from_snapshot_as_of": before["as_of"] if before else None,
+            "to_snapshot_as_of": after["as_of"] if after else None,
+            "from_source": before["source"] if before else None,
+            "to_source": after["source"] if after else None,
+            "status": "available" if before and after else "unknown",
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+            "items": [],
+        }
+        if not before or not after:
+            return result
+        before_rows = conn.execute(
+            "SELECT symbol FROM index_memberships WHERE index_code=? AND as_of=?",
+            (code, before["as_of"]),
+        ).fetchall()
+        after_rows = conn.execute(
+            "SELECT symbol FROM index_memberships WHERE index_code=? AND as_of=?",
+            (code, after["as_of"]),
+        ).fetchall()
+        before_symbols = {row["symbol"] for row in before_rows}
+        after_symbols = {row["symbol"] for row in after_rows}
+        changes = [(symbol, "added") for symbol in after_symbols - before_symbols]
+        changes.extend((symbol, "removed") for symbol in before_symbols - after_symbols)
+        changes.sort()
+        names = (
+            {
+                row["symbol"]: (row["name"], row["asset_type"])
+                for row in conn.execute(
+                    "SELECT symbol,name,asset_type FROM symbol_catalog WHERE symbol IN ("
+                    + ",".join("?" for _ in changes)
+                    + ")",
+                    [symbol for symbol, _ in changes],
+                ).fetchall()
+            }
+            if changes
+            else {}
+        )
+        if query.strip():
+            lowered = query.strip().casefold()
+            changes = [
+                (symbol, change)
+                for symbol, change in changes
+                if lowered in symbol.casefold()
+                or lowered in names.get(symbol, (symbol, "Unknown"))[0].casefold()
+            ]
+        result["total"] = len(changes)
+        result["items"] = [
+            {
+                "symbol": symbol,
+                "name": names.get(symbol, (symbol, "Unknown"))[0],
+                "asset_type": names.get(symbol, (symbol, "Unknown"))[1],
+                "change": change,
+            }
+            for symbol, change in changes[offset : offset + limit]
         ]
         return result
     finally:
@@ -297,6 +514,8 @@ def main() -> None:
     parser.add_argument("--source", required=True, help="Independently verified source reference")
     parser.add_argument("--csv", type=Path, required=True, help="CSV with a symbol header")
     parser.add_argument("--expected-count", type=int, help="Source-reported security count")
+    parser.add_argument("--source-kind", choices=sorted(SOURCE_KINDS), default="verified_public")
+    parser.add_argument("--confidence", choices=sorted(CONFIDENCE_LEVELS))
     args = parser.parse_args()
     if not args.csv.is_file() or args.csv.stat().st_size > 1_000_000:
         parser.error("CSV must exist and be at most 1 MB")
@@ -313,7 +532,13 @@ def main() -> None:
                 parser.error("CSV exceeds the maximum supported constituent count")
     print(
         load_membership(
-            args.index, args.as_of, args.source, symbols, expected_count=args.expected_count
+            args.index,
+            args.as_of,
+            args.source,
+            symbols,
+            expected_count=args.expected_count,
+            source_kind=args.source_kind,
+            confidence=args.confidence,
         )
     )
 
