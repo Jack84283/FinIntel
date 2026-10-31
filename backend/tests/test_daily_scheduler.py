@@ -3,6 +3,7 @@
 from datetime import UTC, date, datetime
 
 from finintel.market_data.daily_scheduler import (
+    DailyAcquisitionScheduler,
     automatic_schedule_dates,
     due_date,
     expected_missing_sessions,
@@ -153,3 +154,37 @@ def test_status_round_trip(tmp_path):
     assert status(path)["status"] == "never_run"
     save(path, {"status": "complete", "last_completed_date": "2026-10-28"})
     assert status(path)["last_completed_date"] == "2026-10-28"
+
+
+def test_explicit_manual_and_retry_recovery_resets_fred(monkeypatch):
+    settings = {
+        "primary_provider": "alpaca_sip",
+        "secondary_provider": "tiingo",
+    }
+    reset_calls = []
+    launched = []
+    monkeypatch.setattr("finintel.market_data.daily_scheduler.get_settings", lambda: settings)
+    monkeypatch.setattr("finintel.market_data.daily_scheduler.get_active_job", lambda: None)
+    monkeypatch.setattr(
+        "finintel.market_data.daily_scheduler.reset_provider_status",
+        lambda provider: reset_calls.append(provider),
+    )
+    monkeypatch.setattr(
+        "finintel.market_data.daily_scheduler.instruments", lambda _provider: ["AAPL"]
+    )
+    monkeypatch.setattr(
+        "finintel.market_data.daily_scheduler.create_job", lambda **_: {"id": "manual-job"}
+    )
+    monkeypatch.setattr("finintel.market_data.daily_scheduler.get_job", lambda *_: None)
+    monkeypatch.setattr(
+        "finintel.market_data.daily_scheduler.retry_failed_job",
+        lambda _job_id: {"id": "retry-job"},
+    )
+    scheduler = DailyAcquisitionScheduler()
+    monkeypatch.setattr(scheduler, "_launch", lambda job_id: launched.append(job_id))
+
+    assert scheduler.trigger_manual()["id"] == "manual-job"
+    assert scheduler.retry_failed("old-job")["id"] == "retry-job"
+
+    assert reset_calls == ["alpaca_sip", "fred", "tiingo", "alpaca_sip", "fred", "tiingo"]
+    assert launched == ["manual-job", "retry-job"]

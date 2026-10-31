@@ -462,9 +462,7 @@ class DailyAcquisitionScheduler:
         active = get_active_job()
         if active is not None:
             raise RuntimeError("A daily acquisition job is already active")
-        reset_provider_status(str(settings["primary_provider"]))
-        if isinstance(settings["secondary_provider"], str):
-            reset_provider_status(str(settings["secondary_provider"]))
+        self._reset_explicit_provider_states(settings)
         job = create_job(
             kind="manual",
             provider=str(settings["primary_provider"]),
@@ -497,14 +495,21 @@ class DailyAcquisitionScheduler:
 
     def retry_failed(self, job_id: str) -> dict[str, object] | None:
         settings = get_settings()
-        reset_provider_status(str(settings["primary_provider"]))
-        if isinstance(settings["secondary_provider"], str):
-            reset_provider_status(str(settings["secondary_provider"]))
+        self._reset_explicit_provider_states(settings)
         result = retry_failed_job(job_id)
         if result and result.get("id"):
             self._launch(str(result["id"]))
         self._wake.set()
         return result
+
+    @staticmethod
+    def _reset_explicit_provider_states(settings: dict[str, object]) -> None:
+        """Reset providers only for an explicit user-triggered recovery action."""
+        providers = [str(settings["primary_provider"]), "fred"]
+        if isinstance(settings["secondary_provider"], str):
+            providers.append(str(settings["secondary_provider"]))
+        for provider in dict.fromkeys(providers):
+            reset_provider_status(provider)
 
     def update_settings(self, values: dict[str, object]) -> dict[str, object]:
         result = update_settings(values)

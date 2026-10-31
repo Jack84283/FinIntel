@@ -8,6 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from finintel.main import app
+from finintel.market_data import index_history_api
+from finintel.market_data.daily_acquisition_store import (
+    mark_provider_status,
+    provider_usage_status,
+    update_settings,
+)
 from finintel.market_data.index_history import (
     MAX_ROWS,
     IndexHistoryError,
@@ -18,6 +24,7 @@ from finintel.market_data.index_history import (
     read_index_closes,
     store_index_closes,
 )
+from finintel.market_data.provider import ProviderAccessDenied, ProviderRateLimited
 from finintel.storage.backup import create_backup, restore_backup
 from finintel.storage.db import _write_connection
 
@@ -75,6 +82,59 @@ def test_mocked_source_fetch_uses_fixed_host_and_series():
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         rows = fetch_fred_index("SP500", client=client)
     assert len(rows) == 2
+
+
+@pytest.mark.parametrize(
+    ("status_code", "error_type"),
+    ((429, ProviderRateLimited), (403, ProviderAccessDenied)),
+)
+def test_fred_http_failures_are_classified(status_code, error_type):
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client, pytest.raises(error_type):
+        fetch_fred_index("SP500", client=client)
+
+
+def test_explicit_index_download_resets_fred_failure_and_recovers(tmp_path, monkeypatch):
+    db = tmp_path / "index.sqlite3"
+    monkeypatch.setenv("FININTEL_DB_PATH", str(db))
+    monkeypatch.setenv("FININTEL_PROCESS_TOKEN", "a" * 32)
+    update_settings({}, db=db)
+    mark_provider_status("fred", "auth_failed", "FRED rejected credentials", db=db)
+    monkeypatch.setattr(
+        index_history_api,
+        "acquire_index_closes",
+        lambda code: {"code": code, "status": "stored"},
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/market-data/index-history/SP500/acquire",
+            headers={"x-finintel-process-token": "a" * 32},
+        )
+
+    assert response.status_code == 200
+    assert provider_usage_status(db=db)["fred"]["quota_state"] == "available"
+
+
+def test_fred_recovery_preserves_request_accounting(tmp_path):
+    db = tmp_path / "index.sqlite3"
+    update_settings({}, db=db)
+    mark_provider_status("fred", "quota_exhausted", "temporary FRED quota", db=db)
+    from finintel.market_data.daily_acquisition_store import reset_provider_status
+
+    reset_provider_status("fred", db=db)
+
+    with httpx.Client(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, content=csv_bytes()))
+    ) as client:
+        result = acquire_index_closes("SP500", db=db, client=client)
+
+    assert result["status"] == "stored"
+    usage = provider_usage_status(db=db)["fred"]
+    assert usage["requests_used"] == 1
+    assert usage["quota_state"] == "available"
 
 
 def test_import_idempotency_and_exact_provenance(tmp_path):
