@@ -38,6 +38,7 @@ EQUITY_PROVIDERS = ("alpaca_sip", "tiingo", "alpha_vantage")
 INDEX_CODES = ("SP500", "DJIA", "NASDAQCOM", "NDX", "VIX")
 DESKTOP_PLATFORMS = ("macos", "windows", "linux")
 ACCEPTANCE_STATUSES = ("pass", "fail", "blocked", "not_run")
+SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 REPORT_VERSION = 1
 
 
@@ -100,6 +101,8 @@ def _acceptance_matrix(
         )
     for platform_name in DESKTOP_PLATFORMS:
         result = desktop_results.get(platform_name)
+        if result:
+            result = _validate_desktop_result(platform_name, result)
         matrix.append(
             {
                 "id": "desktop." + platform_name,
@@ -116,6 +119,63 @@ def _acceptance_matrix(
     return matrix
 
 
+def _validate_desktop_result(
+    platform_name: str, value: dict[str, object]
+) -> dict[str, object]:
+    """Validate one desktop result, including required proof for a pass."""
+    status = value.get("status")
+    if status not in ACCEPTANCE_STATUSES:
+        raise ValueError(
+            f"Desktop evidence for {platform_name} must have a valid status"
+        )
+    summary = value.get("summary")
+    if summary is None:
+        summary = f"Manual packaged-desktop check recorded as {status}."
+    if not isinstance(summary, str):
+        raise TypeError(f"Desktop evidence summary for {platform_name} must be text")
+    details = value.get("evidence", {})
+    if not isinstance(details, dict):
+        raise TypeError(
+            f"Desktop evidence details for {platform_name} must be an object"
+        )
+    if status == "pass":
+        tested_at = details.get("tested_at")
+        if not isinstance(tested_at, str) or not tested_at.strip():
+            raise ValueError(
+                f"Passing {platform_name} evidence requires a non-empty tested_at timestamp"
+            )
+        try:
+            parsed_timestamp = datetime.fromisoformat(tested_at)
+        except ValueError as exc:
+            raise ValueError(
+                f"Passing {platform_name} evidence requires an ISO-8601 tested_at timestamp"
+            ) from exc
+        if parsed_timestamp.tzinfo is None:
+            raise ValueError(
+                f"Passing {platform_name} evidence requires a timezone-aware tested_at timestamp"
+            )
+
+        build_id = details.get("build_id")
+        if not isinstance(build_id, str) or not build_id.strip():
+            raise ValueError(
+                f"Passing {platform_name} evidence requires a non-empty build_id"
+            )
+
+        tested_features = details.get("tested_features")
+        if (
+            not isinstance(tested_features, list)
+            or not tested_features
+            or any(
+                not isinstance(feature, str) or not feature.strip()
+                for feature in tested_features
+            )
+        ):
+            raise ValueError(
+                f"Passing {platform_name} evidence requires a non-empty tested_features list"
+            )
+    return {"status": status, "summary": summary, "evidence": details}
+
+
 def _load_desktop_evidence(path: Path) -> dict[str, dict[str, object]]:
     """Load and validate manually recorded packaged-desktop acceptance evidence."""
     with path.expanduser().resolve().open(encoding="utf-8") as stream:
@@ -129,28 +189,7 @@ def _load_desktop_evidence(path: Path) -> dict[str, dict[str, object]]:
             raise ValueError(f"Unknown desktop platform in evidence: {platform_name}")
         if not isinstance(value, dict):
             raise TypeError(f"Desktop evidence for {platform_name} must be an object")
-        status = value.get("status")
-        if status not in ACCEPTANCE_STATUSES:
-            raise ValueError(
-                f"Desktop evidence for {platform_name} must have a valid status"
-            )
-        summary = value.get("summary")
-        if summary is None:
-            summary = f"Manual packaged-desktop check recorded as {status}."
-        if not isinstance(summary, str):
-            raise TypeError(
-                f"Desktop evidence summary for {platform_name} must be text"
-            )
-        details = value.get("evidence", {})
-        if not isinstance(details, dict):
-            raise TypeError(
-                f"Desktop evidence details for {platform_name} must be an object"
-            )
-        evidence[platform_name] = {
-            "status": status,
-            "summary": summary,
-            "evidence": details,
-        }
+        evidence[platform_name] = _validate_desktop_result(platform_name, value)
     return evidence
 
 
@@ -175,6 +214,7 @@ def _apply_desktop_evidence(
         result = desktop_results.get(platform_name)
         if result is None:
             continue
+        result = _validate_desktop_result(platform_name, result)
         item.update(
             status=result["status"],
             summary=result["summary"],
@@ -187,7 +227,15 @@ def _apply_desktop_evidence(
     production["matrix"] = matrix
     production["verdict"] = _checks_verdict(list(production.get("checks", [])) + matrix)
     report["acceptance_matrix"] = matrix
-    report["verdict"] = production["verdict"]
+    synthetic_acceptance = report.get("synthetic_acceptance")
+    synthetic_verdict = (
+        synthetic_acceptance.get("verdict", "review")
+        if isinstance(synthetic_acceptance, dict)
+        else "review"
+    )
+    report["verdict"] = _overall_verdict(
+        "live", synthetic_verdict, production["verdict"]
+    )
     recorded_at = datetime.now(UTC).isoformat(timespec="seconds")
     run["desktop_evidence_recorded_at"] = recorded_at
     run["finished_at"] = recorded_at
@@ -204,6 +252,19 @@ def _report_exit_code(report: dict[str, object]) -> int:
         "fail": 1,
         "not_run": 2,
     }[str(report["verdict"])]
+
+
+def _overall_verdict(mode: str, synthetic_verdict: str, production_verdict: str) -> str:
+    if mode != "live":
+        return "synthetic_" + synthetic_verdict
+    if "fail" in (synthetic_verdict, production_verdict):
+        return "fail"
+    if synthetic_verdict in ("review", "not_run") or production_verdict in (
+        "review",
+        "not_run",
+    ):
+        return "review"
+    return "pass"
 
 
 def _database_path(value: Path | None) -> tuple[Path, bool]:
@@ -230,7 +291,15 @@ def _known_database_paths() -> set[Path]:
         if directory.is_dir():
             for pattern in ("*.db", "*.sqlite", "*.sqlite3", "*.db-*", "*.sqlite*"):
                 paths.update(item.resolve() for item in directory.glob(pattern))
-    return paths
+    return _with_sqlite_sidecars(paths)
+
+
+def _with_sqlite_sidecars(database_paths: set[Path]) -> set[Path]:
+    return database_paths | {
+        Path(str(database_path) + suffix)
+        for database_path in database_paths
+        for suffix in SQLITE_SIDECAR_SUFFIXES
+    }
 
 
 def _validate_output_path(output: Path, database_paths: set[Path]) -> Path:
@@ -241,8 +310,9 @@ def _validate_output_path(output: Path, database_paths: set[Path]) -> Path:
         candidate.name,
         flags=re.IGNORECASE,
     )
+    protected_paths = _with_sqlite_sidecars(database_paths)
     if (
-        candidate in database_paths
+        candidate in protected_paths
         or candidate.suffix.lower() in database_suffixes
         or compound_sidecar
     ):
@@ -759,7 +829,7 @@ def _report(
     production_verdict = (
         "not_run" if mode != "live" else _checks_verdict(live_checks + matrix)
     )
-    verdict = "synthetic_" + synthetic_verdict if mode != "live" else production_verdict
+    verdict = _overall_verdict(mode, synthetic_verdict, production_verdict)
     return {
         "report_version": REPORT_VERSION,
         "run": {

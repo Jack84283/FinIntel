@@ -126,7 +126,11 @@ def test_manual_desktop_evidence_can_complete_production_matrix(tmp_path):
         platform: {
             "status": "pass",
             "summary": f"Clean installed {platform} acceptance passed.",
-            "evidence": {"tested": True},
+            "evidence": {
+                "tested_at": "2026-10-31T15:30:00Z",
+                "build_id": "finintel-2bbdd62",
+                "tested_features": ["sidecar readiness", "Action History"],
+            },
         }
         for platform in module.DESKTOP_PLATFORMS
     }
@@ -170,7 +174,11 @@ def test_record_desktop_evidence_updates_existing_live_report(tmp_path):
                 platform: {
                     "status": "pass",
                     "summary": f"{platform} verified",
-                    "evidence": {"clean_install": True},
+                    "evidence": {
+                        "tested_at": "2026-10-31T15:30:00Z",
+                        "build_id": "finintel-2bbdd62",
+                        "tested_features": ["clean install", "Action History"],
+                    },
                 }
                 for platform in module.DESKTOP_PLATFORMS
             }
@@ -194,6 +202,80 @@ def test_record_desktop_evidence_updates_existing_live_report(tmp_path):
     assert updated["production_acceptance"]["verdict"] == "pass"
     assert all(item["status"] == "pass" for item in updated["acceptance_matrix"])
     assert updated["run"]["desktop_evidence_recorded_at"]
+
+
+@pytest.mark.parametrize(
+    "details",
+    [
+        {},
+        {
+            "tested_at": "2026-10-31T15:30:00Z",
+            "build_id": "finintel-2bbdd62",
+            "tested_features": [],
+        },
+        {
+            "tested_at": "not-a-timestamp",
+            "build_id": "finintel-2bbdd62",
+            "tested_features": ["Action History"],
+        },
+    ],
+)
+def test_desktop_pass_requires_complete_evidence(tmp_path, details):
+    evidence_path = tmp_path / "desktop-evidence.json"
+    evidence_path.write_text(
+        json.dumps({"macos": {"status": "pass", "evidence": details}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises((TypeError, ValueError)):
+        module._load_desktop_evidence(evidence_path)
+
+
+def test_extensionless_database_paths_protect_all_sqlite_sidecars(monkeypatch, tmp_path):
+    database = tmp_path / "marketdata"
+    monkeypatch.setenv("FININTEL_DB_PATH", str(database))
+    sidecars = {Path(str(database) + suffix) for suffix in module.SQLITE_SIDECAR_SUFFIXES}
+
+    assert sidecars.issubset(module._known_database_paths())
+    for sidecar in sidecars:
+        sidecar.write_bytes(b"sidecar contents")
+        before = sidecar.read_bytes()
+        assert module.main(["--output", str(sidecar)]) == 1
+        assert sidecar.read_bytes() == before
+
+
+def test_failed_synthetic_suite_forces_live_overall_failure(tmp_path):
+    results = {
+        provider: {"status": "pass", "summary": "ok", "evidence": {}}
+        for provider in (*module.EQUITY_PROVIDERS, "fred")
+    }
+    desktop = {
+        platform: {
+            "status": "pass",
+            "summary": "verified",
+            "evidence": {
+                "tested_at": "2026-10-31T15:30:00Z",
+                "build_id": "finintel-2bbdd62",
+                "tested_features": ["Action History"],
+            },
+        }
+        for platform in module.DESKTOP_PLATFORMS
+    }
+
+    report = module._report(
+        "live",
+        tmp_path / "synthetic.sqlite3",
+        tmp_path / "live.sqlite3",
+        [module._check("synthetic-failure", "fail", "broken")],
+        [module._check("live-check", "pass", "ok")],
+        results,
+        datetime.now(UTC),
+        desktop,
+    )
+
+    assert report["synthetic_acceptance"]["verdict"] == "fail"
+    assert report["production_acceptance"]["verdict"] == "pass"
+    assert report["verdict"] == "fail"
 
 
 def test_report_output_cannot_replace_sqlite_file(tmp_path):

@@ -84,15 +84,21 @@ package each platform. Those checks do not replace clean-machine installed-app
 acceptance. Until a platform is exercised manually, record it as `not_run`.
 
 After completing a clean installed-app check, record its result in a disposable
-JSON file. The keys are platform names and each value must contain a status;
-`summary` and `evidence` are optional:
+JSON file. The keys are platform names and each value must contain a status.
+For a `pass`, `evidence` must include an ISO-8601 `tested_at` timestamp, a
+non-empty `build_id`, and a non-empty `tested_features` list. `summary` is
+optional; blocked and not-run entries may omit the proof fields:
 
 ```json
 {
   "macos": {
     "status": "pass",
     "summary": "Clean packaged app launch and Action History passed.",
-    "evidence": {"tested_at": "2026-10-31T15:30:00Z", "app_version": "0.1.0"}
+    "evidence": {
+      "tested_at": "2026-10-31T15:30:00Z",
+      "build_id": "finintel-2bbdd62",
+      "tested_features": ["sidecar readiness", "Action History"]
+    }
   },
   "windows": {"status": "blocked", "summary": "Clean Windows machine unavailable."},
   "linux": {"status": "not_run"}
