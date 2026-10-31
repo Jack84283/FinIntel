@@ -3,6 +3,10 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 export type IndexCode = "SP500" | "DJIA" | "NDX" | "RUT";
+export type MembershipSourceKind = "official_licensed" | "verified_public" | "fund_derived_proxy" | "unknown";
+export type MembershipAvailability = "available" | "incomplete" | "proxy_only" | "unverified" | "not_imported";
+export type MembershipValidation = "complete" | "incomplete" | "unknown";
+export type MembershipConfidence = "high" | "medium" | "low" | "unknown";
 export const INDEX_CODES: IndexCode[] = ["SP500", "DJIA", "NDX", "RUT"];
 
 export interface IndexRecord {
@@ -12,6 +16,12 @@ export interface IndexRecord {
   snapshot_as_of: string | null;
   source: string | null;
   members: number | null;
+  source_kind: MembershipSourceKind | null;
+  source_as_of: string | null;
+  expected_count: number | null;
+  validation_status: MembershipValidation | null;
+  availability_status: MembershipAvailability;
+  confidence: MembershipConfidence | null;
   status: "available" | "not_imported";
 }
 
@@ -29,10 +39,39 @@ export interface ConstituentPage {
   snapshot_as_of: string | null;
   source: string | null;
   snapshot_members: number | null;
+  source_kind: MembershipSourceKind | null;
+  source_as_of: string | null;
+  expected_count: number | null;
+  validation_status: MembershipValidation | null;
+  availability_status: MembershipAvailability;
+  confidence: MembershipConfidence | null;
   total: number;
   limit: number;
   offset: number;
   items: Constituent[];
+}
+
+export interface MembershipChange {
+  symbol: string;
+  name: string;
+  asset_type: string;
+  change: "added" | "removed";
+}
+
+export interface MembershipChangePage {
+  code: IndexCode;
+  name: string;
+  from_requested_as_of: string;
+  to_requested_as_of: string;
+  from_snapshot_as_of: string | null;
+  to_snapshot_as_of: string | null;
+  from_source: string | null;
+  to_source: string | null;
+  status: "available" | "uncertain" | "unknown";
+  total: number;
+  limit: number;
+  offset: number;
+  items: MembershipChange[];
 }
 
 export interface SymbolIndexes {
@@ -54,6 +93,20 @@ function nullableString(raw: unknown): raw is string | null {
 function nullableCount(raw: unknown): raw is number | null {
   return raw === null || (Number.isSafeInteger(raw) && (raw as number) >= 0);
 }
+function validSourceKind(raw: unknown): raw is MembershipSourceKind {
+  return raw === null || raw === "official_licensed" || raw === "verified_public" ||
+    raw === "fund_derived_proxy" || raw === "unknown";
+}
+function validAvailability(raw: unknown): raw is MembershipAvailability {
+  return raw === "available" || raw === "incomplete" || raw === "proxy_only" ||
+    raw === "unverified" || raw === "not_imported";
+}
+function validValidation(raw: unknown): raw is MembershipValidation | null {
+  return raw === null || raw === "complete" || raw === "incomplete" || raw === "unknown";
+}
+function validConfidence(raw: unknown): raw is MembershipConfidence | null {
+  return raw === null || raw === "high" || raw === "medium" || raw === "low" || raw === "unknown";
+}
 function validDate(date: string): boolean {
   return date === "" || /^\d{4}-\d{2}-\d{2}$/.test(date);
 }
@@ -62,6 +115,9 @@ function parseIndex(raw: unknown): IndexRecord {
   if (!isCode(obj.code) || typeof obj.name !== "string" ||
       typeof obj.requested_as_of !== "string" || !nullableString(obj.snapshot_as_of) ||
       !nullableString(obj.source) || !nullableCount(obj.members) ||
+      !validSourceKind(obj.source_kind) || !nullableString(obj.source_as_of) ||
+      !nullableCount(obj.expected_count) || !validValidation(obj.validation_status) ||
+      !validAvailability(obj.availability_status) || !validConfidence(obj.confidence) ||
       (obj.status !== "available" && obj.status !== "not_imported")) {
     throw new Error("Invalid index snapshot metadata.");
   }
@@ -100,6 +156,9 @@ export async function fetchConstituents(
   ));
   if (result.code !== code || !nullableString(result.snapshot_as_of) ||
       !nullableString(result.source) || !nullableCount(result.snapshot_members) ||
+      !validSourceKind(result.source_kind) || !nullableString(result.source_as_of) ||
+      !nullableCount(result.expected_count) || !validValidation(result.validation_status) ||
+      !validAvailability(result.availability_status) || !validConfidence(result.confidence) ||
       typeof result.requested_as_of !== "string" ||
       typeof result.name !== "string" || result.offset !== offset ||
       result.limit !== limit || !Number.isSafeInteger(result.total) ||
@@ -139,6 +198,39 @@ export async function fetchStockIndexes(symbol: string, asOf = ""): Promise<Symb
       return { ...parseIndex(item), is_member: item.is_member as boolean | null };
     }),
   };
+}
+
+export async function fetchMembershipChanges(
+  code: IndexCode, fromAsOf: string, toAsOf: string, q = "", offset = 0, limit = 50,
+): Promise<MembershipChangePage> {
+  if (!isCode(code) || !validDate(fromAsOf) || !validDate(toAsOf) || !fromAsOf || !toAsOf ||
+      q.length > 80 || !Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) ||
+      limit < 1 || limit > 100) throw new Error("Invalid index change lookup.");
+  const params = new URLSearchParams({
+    from_as_of: fromAsOf, to_as_of: toAsOf, q, limit: String(limit), offset: String(offset),
+  });
+  const result = record(await readLocal(
+    "/api/v1/market-data/indexes/" + code + "/changes?" + params,
+    "index_membership_changes", { code, fromAsOf, toAsOf, q, limit, offset },
+  ));
+  if (result.code !== code || typeof result.name !== "string" ||
+      typeof result.from_requested_as_of !== "string" || typeof result.to_requested_as_of !== "string" ||
+      !nullableString(result.from_snapshot_as_of) || !nullableString(result.to_snapshot_as_of) ||
+      !nullableString(result.from_source) || !nullableString(result.to_source) ||
+      (result.status !== "available" && result.status !== "uncertain" && result.status !== "unknown") ||
+      !Number.isSafeInteger(result.total) || (result.total as number) < 0 || result.limit !== limit ||
+      result.offset !== offset || !Array.isArray(result.items) || result.items.length > limit) {
+    throw new Error("Malformed index membership change page.");
+  }
+  const items = result.items.map((value: unknown): MembershipChange => {
+    const item = record(value);
+    if (typeof item.symbol !== "string" || typeof item.name !== "string" ||
+        typeof item.asset_type !== "string" || (item.change !== "added" && item.change !== "removed")) {
+      throw new Error("Invalid index membership change.");
+    }
+    return item as unknown as MembershipChange;
+  });
+  return { ...result, items } as MembershipChangePage;
 }
 
 /** Acquisition is explicit and only the local backend knows the provider key. */

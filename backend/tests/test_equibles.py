@@ -35,6 +35,9 @@ def test_acquisition_paginates_and_commits_once(monkeypatch):
     assert seen == [("SP500", 0), ("SP500", 1)]
     assert saved[0][0][3] == ["AAPL", "MSFT"]
     assert saved[0][1]["expected_count"] == 2
+    assert saved[0][1]["source_expected_count"] == 2
+    assert saved[0][1]["source_kind"] == "fund_derived_proxy"
+    assert saved[0][1]["confidence"] == "low"
     assert saved[0][1]["names"]["AAPL"] == "Apple Inc."
     assert result["provenance"] == "fund_derived_proxy"
 

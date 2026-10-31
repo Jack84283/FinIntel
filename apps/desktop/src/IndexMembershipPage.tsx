@@ -16,6 +16,25 @@ import {
 
 const FETCH_SIZE = 100;
 
+function availabilityLabel(status: IndexRecord["availability_status"]): string {
+  return {
+    available: "Available",
+    incomplete: "Incomplete",
+    proxy_only: "Proxy only",
+    unverified: "Unverified",
+    not_imported: "Not imported",
+  }[status];
+}
+
+function sourceKindLabel(status: IndexRecord["source_kind"]): string {
+  return {
+    official_licensed: "Official licensed",
+    verified_public: "Verified public",
+    fund_derived_proxy: "Fund-derived proxy",
+    unknown: "Unknown",
+  }[status ?? "unknown"];
+}
+
 /** Dated evidence-backed equity index membership; does not infer from ETF holdings. */
 export function IndexMembershipPage() {
   const { t } = useLocale();
@@ -216,6 +235,9 @@ export function IndexMembershipPage() {
                   <p className="text-xs text-muted-foreground">
                     {item?.snapshot_as_of ? t("Snapshot ") + item.snapshot_as_of : t("No imported snapshot")}
                   </p>
+                  <p className="text-xs text-muted-foreground">
+                    {t(availabilityLabel(item?.availability_status ?? "not_imported"))}
+                  </p>
                 </button>
               );
             })}
@@ -293,7 +315,9 @@ export function IndexMembershipPage() {
           <CardTitle>{selectedMeta?.name ?? selected} — {t("Constituents")}</CardTitle>
           <CardDescription>
             {snapshot?.snapshot_as_of
-              ? t("Effective snapshot: ") + snapshot.snapshot_as_of + " · " + t("Source") + ": " + (snapshot.source ? snapshot.source.replace("ETF holdings proxy", t("ETF holdings proxy")) : t("Unknown"))
+              ? t("Effective snapshot: ") + snapshot.snapshot_as_of + " · " + t("Source") + ": " + (snapshot.source ? snapshot.source.replace("ETF holdings proxy", t("ETF holdings proxy")) : t("Unknown")) +
+                " · " + t("Availability") + ": " + t(availabilityLabel(snapshot.availability_status)) +
+                " · " + t("Source type") + ": " + t(sourceKindLabel(snapshot.source_kind))
               : t("No constituent snapshot has been imported for this date.")}
           </CardDescription>
         </CardHeader>
