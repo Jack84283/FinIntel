@@ -82,6 +82,10 @@ PROVIDER_PUBLICATION_DELAY_SESSIONS = {
 }
 
 
+class _AcquisitionStopped(Exception):
+    """Stop before an HTTP request when a scheduled job is paused or cancelled."""
+
+
 def now_utc() -> datetime:
     return datetime.now(UTC)
 
@@ -462,7 +466,7 @@ class DailyAcquisitionScheduler:
         active = get_active_job()
         if active is not None:
             raise RuntimeError("A daily acquisition job is already active")
-        self._reset_explicit_provider_states(settings)
+        self._reset_explicit_provider_states(settings, include_fred=True)
         job = create_job(
             kind="manual",
             provider=str(settings["primary_provider"]),
@@ -494,20 +498,38 @@ class DailyAcquisitionScheduler:
         return result
 
     def retry_failed(self, job_id: str) -> dict[str, object] | None:
-        settings = get_settings()
-        self._reset_explicit_provider_states(settings)
         result = retry_failed_job(job_id)
+        if result:
+            self._reset_explicit_provider_states(result)
         if result and result.get("id"):
             self._launch(str(result["id"]))
         self._wake.set()
         return result
 
     @staticmethod
-    def _reset_explicit_provider_states(settings: dict[str, object]) -> None:
+    def _reset_explicit_provider_states(
+        source: dict[str, object], *, include_fred: bool = False
+    ) -> None:
         """Reset providers only for an explicit user-triggered recovery action."""
-        providers = [str(settings["primary_provider"]), "fred"]
-        if isinstance(settings["secondary_provider"], str):
-            providers.append(str(settings["secondary_provider"]))
+        valid_providers = {*PROVIDERS, "fred"}
+        providers: list[str] = []
+        for key in ("primary_provider", "provider"):
+            value = source.get(key)
+            if isinstance(value, str) and value in valid_providers:
+                providers.append(value)
+        if include_fred:
+            providers.append("fred")
+        value = source.get("secondary_provider")
+        if isinstance(value, str) and value in valid_providers:
+            providers.append(value)
+        for item in source.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            value = item.get("provider")
+            if isinstance(value, str) and value in valid_providers:
+                providers.append(value)
+            if item.get("kind") == "index":
+                providers.append("fred")
         for provider in dict.fromkeys(providers):
             reset_provider_status(provider)
 
@@ -713,10 +735,22 @@ class DailyAcquisitionScheduler:
             self._stop.wait(min(0.5, max(0.01, deadline - time.monotonic())))
         return not self._stop.is_set() and not (lease_lost and lease_lost.is_set())
 
-    @staticmethod
-    def _request_guard(provider: str):
+    def _wait_request_slot(self, seconds: float, job_id: str, lease_lost: threading.Event) -> None:
+        deadline = time.monotonic() + max(0.0, seconds)
+        while True:
+            if self._stop.is_set() or self._should_stop(job_id, lease_lost=lease_lost):
+                raise _AcquisitionStopped
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            self._stop.wait(min(0.5, remaining))
+
+    def _request_guard(self, provider: str, job_id: str, lease_lost: threading.Event):
         """Reserve a durable request slot before each provider HTTP request."""
-        return provider_request_guard(provider)
+        return provider_request_guard(
+            provider,
+            sleeper=lambda seconds: self._wait_request_slot(seconds, job_id, lease_lost),
+        )
 
     def _run_index(
         self,
@@ -748,7 +782,9 @@ class DailyAcquisitionScheduler:
         for attempt in range(attempts):
             set_item_running(job_id, "index", code, owner_token=owner)
             try:
-                result = acquire_index_closes(code, request_guard=self._request_guard("fred"))
+                result = acquire_index_closes(
+                    code, request_guard=self._request_guard("fred", job_id, lease_lost)
+                )
                 record_item(
                     job_id,
                     "index",
@@ -766,6 +802,8 @@ class DailyAcquisitionScheduler:
                 return
             except LeaseLostError:
                 raise
+            except _AcquisitionStopped:
+                return
             except (ProviderRateLimited, ProviderAccessDenied) as exc:
                 blocked_providers.add("fred")
                 state = (
@@ -887,7 +925,7 @@ class DailyAcquisitionScheduler:
                         provider=selected,
                         period="5y",
                         start_date=start if selected != "alpha_vantage" else None,
-                        request_guard=self._request_guard(selected),
+                        request_guard=self._request_guard(selected, job_id, lease_lost),
                     )
                     provider_end = (
                         latest_provider_eligible_session(selected, expected_session)
@@ -922,6 +960,8 @@ class DailyAcquisitionScheduler:
                     break
                 except LeaseLostError:
                     raise
+                except _AcquisitionStopped:
+                    return
                 except (ProviderRateLimited, ProviderAccessDenied) as exc:
                     last_error = exc
                     blocked_providers.add(selected)

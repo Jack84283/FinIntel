@@ -1,7 +1,11 @@
 """No-network tests for calendar-aware scheduling and monitoring."""
 
+import threading
 from datetime import UTC, date, datetime
 
+import pytest
+
+from finintel.market_data import daily_scheduler
 from finintel.market_data.daily_scheduler import (
     DailyAcquisitionScheduler,
     automatic_schedule_dates,
@@ -178,7 +182,15 @@ def test_explicit_manual_and_retry_recovery_resets_fred(monkeypatch):
     monkeypatch.setattr("finintel.market_data.daily_scheduler.get_job", lambda *_: None)
     monkeypatch.setattr(
         "finintel.market_data.daily_scheduler.retry_failed_job",
-        lambda _job_id: {"id": "retry-job"},
+        lambda _job_id: {
+            "id": "retry-job",
+            "provider": "alpha_vantage",
+            "secondary_provider": None,
+            "items": [
+                {"kind": "equity", "provider": "tiingo"},
+                {"kind": "index", "provider": "fred"},
+            ],
+        },
     )
     scheduler = DailyAcquisitionScheduler()
     monkeypatch.setattr(scheduler, "_launch", lambda job_id: launched.append(job_id))
@@ -186,5 +198,26 @@ def test_explicit_manual_and_retry_recovery_resets_fred(monkeypatch):
     assert scheduler.trigger_manual()["id"] == "manual-job"
     assert scheduler.retry_failed("old-job")["id"] == "retry-job"
 
-    assert reset_calls == ["alpaca_sip", "fred", "tiingo", "alpaca_sip", "fred", "tiingo"]
+    assert reset_calls == [
+        "alpaca_sip",
+        "fred",
+        "tiingo",
+        "alpha_vantage",
+        "tiingo",
+        "fred",
+    ]
     assert launched == ["manual-job", "retry-job"]
+
+
+def test_scheduled_request_guard_stops_before_http_on_cancellation(monkeypatch):
+    scheduler = DailyAcquisitionScheduler()
+    lease_lost = threading.Event()
+    monkeypatch.setattr(scheduler, "_should_stop", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        daily_scheduler,
+        "provider_request_guard",
+        lambda _provider, *, sleeper: sleeper(60),
+    )
+
+    with pytest.raises(daily_scheduler._AcquisitionStopped):
+        scheduler._request_guard("alpaca_sip", "job-id", lease_lost)()

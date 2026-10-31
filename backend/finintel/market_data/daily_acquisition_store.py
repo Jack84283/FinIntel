@@ -11,6 +11,7 @@ import math
 import re
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -340,14 +341,19 @@ def reserve_provider_request(
         conn.close()
 
 
-def provider_request_guard(provider: str, *, db: Path | None = None):
+def provider_request_guard(
+    provider: str,
+    *,
+    db: Path | None = None,
+    sleeper: Callable[[float], None] | None = None,
+):
     """Create the shared request hook used by scheduled and manual acquisition."""
 
     def reserve() -> None:
         reservation = reserve_provider_request(provider, db=db)
         wait_seconds = float(reservation.get("wait_seconds", 0.0))
-        if wait_seconds > 0:
-            time.sleep(wait_seconds)
+        if wait_seconds > 0 or sleeper is not None:
+            (sleeper or time.sleep)(wait_seconds)
 
     return reserve
 
