@@ -675,6 +675,23 @@ def _migrate(conn: sqlite3.Connection) -> None:
             }
             if "payload_sha256" not in ingestion_columns:
                 conn.execute("ALTER TABLE index_ingestion_runs ADD COLUMN payload_sha256 TEXT")
+            # Preserve coverage metadata for databases that already contain
+            # index observations from before the capability catalog existed.
+            conn.execute(
+                "UPDATE index_series_catalog SET "
+                "local_first_session=(SELECT MIN(d.session_date) FROM index_daily_closes d "
+                "WHERE d.index_code=index_series_catalog.index_code "
+                "AND d.provider=index_series_catalog.provider), "
+                "local_last_session=(SELECT MAX(d.session_date) FROM index_daily_closes d "
+                "WHERE d.index_code=index_series_catalog.index_code "
+                "AND d.provider=index_series_catalog.provider), "
+                "coverage_updated_at=(SELECT MAX(d.retrieved_at) FROM index_daily_closes d "
+                "WHERE d.index_code=index_series_catalog.index_code "
+                "AND d.provider=index_series_catalog.provider) "
+                "WHERE EXISTS (SELECT 1 FROM index_daily_closes d "
+                "WHERE d.index_code=index_series_catalog.index_code "
+                "AND d.provider=index_series_catalog.provider)"
+            )
             conn.execute("PRAGMA user_version = 12")
             conn.commit()
         except sqlite3.Error as exc:

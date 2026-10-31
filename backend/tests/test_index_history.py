@@ -285,6 +285,45 @@ def test_version_six_migrates_without_erasing_equity_data(tmp_path):
     assert list((db.parent / "backups").glob("finintel-pre-restore-*.sqlite3"))
 
 
+def test_schema_v10_migration_backfills_existing_index_coverage(tmp_path):
+    db = tmp_path / "legacy.sqlite3"
+    conn = _write_connection(db)
+    with conn:
+        conn.execute("DROP TABLE index_ingestion_runs")
+        conn.execute("DROP TABLE index_series_catalog")
+        conn.executemany(
+            "INSERT INTO index_daily_closes"
+            "(index_code,provider,session_date,close,retrieved_at,source_url) "
+            "VALUES ('SP500','fred',?,?,?,?)",
+            [
+                (
+                    "2026-10-21",
+                    "5998.50",
+                    "2026-10-24T10:00:00+00:00",
+                    "https://fred.stlouisfed.org/series/SP500",
+                ),
+                (
+                    "2026-10-23",
+                    "6000.25",
+                    "2026-10-25T10:00:00+00:00",
+                    "https://fred.stlouisfed.org/series/SP500",
+                ),
+            ],
+        )
+        conn.execute("PRAGMA user_version=10")
+    conn.close()
+
+    migrated = _write_connection(db)
+    migrated.close()
+
+    item = next(record for record in index_catalog(db=db) if record["code"] == "SP500")
+    assert item["sessions"] == 2
+    assert item["local_first_session"] == "2026-10-21"
+    assert item["local_last_session"] == "2026-10-23"
+    assert item["coverage_updated_at"] == "2026-10-25T10:00:00+00:00"
+    assert read_index_closes("SP500", db=db)["observations"]
+
+
 def test_api_requires_desktop_auth_and_retains_read_only_get(tmp_path, monkeypatch):
     db = tmp_path / "api.sqlite3"
     monkeypatch.setenv("FININTEL_DB_PATH", str(db))

@@ -31,8 +31,9 @@ These are metadata only: API credentials, provider payloads, and private
 financial information are not stored in the request ledger or index metadata.
 Version 12 separates local index coverage from nullable provider availability
 bounds and distinguishes raw provider payload hashes from normalized
-observation hashes. Existing price, import, membership, index observations,
-and backup tables are preserved by additive migration.
+observation hashes; it backfills local coverage from existing index
+observations. Existing price, import, membership, index observations, and
+backup tables are preserved by additive migration.
 
 ## Correctness and precedence
 The importer verifies a real local JSON file (not a symlink, <=25 MiB),
