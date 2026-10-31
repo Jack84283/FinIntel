@@ -108,7 +108,7 @@ def test_v5_migration_preserves_old_index_snapshots(tmp_path):
     conn.close()
     load_membership("NDX", "2026-10-02", "added", ["AAPL"], db=db)
     with sqlite3.connect(db) as check:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 10
         assert check.execute("SELECT COUNT(*) FROM index_memberships").fetchone()[0] == 2
     assert {x["index_code"] for x in memberships("AAPL", db=db)} == {"SP500", "NDX"}
 

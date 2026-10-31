@@ -9,12 +9,18 @@ from __future__ import annotations
 import csv
 import io
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import httpx
 
+from finintel.market_data.provider import (
+    ProviderAccessDenied,
+    ProviderRateLimited,
+    ProviderUnavailable,
+)
 from finintel.storage.db import (
     StorageError,
     _read_connection,
@@ -95,22 +101,35 @@ def parse_fred_csv(code: str, payload: bytes) -> list[tuple[str, str]]:
         raise IndexHistoryError("Index history CSV cannot be decoded") from exc
 
 
-def fetch_fred_index(code: str, *, client: httpx.Client | None = None) -> list[tuple[str, str]]:
+def fetch_fred_index(
+    code: str,
+    *,
+    client: httpx.Client | None = None,
+    request_guard: Callable[[], None] | None = None,
+) -> list[tuple[str, str]]:
     if code not in INDEX_SERIES:
         raise IndexHistoryError("Unsupported index code")
     own = client is None
     session = client or httpx.Client(timeout=30, follow_redirects=False)
     try:
+        if request_guard is not None:
+            request_guard()
         response = session.get(
             FRED_CSV,
             params={"id": INDEX_SERIES[code][1]},
             headers={"Accept": "text/csv"},
         )
+        if response.status_code == 429:
+            raise ProviderRateLimited("FRED request quota reached")
+        if response.status_code in (401, 403):
+            raise ProviderAccessDenied("FRED rejected the index request")
+        if response.status_code >= 500:
+            raise ProviderUnavailable("FRED index history is temporarily unavailable")
         if response.status_code != 200:
             raise IndexHistoryError("FRED index history is temporarily unavailable")
         return parse_fred_csv(code, response.content)
     except httpx.RequestError as exc:
-        raise IndexHistoryError("Could not contact FRED for index history") from exc
+        raise ProviderUnavailable("Could not contact FRED for index history") from exc
     finally:
         if own:
             session.close()
@@ -180,10 +199,18 @@ def store_index_closes(
 
 
 def acquire_index_closes(
-    code: str, *, db: Path | None = None, client: httpx.Client | None = None
+    code: str,
+    *,
+    db: Path | None = None,
+    client: httpx.Client | None = None,
+    request_guard: Callable[[], None] | None = None,
 ) -> dict[str, object]:
     # Explicit user action only. No periodic downloads.
-    return store_index_closes(code, fetch_fred_index(code, client=client), db=db)
+    return store_index_closes(
+        code,
+        fetch_fred_index(code, client=client, request_guard=request_guard),
+        db=db,
+    )
 
 
 def index_catalog(*, db: Path | None = None) -> list[dict[str, object]]:

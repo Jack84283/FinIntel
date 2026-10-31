@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import HistoricalBatch
 from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -251,6 +251,24 @@ CREATE TABLE IF NOT EXISTS daily_acquisition_lock (
 );
 """
 
+# Provider request accounting is metadata only. It never stores credentials or
+# response payloads; the scheduler uses it to reserve a request slot before a
+# provider HTTP call and to make quota/throttle state visible after restart.
+SCHEMA_V10 = """
+CREATE TABLE IF NOT EXISTS daily_acquisition_provider_usage (
+    provider TEXT NOT NULL,
+    usage_date TEXT NOT NULL,
+    request_count INTEGER NOT NULL DEFAULT 0 CHECK(request_count >= 0),
+    last_request_at TEXT,
+    quota_state TEXT NOT NULL DEFAULT 'available',
+    quota_message TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(provider, usage_date)
+);
+CREATE INDEX IF NOT EXISTS daily_acquisition_provider_usage_date
+    ON daily_acquisition_provider_usage(usage_date, provider);
+"""
+
 
 class StorageError(Exception):
     """Safe failure message for local CLI or API consumers."""
@@ -279,7 +297,7 @@ def _ensure_version(conn: sqlite3.Connection, *, allow_missing: bool) -> bool:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == 0 and allow_missing:
         return False
-    if version not in (1, 2, 3, 4, 5, 6, 7, 8, SCHEMA_VERSION):
+    if version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, SCHEMA_VERSION):
         raise StorageError(
             "SQLite schema version is unsupported; expected version "
             + str(SCHEMA_VERSION)
@@ -460,6 +478,24 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if conn.in_transaction:
                 conn.rollback()
             raise StorageError("Unable to migrate daily acquisition storage to v9") from exc
+    if version == 9:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            settings_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(daily_acquisition_settings)")
+            }
+            if "provider_limits" not in settings_columns:
+                conn.execute(
+                    "ALTER TABLE daily_acquisition_settings ADD COLUMN provider_limits TEXT "
+                    "NOT NULL DEFAULT '{}'"
+                )
+            conn.executescript(SCHEMA_V10)
+            conn.execute("PRAGMA user_version = 10")
+            conn.commit()
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate daily acquisition storage to v10") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:

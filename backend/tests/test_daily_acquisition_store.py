@@ -282,3 +282,55 @@ def test_get_settings_migrates_before_reading_legacy_schema(tmp_path):
         conn.close()
     settings = get_settings(db=db)
     assert settings["catch_up_limit"] == 5
+
+
+def test_provider_request_budget_and_cross_process_pacing_are_durable(tmp_path):
+    db = tmp_path / "daily.sqlite3"
+    update_settings(
+        {
+            "provider_limits": {
+                "alpaca_sip": {"requests_per_minute": 60, "daily_request_budget": 2},
+            }
+        },
+        db=db,
+    )
+    from datetime import UTC, datetime
+
+    from finintel.market_data.daily_acquisition_store import (
+        mark_provider_status,
+        provider_usage_status,
+        reserve_provider_request,
+    )
+    from finintel.market_data.provider import ProviderRateLimited
+
+    moment = datetime(2026, 10, 29, 20, 0, tzinfo=UTC)
+    first = reserve_provider_request("alpaca_sip", db=db, now=moment)
+    second = reserve_provider_request("alpaca_sip", db=db, now=moment)
+    assert first["request_count"] == 1
+    assert second["request_count"] == 2
+    assert second["wait_seconds"] == 1
+    with pytest.raises(ProviderRateLimited):
+        reserve_provider_request("alpaca_sip", db=db, now=moment)
+    mark_provider_status("alpaca_sip", "quota_exhausted", "test quota", db=db, now=moment)
+    assert provider_usage_status(db=db)["alpaca_sip"]["quota_state"] == "quota_exhausted"
+
+
+def test_history_filters_provider_from_item_and_execution_date(tmp_path):
+    db = tmp_path / "daily.sqlite3"
+    update_settings({}, db=db)
+    job = create_job(
+        kind="manual",
+        provider="alpaca_sip",
+        secondary_provider="tiingo",
+        scheduled_for="2026-10-29T20:00:00+00:00",
+        schedule_date=None,
+        equity_symbols=["AAPL"],
+        index_codes=[],
+        db=db,
+    )
+    job_id = str(job["id"])
+    set_item_running(job_id, "equity", "AAPL", db=db)
+    record_item(job_id, "equity", "AAPL", status="completed", provider="tiingo", db=db)
+    finish_job(job_id, status="completed", db=db)
+    assert list_history(provider="tiingo", execution_date="2026-10-29", db=db)["total"] == 1
+    assert list_history(provider="alpha_vantage", execution_date="2026-10-29", db=db)["total"] == 0

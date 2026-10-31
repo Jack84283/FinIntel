@@ -8,6 +8,7 @@ import json
 import os
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
@@ -145,7 +146,12 @@ def _decode_page(content: bytes, symbol: str) -> tuple[list[DailyOHLCV], str | N
 class AlpacaDailyProvider:
     """One explicitly requested bounded date interval, with page-token traversal."""
 
-    def __init__(self, *, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        client: httpx.Client | None = None,
+        request_guard: Callable[[], None] | None = None,
+    ) -> None:
         self._key = get_secret("alpaca_sip", "key_id").strip()
         self._secret = get_secret("alpaca_sip", "secret_key").strip()
         if not self._key or not self._secret:
@@ -153,6 +159,7 @@ class AlpacaDailyProvider:
                 "Configure FININTEL_ALPACA_API_KEY_ID and FININTEL_ALPACA_API_SECRET_KEY"
             )
         self._client = client
+        self._request_guard = request_guard
 
     def fetch_daily(
         self, symbol: str, *, period: str = "10y", start_date: date | None = None
@@ -210,6 +217,8 @@ class AlpacaDailyProvider:
                 payload["page_token"] = page_token
             try:
                 _pace_request()
+                if self._request_guard is not None:
+                    self._request_guard()
                 response = client.get(
                     ALPACA_ENDPOINT,
                     params=payload,

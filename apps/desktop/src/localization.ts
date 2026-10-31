@@ -652,6 +652,23 @@ const additionalChinese: Readonly<Record<string, string>> = {
   "Automatic": "自动",
   "Manual": "手动",
   "Loading daily acquisition history": "正在加载每日采集历史",
+  "Elapsed": "耗时",
+  "Last successful trading session": "最近成功交易日",
+  "Provider quota and throttling": "数据源配额与限流",
+  "Recent acquisition errors": "最近采集错误",
+  "available": "可用",
+  "throttled": "限流中",
+  "quota_exhausted": "配额耗尽",
+  "budget_exhausted": "本地预算耗尽",
+  "auth_failed": "认证失败",
+  "Execution date": "执行日期",
+  "Instrument details": "证券详情",
+  "Hide details": "隐藏详情",
+  "Loading instrument details…": "正在加载证券详情…",
+  "Daily acquisition job details could not be loaded.": "无法加载每日采集任务详情。",
+  "missing sessions": "个缺失交易日",
+  "daily jobs": "个每日任务",
+  "No matching daily jobs": "没有匹配的每日任务",
 };
 
 export type TranslationKey = keyof typeof translations.en;

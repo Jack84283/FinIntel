@@ -37,3 +37,14 @@ def test_daily_status_defaults_and_settings_are_local_only(tmp_path, monkeypatch
         assert payload["scheduled_execution_time"] == "20:30"
         assert payload["job"]["id"] is None
         assert isinstance(payload["next_scheduled_execution"], str)
+        assert "provider_quota" in payload
+        assert payload["provider_quota"]["alpaca_sip"]["requests_used"] == 0
+
+
+def test_daily_history_rejects_invalid_execution_date(tmp_path, monkeypatch):
+    monkeypatch.setenv("FININTEL_DB_PATH", str(tmp_path / "daily.sqlite3"))
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/daily-acquisition/history", params={"execution_date": "not-a-date"}
+        )
+    assert response.status_code == 422

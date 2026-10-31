@@ -12,6 +12,11 @@ from finintel.market_data.index_history import (
     index_catalog,
     read_index_closes,
 )
+from finintel.market_data.provider import (
+    ProviderAccessDenied,
+    ProviderRateLimited,
+    ProviderUnavailable,
+)
 from finintel.settings.api import _require_managed
 from finintel.storage.db import StorageError
 
@@ -79,6 +84,10 @@ def download_index_daily_closes(code: IndexCode, request: Request) -> dict[str, 
     try:
         try:
             return acquire_index_closes(code)
+        except ProviderRateLimited as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except (ProviderAccessDenied, ProviderUnavailable) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         except IndexHistoryError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except StorageError as exc:

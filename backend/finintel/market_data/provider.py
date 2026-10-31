@@ -162,6 +162,7 @@ class AlphaVantageDailyProvider:
         client: httpx.Client | None = None,
         max_attempts: int = 3,
         sleeper: Callable[[float], None] = time.sleep,
+        request_guard: Callable[[], None] | None = None,
     ) -> None:
         self._api_key = (api_key or get_secret("alpha_vantage", "api_key")).strip()
         if not self._api_key:
@@ -174,6 +175,7 @@ class AlphaVantageDailyProvider:
         self._client = client
         self._max_attempts = max_attempts
         self._sleeper = sleeper
+        self._request_guard = request_guard
 
     def fetch_daily(self, symbol: str, *, outputsize: str = "compact") -> HistoricalBatch:
         instrument = symbol.strip().upper()
@@ -209,6 +211,8 @@ class AlphaVantageDailyProvider:
     ) -> HistoricalBatch:
         for attempt in range(self._max_attempts):
             try:
+                if self._request_guard is not None:
+                    self._request_guard()
                 response = client.get(API_ENDPOINT, params=params)
             except httpx.RequestError as exc:
                 # Do not stringify httpx exceptions; some include the API key URL.
@@ -221,6 +225,8 @@ class AlphaVantageDailyProvider:
                 raise ProviderRateLimited(
                     "Alpha Vantage rate limit reached; no automatic retry attempted"
                 )
+            if response.status_code in (401, 403):
+                raise ProviderAccessDenied("Alpha Vantage credentials or access were rejected")
             if response.status_code in RETRYABLE_STATUS_CODES:
                 if attempt + 1 < self._max_attempts:
                     self._sleeper(min(2.0, 0.25 * (2**attempt)))

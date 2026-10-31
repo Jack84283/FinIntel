@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -24,6 +24,13 @@ from finintel.storage.db import (
 )
 
 PROVIDERS = ("alpaca_sip", "tiingo", "alpha_vantage")
+DEFAULT_PROVIDER_LIMITS = {
+    # Conservative defaults; users with larger entitlements can raise these
+    # values in local settings without changing provider adapters.
+    "alpaca_sip": {"requests_per_minute": 180, "daily_request_budget": 10000},
+    "tiingo": {"requests_per_minute": 60, "daily_request_budget": 1000},
+    "alpha_vantage": {"requests_per_minute": 5, "daily_request_budget": 25},
+}
 JOB_STATUSES = ("scheduled", "running", "paused", "completed", "partial", "failed", "cancelled")
 ITEM_STATUSES = ("pending", "running", "completed", "incomplete", "failed", "cancelled")
 TIME_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
@@ -38,6 +45,7 @@ DEFAULT_SETTINGS = {
     "retry_attempts": 3,
     "retry_backoff_seconds": 2.0,
     "catch_up_limit": 5,
+    "provider_limits": DEFAULT_PROVIDER_LIMITS,
     "updated_at": None,
 }
 
@@ -63,9 +71,43 @@ def _json(value: str | None, fallback: object) -> object:
         return fallback
 
 
+def _provider_limits(value: object) -> dict[str, dict[str, int]]:
+    """Normalize stored/provider-supplied request policies without mutation."""
+    if not isinstance(value, dict):
+        value = {}
+    result = {
+        provider: dict(limits) for provider, limits in DEFAULT_PROVIDER_LIMITS.items()
+    }
+    for provider, raw in value.items():
+        if provider not in PROVIDERS:
+            raise ValueError(f"provider_limits contains unsupported provider: {provider}")
+        if not isinstance(raw, dict):
+            raise ValueError(f"provider_limits.{provider} must be an object")
+        result[provider].update(raw)
+    for provider, limits in result.items():
+        requests_per_minute = limits.get("requests_per_minute")
+        daily_request_budget = limits.get("daily_request_budget")
+        if (
+            isinstance(requests_per_minute, bool)
+            or not isinstance(requests_per_minute, int)
+            or not 1 <= requests_per_minute <= 10000
+        ):
+            raise ValueError(f"provider_limits.{provider}.requests_per_minute must be 1-10000")
+        if (
+            isinstance(daily_request_budget, bool)
+            or not isinstance(daily_request_budget, int)
+            or not 0 <= daily_request_budget <= 1000000
+        ):
+            raise ValueError(
+                f"provider_limits.{provider}.daily_request_budget must be 0-1000000"
+            )
+    return result
+
+
 def _settings_row(row) -> dict[str, object]:
     if row is None:
-        return dict(DEFAULT_SETTINGS)
+        return {**DEFAULT_SETTINGS, "provider_limits": _provider_limits(DEFAULT_PROVIDER_LIMITS)}
+    raw_limits = _json(row["provider_limits"] if "provider_limits" in row.keys() else None, {})
     return {
         "enabled": bool(row["enabled"]),
         "schedule_time": row["schedule_time"],
@@ -76,6 +118,7 @@ def _settings_row(row) -> dict[str, object]:
         "retry_attempts": int(row["retry_attempts"]),
         "retry_backoff_seconds": float(row["retry_backoff_seconds"]),
         "catch_up_limit": int(row["catch_up_limit"]),
+        "provider_limits": _provider_limits(raw_limits),
         "updated_at": row["updated_at"] or None,
     }
 
@@ -112,6 +155,7 @@ def _validate_settings(values: dict[str, object]) -> dict[str, object]:
         raise ValueError("retry_backoff_seconds must be between 0 and 300")
     if not isinstance(merged["catch_up_limit"], int) or not 1 <= merged["catch_up_limit"] <= 30:
         raise ValueError("catch_up_limit must be between 1 and 30")
+    merged["provider_limits"] = _provider_limits(merged["provider_limits"])
     return merged
 
 
@@ -122,7 +166,7 @@ def get_settings(*, db: Path | None = None) -> dict[str, object]:
         migration_conn.close()
     conn = _read_connection(path)
     if conn is None:
-        return dict(DEFAULT_SETTINGS)
+        return {**DEFAULT_SETTINGS, "provider_limits": _provider_limits(DEFAULT_PROVIDER_LIMITS)}
     try:
         row = conn.execute("SELECT * FROM daily_acquisition_settings WHERE id=1").fetchone()
         return _settings_row(row)
@@ -138,13 +182,24 @@ def update_settings(values: dict[str, object], *, db: Path | None = None) -> dic
     conn = _write_connection(path)
     try:
         row = conn.execute("SELECT * FROM daily_acquisition_settings WHERE id=1").fetchone()
-        merged = _validate_settings({**_settings_row(row), **values})
+        current = _settings_row(row)
+        requested = dict(values)
+        if isinstance(requested.get("provider_limits"), dict):
+            requested_limits = {
+                provider: dict(limits)
+                for provider, limits in current["provider_limits"].items()
+            }
+            for provider, limits in requested["provider_limits"].items():
+                if isinstance(limits, dict):
+                    requested_limits.setdefault(provider, {}).update(limits)
+            requested["provider_limits"] = requested_limits
+        merged = _validate_settings({**current, **requested})
         updated_at = _iso(_now())
         with conn:
             conn.execute(
                 "UPDATE daily_acquisition_settings SET enabled=?, schedule_time=?, timezone=?, "
                 "primary_provider=?, secondary_provider=?, overlap_days=?, retry_attempts=?, "
-                "retry_backoff_seconds=?, catch_up_limit=?, updated_at=? WHERE id=1",
+                "retry_backoff_seconds=?, catch_up_limit=?, provider_limits=?, updated_at=? WHERE id=1",
                 (
                     int(merged["enabled"]),
                     merged["schedule_time"],
@@ -155,6 +210,7 @@ def update_settings(values: dict[str, object], *, db: Path | None = None) -> dic
                     merged["retry_attempts"],
                     float(merged["retry_backoff_seconds"]),
                     merged["catch_up_limit"],
+                    json.dumps(merged["provider_limits"], sort_keys=True, separators=(",", ":")),
                     updated_at,
                 ),
             )
@@ -166,19 +222,169 @@ def update_settings(values: dict[str, object], *, db: Path | None = None) -> dic
         conn.close()
 
 
+def _provider_policy(provider: str, settings: dict[str, object]) -> dict[str, int]:
+    limits = settings.get("provider_limits")
+    if isinstance(limits, dict) and isinstance(limits.get(provider), dict):
+        return limits[provider]
+    if provider in DEFAULT_PROVIDER_LIMITS:
+        return DEFAULT_PROVIDER_LIMITS[provider]
+    # FRED is used for the five index series. It has no user API quota in this
+    # application, but it still gets a modest cross-process pacing interval.
+    return {"requests_per_minute": 30, "daily_request_budget": 0}
+
+
+@serialized_storage_write
+def reserve_provider_request(
+    provider: str, *, db: Path | None = None, now: datetime | None = None
+) -> dict[str, object]:
+    """Atomically reserve one provider request slot across backend processes.
+
+    The returned ``wait_seconds`` is safe to sleep before making the request.
+    A reservation is counted even if the process later crashes, which is
+    conservative for provider quotas and avoids duplicate request bursts after
+    restart. A zero daily budget means unlimited for that provider.
+    """
+    from finintel.market_data.provider import ProviderRateLimited
+
+    path = db if db is not None else database_path()
+    settings = get_settings(db=path)
+    policy = _provider_policy(provider, settings)
+    current = (now or _now()).astimezone(UTC)
+    usage_date = current.date().isoformat()
+    interval_seconds = 60.0 / int(policy["requests_per_minute"])
+    conn = _write_connection(path)
+    try:
+        with conn:
+            row = conn.execute(
+                "SELECT * FROM daily_acquisition_provider_usage "
+                "WHERE provider=? AND usage_date=?",
+                (provider, usage_date),
+            ).fetchone()
+            request_count = int(row["request_count"]) if row else 0
+            budget = int(policy["daily_request_budget"])
+            if budget and request_count >= budget:
+                message = f"{provider} local daily request budget exhausted"
+                if row:
+                    conn.execute(
+                        "UPDATE daily_acquisition_provider_usage SET quota_state='budget_exhausted', "
+                        "quota_message=?, updated_at=? WHERE provider=? AND usage_date=?",
+                        (message, _iso(current), provider, usage_date),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO daily_acquisition_provider_usage "
+                        "(provider,usage_date,request_count,quota_state,quota_message,updated_at) "
+                        "VALUES (?, ?, 0, 'budget_exhausted', ?, ?)",
+                        (provider, usage_date, message, _iso(current)),
+                    )
+                raise ProviderRateLimited(message)
+
+            previous = None
+            if row and row["last_request_at"]:
+                try:
+                    previous = datetime.fromisoformat(row["last_request_at"])
+                except ValueError:
+                    previous = None
+            slot = max(current, (previous + timedelta(seconds=interval_seconds)) if previous else current)
+            wait_seconds = max(0.0, (slot - current).total_seconds())
+            new_count = request_count + 1
+            state = "throttled" if wait_seconds > 0.001 else "available"
+            conn.execute(
+                "INSERT INTO daily_acquisition_provider_usage "
+                "(provider,usage_date,request_count,last_request_at,quota_state,quota_message,updated_at) "
+                "VALUES (?, ?, ?, ?, ?, NULL, ?) "
+                "ON CONFLICT(provider,usage_date) DO UPDATE SET request_count=excluded.request_count, "
+                "last_request_at=excluded.last_request_at, quota_state=excluded.quota_state, "
+                "quota_message=NULL, updated_at=excluded.updated_at",
+                (provider, usage_date, new_count, _iso(slot), state, _iso(current)),
+            )
+        return {
+            "provider": provider,
+            "usage_date": usage_date,
+            "request_count": new_count,
+            "daily_request_budget": budget,
+            "wait_seconds": wait_seconds,
+            "quota_state": state,
+        }
+    finally:
+        conn.close()
+
+
+@serialized_storage_write
+def mark_provider_status(
+    provider: str,
+    state: str,
+    message: str | None = None,
+    *,
+    db: Path | None = None,
+    now: datetime | None = None,
+) -> None:
+    """Persist safe quota/auth state for monitoring and restart recovery."""
+    if state not in {"available", "throttled", "quota_exhausted", "auth_failed"}:
+        raise ValueError("Invalid provider quota state")
+    path = db if db is not None else database_path()
+    current = (now or _now()).astimezone(UTC)
+    usage_date = current.date().isoformat()
+    conn = _write_connection(path)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO daily_acquisition_provider_usage "
+                "(provider,usage_date,request_count,quota_state,quota_message,updated_at) "
+                "VALUES (?, ?, 0, ?, ?, ?) "
+                "ON CONFLICT(provider,usage_date) DO UPDATE SET quota_state=excluded.quota_state, "
+                "quota_message=excluded.quota_message, updated_at=excluded.updated_at",
+                (provider, usage_date, state, (message or "")[:240] or None, _iso(current)),
+            )
+    finally:
+        conn.close()
+
+
+def provider_usage_status(*, db: Path | None = None) -> dict[str, dict[str, object]]:
+    """Return current-day request usage without exposing provider credentials."""
+    path = db if db is not None else database_path()
+    settings = get_settings(db=path)
+    usage_date = _now().date().isoformat()
+    conn = _read_connection(path)
+    rows = [] if conn is None else conn.execute(
+        "SELECT * FROM daily_acquisition_provider_usage WHERE usage_date=?",
+        (usage_date,),
+    ).fetchall()
+    try:
+        by_provider = {row["provider"]: row for row in rows}
+        result: dict[str, dict[str, object]] = {}
+        for provider in (*PROVIDERS, "fred"):
+            policy = _provider_policy(provider, settings)
+            row = by_provider.get(provider)
+            result[provider] = {
+                "requests_used": int(row["request_count"]) if row else 0,
+                "daily_request_budget": int(policy["daily_request_budget"]),
+                "requests_per_minute": int(policy["requests_per_minute"]),
+                "quota_state": row["quota_state"] if row else "available",
+                "quota_message": row["quota_message"] if row else None,
+                "last_request_at": row["last_request_at"] if row else None,
+                "usage_date": usage_date,
+            }
+        return result
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def _job_row(row) -> dict[str, object] | None:
     if row is None:
         return None
     started = row["started_at"]
     finished = row["finished_at"]
     duration_ms = None
-    if started and finished:
+    if started:
         try:
             duration_ms = max(
                 0,
                 int(
                     (
-                        datetime.fromisoformat(finished) - datetime.fromisoformat(started)
+                        datetime.fromisoformat(finished or _iso(_now()))
+                        - datetime.fromisoformat(started)
                     ).total_seconds()
                     * 1000
                 ),
@@ -757,10 +963,19 @@ def append_provider_error(
             errors = _json(row["provider_errors"] if row else "[]", [])
             if not isinstance(errors, list):
                 errors = []
-            safe = {
+            safe: dict[str, object] = {
                 "code": str(error.get("code", "provider_error"))[:64],
                 "message": str(error.get("message", ""))[:240],
             }
+            for field in ("provider", "instrument"):
+                value = error.get(field)
+                if isinstance(value, str) and value:
+                    safe[field] = value[:64]
+            for field in ("retryable", "quota"):
+                value = error.get(field)
+                if isinstance(value, bool):
+                    safe[field] = value
+            safe["recorded_at"] = _iso(_now())
             errors.append(safe)
             conn.execute(
                 "UPDATE daily_acquisition_jobs SET provider_errors=?, last_error=? WHERE id=?",
@@ -908,12 +1123,24 @@ def list_history(
     provider: str = "",
     status: str = "",
     kind: str = "",
+    execution_date: str = "",
     limit: int = 20,
     offset: int = 0,
     db: Path | None = None,
 ) -> dict[str, object]:
-    if len(query) > 80 or len(provider) > 40 or len(status) > 20 or len(kind) > 20:
+    if (
+        len(query) > 80
+        or len(provider) > 40
+        or len(status) > 20
+        or len(kind) > 20
+        or len(execution_date) > 10
+    ):
         raise ValueError("Invalid daily acquisition history filters")
+    if execution_date:
+        try:
+            date.fromisoformat(execution_date)
+        except ValueError as exc:
+            raise ValueError("execution_date must use YYYY-MM-DD format") from exc
     if not 1 <= limit <= 100 or offset < 0:
         raise ValueError("Invalid daily acquisition history pagination")
     conn = _read_connection(db if db is not None else database_path())
@@ -929,14 +1156,20 @@ def list_history(
             )
             params.extend([pattern, pattern])
         if provider:
-            terms.append("j.provider=?")
-            params.append(provider)
+            terms.append(
+                "(j.provider=? OR EXISTS (SELECT 1 FROM daily_acquisition_items pi "
+                "WHERE pi.job_id=j.id AND pi.provider=?))"
+            )
+            params.extend([provider, provider])
         if status:
             terms.append("j.status=?")
             params.append(status)
         if kind:
             terms.append("j.kind=?")
             params.append(kind)
+        if execution_date:
+            terms.append("substr(COALESCE(j.started_at,j.scheduled_for),1,10)=?")
+            params.append(execution_date)
         where = " WHERE " + " AND ".join(terms)
         total = conn.execute(
             "SELECT COUNT(*) FROM daily_acquisition_jobs j" + where, params
