@@ -16,6 +16,11 @@ restart-safe leases, pause/resume/cancel/retry controls, incomplete results,
 provider fallback provenance, request budgets, history filters, and API write
 authorization.
 
+For the issue #26 production-acceptance harness, see
+[`DAILY_ACQUISITION_ACCEPTANCE.md`](DAILY_ACQUISITION_ACCEPTANCE.md). The
+harness defaults to a disposable synthetic run and only contacts live providers
+when `--mode live` is explicitly selected.
+
 Run from the repository root:
 
 ```sh
