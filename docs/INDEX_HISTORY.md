@@ -8,12 +8,16 @@ are fabricated for these series.
 ## Capability and provenance
 
 Schema v11 adds `index_series_catalog` for provider capability metadata and
-`index_ingestion_runs` for append-only retrieval evidence. The catalog reports
-official name, series type, frequency, units, source URL, licensing note,
-provider-reported history limitation, and observed local coverage. Each
+`index_ingestion_runs` for append-only retrieval evidence. Schema v12 names
+local coverage explicitly and adds nullable provider availability bounds. The
+catalog reports official name, series type, frequency, units, source URL,
+licensing note, provider-reported history limitation, provider availability
+when actually known, and observed local coverage. Provider bounds remain null
+when FRED has not been queried for authoritative availability metadata. Each
 ingestion run records the requested date range, sanitized FRED request URL,
-retrieval timestamp, first/last returned session, counts, and a SHA-256 payload
-revision hash.
+retrieval timestamp, first/last returned session, counts, and separate SHA-256
+hashes for the raw provider payload and normalized observations. Programmatic
+imports without the original payload set only the normalized observation hash.
 
 The observation table remains keyed by `(index_code, provider, session_date)`.
 An overlapping import inserts only missing sessions, updates a revised level,

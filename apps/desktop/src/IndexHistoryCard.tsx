@@ -159,8 +159,12 @@ export function IndexHistoryCard() {
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          {t("Coverage")}: {selectedItem?.first_session ?? "—"} – {selectedItem?.last_session ?? "—"}
-          {" · "}{t("Last available")}: {selectedItem?.last_session ?? "—"}
+          {t("Local coverage")}: {selectedItem?.local_first_session ?? "—"} – {selectedItem?.local_last_session ?? "—"}
+          {" · "}{t("Last available")}: {selectedItem?.local_last_session ?? "—"}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {t("Provider availability")}: {selectedItem?.provider_earliest_available ?? t("Unknown")}
+          {" – "}{selectedItem?.provider_latest_available ?? t("Unknown")}
         </p>
         <p className="text-xs text-muted-foreground">
           {selectedItem

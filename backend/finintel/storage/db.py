@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import HistoricalBatch
 from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -631,6 +631,56 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if conn.in_transaction:
                 conn.rollback()
             raise StorageError("Unable to migrate index capability storage to v11") from exc
+        version = 11
+    if version == 11:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            catalog_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(index_series_catalog)")
+            }
+            if "earliest_available" in catalog_columns:
+                conn.execute(
+                    "ALTER TABLE index_series_catalog RENAME COLUMN earliest_available "
+                    "TO local_first_session"
+                )
+            if "latest_available" in catalog_columns:
+                conn.execute(
+                    "ALTER TABLE index_series_catalog RENAME COLUMN latest_available "
+                    "TO local_last_session"
+                )
+            catalog_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(index_series_catalog)")
+            }
+            if "provider_earliest_available" not in catalog_columns:
+                conn.execute(
+                    "ALTER TABLE index_series_catalog ADD COLUMN provider_earliest_available TEXT"
+                )
+            if "provider_latest_available" not in catalog_columns:
+                conn.execute(
+                    "ALTER TABLE index_series_catalog ADD COLUMN provider_latest_available TEXT"
+                )
+            ingestion_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(index_ingestion_runs)")
+            }
+            if (
+                "payload_sha256" in ingestion_columns
+                and "observation_sha256" not in ingestion_columns
+            ):
+                conn.execute(
+                    "ALTER TABLE index_ingestion_runs RENAME COLUMN payload_sha256 "
+                    "TO observation_sha256"
+                )
+            ingestion_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(index_ingestion_runs)")
+            }
+            if "payload_sha256" not in ingestion_columns:
+                conn.execute("ALTER TABLE index_ingestion_runs ADD COLUMN payload_sha256 TEXT")
+            conn.execute("PRAGMA user_version = 12")
+            conn.commit()
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate index provenance storage to v12") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:

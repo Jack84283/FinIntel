@@ -42,6 +42,10 @@ class IndexCatalogRecord(BaseModel):
     licensing_note: str
     known_history_limit: str
     sessions: int
+    local_first_session: str | None
+    local_last_session: str | None
+    provider_earliest_available: str | None
+    provider_latest_available: str | None
     first_session: str | None
     last_session: str | None
     coverage_updated_at: str | None
@@ -83,6 +87,8 @@ def get_index_daily_closes(
 ) -> dict[str, object]:
     try:
         return read_index_closes(code, limit=limit, start=start, end=end)
+    except IndexHistoryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except StorageError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -111,7 +117,7 @@ def download_index_daily_closes(
         except (ProviderAccessDenied, ProviderUnavailable) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except IndexHistoryError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except StorageError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     finally:

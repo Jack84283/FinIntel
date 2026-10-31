@@ -15,6 +15,8 @@ describe("local index history API", () => {
       series_type: code === "VIX" ? "volatility" : "price", frequency: "daily",
       currency: null, units: "index_points", licensing_note: "FRED terms apply",
       known_history_limit: "Provider coverage", coverage_updated_at: null,
+      local_first_session: null, local_last_session: null,
+      provider_earliest_available: null, provider_latest_available: null,
       sessions: 0, first_session: null, last_session: null, data_kind: "daily_close_only",
     }));
     const request = fakeFetch(catalog);

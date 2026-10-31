@@ -16,6 +16,10 @@ export type IndexCatalogRecord = {
   licensing_note: string;
   known_history_limit: string;
   sessions: number;
+  local_first_session: string | null;
+  local_last_session: string | null;
+  provider_earliest_available: string | null;
+  provider_latest_available: string | null;
   first_session: string | null;
   last_session: string | null;
   coverage_updated_at: string | null;
@@ -80,6 +84,10 @@ function parseCatalog(value: unknown): IndexCatalogRecord[] {
         row.units !== "index_points" || typeof row.licensing_note !== "string" ||
         typeof row.known_history_limit !== "string" ||
         !Number.isSafeInteger(row.sessions) || (row.sessions as number) < 0 ||
+        !(row.local_first_session === null || typeof row.local_first_session === "string") ||
+        !(row.local_last_session === null || typeof row.local_last_session === "string") ||
+        !(row.provider_earliest_available === null || typeof row.provider_earliest_available === "string") ||
+        !(row.provider_latest_available === null || typeof row.provider_latest_available === "string") ||
         !(row.first_session === null || typeof row.first_session === "string") ||
         !(row.last_session === null || typeof row.last_session === "string") ||
         !(row.coverage_updated_at === null || typeof row.coverage_updated_at === "string")) {

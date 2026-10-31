@@ -142,6 +142,8 @@ const additionalChinese: Readonly<Record<string, string>> = {
   "Session change": "交易日涨跌幅",
   "Coverage": "覆盖范围",
   "Last available": "最新可用",
+  "Local coverage": "本地覆盖范围",
+  "Provider availability": "数据源可用范围",
   "Data type": "数据类型",
   "Frequency": "频率",
   "Units": "单位",

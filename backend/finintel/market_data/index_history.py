@@ -172,6 +172,7 @@ def fetch_fred_index(
     request_guard: Callable[[], None] | None = None,
     start: date | None = None,
     end: date | None = None,
+    payload_observer: Callable[[bytes], None] | None = None,
 ) -> list[tuple[str, str]]:
     if code not in INDEX_SERIES:
         raise IndexHistoryError("Unsupported index code")
@@ -202,6 +203,8 @@ def fetch_fred_index(
             raise ProviderUnavailable("FRED index history is temporarily unavailable")
         if response.status_code != 200:
             raise IndexHistoryError("FRED index history is temporarily unavailable")
+        if payload_observer is not None:
+            payload_observer(response.content)
         rows = parse_fred_csv(code, response.content)
         if start is not None and rows[0][0] < start.isoformat():
             raise IndexHistoryError("FRED returned observations before the requested start date")
@@ -223,6 +226,7 @@ def store_index_closes(
     db: Path | None = None,
     requested_start: date | None = None,
     requested_end: date | None = None,
+    raw_payload: bytes | None = None,
 ) -> dict[str, object]:
     if code not in INDEX_SERIES:
         raise IndexHistoryError("Unsupported index code")
@@ -247,21 +251,26 @@ def store_index_closes(
         now = datetime.now(UTC).isoformat(timespec="microseconds")
         url = index_source_url(code)
         request_url = index_request_url(code, requested_start, requested_end)
-        revision = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        observation_revision = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        payload_revision = (
+            hashlib.sha256(raw_payload).hexdigest() if raw_payload is not None else None
+        )
         inserted = updated = unchanged = 0
         with conn:
             ingestion_id = conn.execute(
                 "INSERT INTO index_ingestion_runs("
                 "index_code,provider,requested_start,requested_end,retrieved_at,source_url,"
-                "payload_sha256,first_session,last_session,observations,inserted,updated,unchanged) "
-                "VALUES (?, 'fred', ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0)",
+                "observation_sha256,payload_sha256,first_session,last_session,observations,"
+                "inserted,updated,unchanged) "
+                "VALUES (?, 'fred', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0)",
                 (
                     code,
                     requested_start.isoformat() if requested_start is not None else None,
                     requested_end.isoformat() if requested_end is not None else None,
                     now,
                     request_url,
-                    revision,
+                    observation_revision,
+                    payload_revision,
                     values[0][0],
                     values[-1][0],
                     len(values),
@@ -299,7 +308,7 @@ def store_index_closes(
                 (code,),
             ).fetchone()
             conn.execute(
-                "UPDATE index_series_catalog SET earliest_available=?,latest_available=?,"
+                "UPDATE index_series_catalog SET local_first_session=?,local_last_session=?,"
                 "coverage_updated_at=? WHERE index_code=? AND provider='fred'",
                 (coverage[0], coverage[1], now, code),
             )
@@ -315,7 +324,8 @@ def store_index_closes(
             "last_session": values[-1][0],
             "source_url": url,
             "request_url": request_url,
-            "source_revision": revision,
+            "observation_sha256": observation_revision,
+            "payload_sha256": payload_revision,
             "request_start": requested_start.isoformat() if requested_start else None,
             "request_end": requested_end.isoformat() if requested_end else None,
         }
@@ -339,6 +349,7 @@ def acquire_index_closes(
         from finintel.market_data.daily_acquisition_store import provider_request_guard
 
         request_guard = provider_request_guard("fred", db=db)
+    payloads: list[bytes] = []
     try:
         result = store_index_closes(
             code,
@@ -348,10 +359,12 @@ def acquire_index_closes(
                 request_guard=request_guard,
                 start=start,
                 end=end,
+                payload_observer=payloads.append,
             ),
             db=db,
             requested_start=start,
             requested_end=end,
+            raw_payload=payloads[0] if payloads else None,
         )
     except (ProviderRateLimited, ProviderAccessDenied) as exc:
         from finintel.market_data.daily_acquisition_store import mark_provider_status
@@ -381,8 +394,9 @@ def index_catalog(*, db: Path | None = None) -> list[dict[str, object]]:
                 "SELECT c.index_code AS code,c.official_name AS name,"
                 "c.provider,c.source_url,c.series_type,"
                 "c.frequency,c.currency,c.units,c.licensing_note,c.known_history_limit,"
-                "COUNT(d.session_date) AS sessions,MIN(d.session_date) AS first_session,"
-                "MAX(d.session_date) AS last_session,c.coverage_updated_at,"
+                "COUNT(d.session_date) AS sessions,c.local_first_session,"
+                "c.local_last_session,c.provider_earliest_available,"
+                "c.provider_latest_available,c.coverage_updated_at,"
                 "'daily_close_only' AS data_kind "
                 "FROM index_series_catalog c LEFT JOIN index_daily_closes d "
                 "ON d.index_code=c.index_code AND d.provider=c.provider "
@@ -392,6 +406,8 @@ def index_catalog(*, db: Path | None = None) -> list[dict[str, object]]:
             ):
                 item = dict(row)
                 item["fred_series"] = INDEX_SERIES[item["code"]][1]
+                item["first_session"] = item["local_first_session"]
+                item["last_session"] = item["local_last_session"]
                 item["data_kind"] = "daily_close_only"
                 catalog.append(item)
             return catalog
@@ -412,6 +428,10 @@ def index_catalog(*, db: Path | None = None) -> list[dict[str, object]]:
                 "sessions": int(stored[code]["sessions"]) if code in stored else 0,
                 "first_session": stored[code]["first_session"] if code in stored else None,
                 "last_session": stored[code]["last_session"] if code in stored else None,
+                "local_first_session": stored[code]["first_session"] if code in stored else None,
+                "local_last_session": stored[code]["last_session"] if code in stored else None,
+                "provider_earliest_available": None,
+                "provider_latest_available": None,
                 **INDEX_CAPABILITY_METADATA[code],
                 "coverage_updated_at": None,
                 "data_kind": "daily_close_only",
