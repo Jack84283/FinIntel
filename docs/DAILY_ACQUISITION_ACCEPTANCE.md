@@ -13,6 +13,8 @@ provider credentials or platforms passed.
   directory, and explicit paths must not already exist.
 - The harness refuses `data/finintel.sqlite3` and does not read the normal user
   database, backups, or downloaded snapshots.
+- It also refuses SQLite sidecar names such as `finintel.sqlite3-wal`,
+  `finintel.sqlite3-shm`, and `finintel.sqlite3-journal` as report paths.
 - Provider keys are read only through the existing credential adapters. They
   are never printed, stored in the report, or included in source URLs.
 - Live mode is never run by CI. Synthetic mode is the safe default.
@@ -80,6 +82,47 @@ Record these checks separately from synthetic CI and live-provider results.
 CI's native jobs build the sidecar, run its authenticated local smoke test, and
 package each platform. Those checks do not replace clean-machine installed-app
 acceptance. Until a platform is exercised manually, record it as `not_run`.
+
+After completing a clean installed-app check, record its result in a disposable
+JSON file. The keys are platform names and each value must contain a status;
+`summary` and `evidence` are optional:
+
+```json
+{
+  "macos": {
+    "status": "pass",
+    "summary": "Clean packaged app launch and Action History passed.",
+    "evidence": {"tested_at": "2026-10-31T15:30:00Z", "app_version": "0.1.0"}
+  },
+  "windows": {"status": "blocked", "summary": "Clean Windows machine unavailable."},
+  "linux": {"status": "not_run"}
+}
+```
+
+Attach evidence to a live run with `--desktop-evidence`:
+
+```sh
+python scripts/daily_acquisition_acceptance.py --mode live \
+  --desktop-evidence /private/tmp/desktop-evidence.json \
+  --db-path /private/tmp/finintel-live-acceptance.sqlite3 \
+  --provider alpaca_sip --provider tiingo --provider alpha_vantage \
+  --index SP500 \
+  --output /private/tmp/finintel-live-acceptance.json
+```
+
+Or merge evidence into an existing live report without rerunning provider
+requests:
+
+```sh
+python scripts/daily_acquisition_acceptance.py \
+  --record-desktop-evidence /private/tmp/finintel-live-acceptance.json \
+  --desktop-evidence /private/tmp/desktop-evidence.json
+```
+
+The merge is atomic. It updates only the named desktop entries and recalculates
+the production verdict from the existing provider checks plus the complete
+matrix. All four provider entries and all three desktop entries must be `pass`
+before production acceptance can become `pass`.
 
 ## Report interpretation
 

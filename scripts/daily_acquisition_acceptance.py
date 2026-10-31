@@ -37,6 +37,7 @@ DEFAULT_INDEX = "SP500"
 EQUITY_PROVIDERS = ("alpaca_sip", "tiingo", "alpha_vantage")
 INDEX_CODES = ("SP500", "DJIA", "NASDAQCOM", "NDX", "VIX")
 DESKTOP_PLATFORMS = ("macos", "windows", "linux")
+ACCEPTANCE_STATUSES = ("pass", "fail", "blocked", "not_run")
 REPORT_VERSION = 1
 
 
@@ -77,8 +78,10 @@ def _checks_verdict(checks: list[dict[str, object]]) -> str:
 
 def _acceptance_matrix(
     live_results: dict[str, dict[str, object]],
+    desktop_results: dict[str, dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     """Return every required production check, including omitted checks."""
+    desktop_results = desktop_results or {}
     matrix: list[dict[str, object]] = []
     for provider in (*EQUITY_PROVIDERS, "fred"):
         result = live_results.get(provider)
@@ -96,16 +99,111 @@ def _acceptance_matrix(
             }
         )
     for platform_name in DESKTOP_PLATFORMS:
+        result = desktop_results.get(platform_name)
         matrix.append(
             {
                 "id": "desktop." + platform_name,
                 "category": "packaged_desktop",
-                "status": "not_run",
-                "summary": "No clean installed-desktop evidence was supplied.",
-                "evidence": {},
+                "status": result["status"] if result else "not_run",
+                "summary": (
+                    result["summary"]
+                    if result
+                    else "No clean installed-desktop evidence was supplied."
+                ),
+                "evidence": result.get("evidence", {}) if result else {},
             }
         )
     return matrix
+
+
+def _load_desktop_evidence(path: Path) -> dict[str, dict[str, object]]:
+    """Load and validate manually recorded packaged-desktop acceptance evidence."""
+    with path.expanduser().resolve().open(encoding="utf-8") as stream:
+        payload = json.load(stream)
+    if not isinstance(payload, dict):
+        raise TypeError("Desktop evidence must be a JSON object keyed by platform")
+
+    evidence: dict[str, dict[str, object]] = {}
+    for platform_name, value in payload.items():
+        if platform_name not in DESKTOP_PLATFORMS:
+            raise ValueError(f"Unknown desktop platform in evidence: {platform_name}")
+        if not isinstance(value, dict):
+            raise TypeError(f"Desktop evidence for {platform_name} must be an object")
+        status = value.get("status")
+        if status not in ACCEPTANCE_STATUSES:
+            raise ValueError(
+                f"Desktop evidence for {platform_name} must have a valid status"
+            )
+        summary = value.get("summary")
+        if summary is None:
+            summary = f"Manual packaged-desktop check recorded as {status}."
+        if not isinstance(summary, str):
+            raise TypeError(
+                f"Desktop evidence summary for {platform_name} must be text"
+            )
+        details = value.get("evidence", {})
+        if not isinstance(details, dict):
+            raise TypeError(
+                f"Desktop evidence details for {platform_name} must be an object"
+            )
+        evidence[platform_name] = {
+            "status": status,
+            "summary": summary,
+            "evidence": details,
+        }
+    return evidence
+
+
+def _apply_desktop_evidence(
+    report: dict[str, object],
+    desktop_results: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    """Merge manual desktop results into an existing live acceptance report."""
+    run = report.get("run")
+    production = report.get("production_acceptance")
+    matrix = report.get("acceptance_matrix")
+    if not isinstance(run, dict) or run.get("mode") != "live":
+        raise ValueError("Desktop evidence can only be recorded on a live report")
+    if not isinstance(production, dict) or not isinstance(matrix, list):
+        raise TypeError("Acceptance report has no production acceptance matrix")
+
+    updated = False
+    for item in matrix:
+        if not isinstance(item, dict) or item.get("category") != "packaged_desktop":
+            continue
+        platform_name = str(item.get("id", "")).removeprefix("desktop.")
+        result = desktop_results.get(platform_name)
+        if result is None:
+            continue
+        item.update(
+            status=result["status"],
+            summary=result["summary"],
+            evidence=result.get("evidence", {}),
+        )
+        updated = True
+    if not updated:
+        raise ValueError("Desktop evidence did not match a required platform")
+
+    production["matrix"] = matrix
+    production["verdict"] = _checks_verdict(list(production.get("checks", [])) + matrix)
+    report["acceptance_matrix"] = matrix
+    report["verdict"] = production["verdict"]
+    recorded_at = datetime.now(UTC).isoformat(timespec="seconds")
+    run["desktop_evidence_recorded_at"] = recorded_at
+    run["finished_at"] = recorded_at
+    return report
+
+
+def _report_exit_code(report: dict[str, object]) -> int:
+    return {
+        "synthetic_pass": 0,
+        "synthetic_review": 2,
+        "synthetic_fail": 1,
+        "pass": 0,
+        "review": 2,
+        "fail": 1,
+        "not_run": 2,
+    }[str(report["verdict"])]
 
 
 def _database_path(value: Path | None) -> tuple[Path, bool]:
@@ -138,7 +236,16 @@ def _known_database_paths() -> set[Path]:
 def _validate_output_path(output: Path, database_paths: set[Path]) -> Path:
     candidate = output.expanduser().resolve()
     database_suffixes = {".db", ".sqlite", ".sqlite3", ".wal", ".shm", ".journal"}
-    if candidate in database_paths or candidate.suffix.lower() in database_suffixes:
+    compound_sidecar = re.search(
+        r"\.(?:db|sqlite|sqlite3)-(?:wal|shm|journal)$",
+        candidate.name,
+        flags=re.IGNORECASE,
+    )
+    if (
+        candidate in database_paths
+        or candidate.suffix.lower() in database_suffixes
+        or compound_sidecar
+    ):
         raise ValueError("Refusing to write an acceptance report over a SQLite path")
     if candidate.exists() and candidate.is_file():
         with candidate.open("rb") as stream:
@@ -645,9 +752,10 @@ def _report(
     live_checks: list[dict[str, object]],
     live_results: dict[str, dict[str, object]],
     started_at: datetime,
+    desktop_results: dict[str, dict[str, object]] | None = None,
 ) -> dict[str, object]:
     synthetic_verdict = _checks_verdict(synthetic_checks)
-    matrix = _acceptance_matrix(live_results)
+    matrix = _acceptance_matrix(live_results, desktop_results)
     production_verdict = (
         "not_run" if mode != "live" else _checks_verdict(live_checks + matrix)
     )
@@ -704,7 +812,56 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--provider", action="append", choices=EQUITY_PROVIDERS)
     parser.add_argument("--symbol", action="append")
     parser.add_argument("--index", dest="indexes", action="append", choices=INDEX_CODES)
+    parser.add_argument(
+        "--desktop-evidence",
+        type=Path,
+        help=(
+            "JSON mapping of desktop platforms to manual evidence; valid statuses "
+            "are pass, fail, blocked, and not_run"
+        ),
+    )
+    parser.add_argument(
+        "--record-desktop-evidence",
+        type=Path,
+        metavar="REPORT",
+        help="Merge --desktop-evidence into an existing live acceptance report",
+    )
     args = parser.parse_args(argv)
+    if args.record_desktop_evidence:
+        if not args.desktop_evidence:
+            parser.error("--record-desktop-evidence requires --desktop-evidence")
+        if any(
+            (
+                args.db_path,
+                args.synthetic_db_path,
+                args.live_db_path,
+                args.provider,
+                args.symbol,
+                args.indexes,
+            )
+        ):
+            parser.error(
+                "--record-desktop-evidence cannot be combined with acquisition options"
+            )
+        try:
+            report_path = _validate_output_path(
+                args.record_desktop_evidence, _known_database_paths()
+            )
+            desktop_results = _load_desktop_evidence(args.desktop_evidence)
+            with report_path.open(encoding="utf-8") as stream:
+                report = json.load(stream)
+            if not isinstance(report, dict):
+                raise TypeError("Acceptance report must be a JSON object")
+            _apply_desktop_evidence(report, desktop_results)
+            _atomic_write_report(report_path, report)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            print("Acceptance harness failed:", _redact_message(exc), file=sys.stderr)
+            return 1
+        print(f"Acceptance report: {report_path}")
+        print("Verdict:", str(report["verdict"]).upper())
+        return _report_exit_code(report)
+    if args.desktop_evidence and args.mode != "live":
+        parser.error("--desktop-evidence requires --mode live")
     if args.db_path and (args.synthetic_db_path or args.live_db_path):
         parser.error(
             "--db-path cannot be combined with --synthetic-db-path or --live-db-path"
@@ -731,6 +888,15 @@ def main(argv: list[str] | None = None) -> int:
             },
         )
     except (OSError, ValueError) as exc:
+        print("Acceptance harness failed:", _redact_message(exc), file=sys.stderr)
+        return 1
+    try:
+        desktop_results = (
+            _load_desktop_evidence(args.desktop_evidence)
+            if args.desktop_evidence
+            else {}
+        )
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         print("Acceptance harness failed:", _redact_message(exc), file=sys.stderr)
         return 1
     started_at = datetime.now(UTC)
@@ -805,6 +971,7 @@ def main(argv: list[str] | None = None) -> int:
                         live_checks,
                         live_results,
                         started_at,
+                        desktop_results,
                     )
     except (OSError, ValueError, sqlite3.Error) as exc:
         print("Acceptance harness failed:", _redact_message(exc), file=sys.stderr)
@@ -819,15 +986,7 @@ def main(argv: list[str] | None = None) -> int:
     print("Verdict:", str(report["verdict"]).upper())
     for check in report["checks"]:
         print(f"{str(check['status']).upper():8} {check['id']}: {check['summary']}")
-    return {
-        "synthetic_pass": 0,
-        "synthetic_review": 2,
-        "synthetic_fail": 1,
-        "pass": 0,
-        "review": 2,
-        "fail": 1,
-        "not_run": 2,
-    }[str(report["verdict"])]
+    return _report_exit_code(report)
 
 
 if __name__ == "__main__":
