@@ -116,7 +116,9 @@ def index_request_url(code: str, start: date | None = None, end: date | None = N
     return FRED_CSV + "?" + urlencode(params)
 
 
-def parse_fred_csv(code: str, payload: bytes) -> list[tuple[str, str]]:
+def parse_fred_csv(
+    code: str, payload: bytes, *, allow_empty: bool = False
+) -> list[tuple[str, str]]:
     """Validate all observations before storing any; missing holidays are omitted."""
     if code not in INDEX_SERIES:
         raise IndexHistoryError("Unsupported index code")
@@ -158,7 +160,7 @@ def parse_fred_csv(code: str, payload: bytes) -> list[tuple[str, str]]:
             if not value.is_finite() or value <= 0:
                 raise IndexHistoryError("Index levels must be finite positive numbers")
             rows.append((observed, str(value)))
-        if not rows:
+        if not rows and not allow_empty:
             raise IndexHistoryError("Index series has no valid daily closing levels")
         return rows
     except (UnicodeError, csv.Error) as exc:
@@ -173,6 +175,7 @@ def fetch_fred_index(
     start: date | None = None,
     end: date | None = None,
     payload_observer: Callable[[bytes], None] | None = None,
+    allow_empty: bool = False,
 ) -> list[tuple[str, str]]:
     if code not in INDEX_SERIES:
         raise IndexHistoryError("Unsupported index code")
@@ -205,10 +208,10 @@ def fetch_fred_index(
             raise IndexHistoryError("FRED index history is temporarily unavailable")
         if payload_observer is not None:
             payload_observer(response.content)
-        rows = parse_fred_csv(code, response.content)
-        if start is not None and rows[0][0] < start.isoformat():
+        rows = parse_fred_csv(code, response.content, allow_empty=allow_empty)
+        if rows and start is not None and rows[0][0] < start.isoformat():
             raise IndexHistoryError("FRED returned observations before the requested start date")
-        if end is not None and rows[-1][0] > end.isoformat():
+        if rows and end is not None and rows[-1][0] > end.isoformat():
             raise IndexHistoryError("FRED returned observations after the requested end date")
         return rows
     except httpx.RequestError as exc:
@@ -343,6 +346,7 @@ def acquire_index_closes(
     request_guard: Callable[[], None] | None = None,
     start: date | None = None,
     end: date | None = None,
+    allow_empty: bool = False,
 ) -> dict[str, object]:
     # Explicit user action only. No periodic downloads.
     if request_guard is None:
@@ -351,16 +355,39 @@ def acquire_index_closes(
         request_guard = provider_request_guard("fred", db=db)
     payloads: list[bytes] = []
     try:
+        rows = fetch_fred_index(
+            code,
+            client=client,
+            request_guard=request_guard,
+            start=start,
+            end=end,
+            payload_observer=payloads.append,
+            allow_empty=allow_empty,
+        )
+        if not rows:
+            from finintel.market_data.daily_acquisition_store import mark_provider_status
+
+            mark_provider_status("fred", "available", db=db)
+            return {
+                "code": code,
+                "provider": "fred",
+                "status": "empty",
+                "sessions": 0,
+                "inserted": 0,
+                "updated": 0,
+                "unchanged": 0,
+                "first_session": None,
+                "last_session": None,
+                "source_url": index_source_url(code),
+                "request_url": index_request_url(code, start, end),
+                "observation_sha256": None,
+                "payload_sha256": (hashlib.sha256(payloads[0]).hexdigest() if payloads else None),
+                "request_start": start.isoformat() if start else None,
+                "request_end": end.isoformat() if end else None,
+            }
         result = store_index_closes(
             code,
-            fetch_fred_index(
-                code,
-                client=client,
-                request_guard=request_guard,
-                start=start,
-                end=end,
-                payload_observer=payloads.append,
-            ),
+            rows,
             db=db,
             requested_start=start,
             requested_end=end,

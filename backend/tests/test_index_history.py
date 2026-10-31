@@ -86,6 +86,26 @@ def test_mocked_source_fetch_uses_fixed_host_and_series():
     assert len(rows) == 2
 
 
+def test_empty_fred_window_can_be_skipped_for_chunked_backfill(tmp_path):
+    payload = b"observation_date,SP500\n2020-01-01,.\n"
+
+    with httpx.Client(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, content=payload))
+    ) as client:
+        result = acquire_index_closes(
+            "SP500",
+            client=client,
+            db=tmp_path / "empty.sqlite3",
+            start=date(2020, 1, 1),
+            end=date(2020, 1, 1),
+            allow_empty=True,
+        )
+
+    assert result["status"] == "empty"
+    assert result["sessions"] == 0
+    assert read_index_closes("SP500", db=tmp_path / "empty.sqlite3")["observations"] == []
+
+
 def test_bounded_fetch_uses_fred_range_and_persists_provenance(tmp_path):
     seen: list[httpx.URL] = []
 
