@@ -39,6 +39,24 @@ and supports bounded reads on the daily history endpoint. Packaged desktop
 calls continue to pass only allowlisted index codes and ISO date filters to the
 loopback backend.
 
+For a long-running, resumable local backfill, use the explicit worker. It
+requests bounded ten-year windows, advances an atomic checkpoint only after a
+validated import, and retries the current window after a restart. The default
+`1776-01-01` start is a provider-query sentinel rather than a claim that any
+enabled series has observations that old; empty windows are recorded and
+skipped. Provider pacing and daily request accounting remain owned by the
+shared SQLite reservation path.
+
+```sh
+python -m finintel.market_data.index_backfill_worker \
+  --code SP500 --start 1776-01-01 --end 2026-10-31 --once
+```
+
+Leave off `--once` to process all windows in one explicit local run. The
+checkpoint defaults beside the configured SQLite database and can be supplied
+with `--state-path`; do not share one checkpoint between index codes or date
+ranges.
+
 FRED licensing and the provider's actual available history window still apply.
 The catalog never claims a fixed ten-year limit or a date range that has not
 been observed locally.
