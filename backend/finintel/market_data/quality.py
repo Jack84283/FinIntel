@@ -501,8 +501,10 @@ def _iter_series_prices(
             raise FileNotFoundError(path)
         try:
             parameters: list[object] = [series["id"]]
-            query = ("SELECT session_date, close, retrieved_at, ingestion_id "
-                     "FROM daily_prices WHERE series_id = ?")
+            query = (
+                "SELECT session_date, close, retrieved_at, ingestion_id "
+                "FROM daily_prices WHERE series_id = ?"
+            )
             if last_session is not None:
                 query += " AND session_date > ?"
                 parameters.append(last_session)
