@@ -122,6 +122,8 @@ def _iter_query_rows(
     order_expression: str,
     key_columns: tuple[str, ...],
     batch_size: int = _SCAN_BATCH_SIZE,
+    start_key: tuple[object, ...] | None = None,
+    start_inclusive: bool = False,
 ) -> Iterator[sqlite3.Row]:
     """Yield bounded keyset pages so no reader remains open for the full scan."""
 
@@ -133,7 +135,16 @@ def _iter_query_rows(
         try:
             parameters: list[object] = []
             if last_key is None:
-                query = f"{select_sql} ORDER BY {order_expression} LIMIT ?"
+                if start_key is None:
+                    query = f"{select_sql} ORDER BY {order_expression} LIMIT ?"
+                else:
+                    placeholders = ", ".join("?" for _ in key_columns)
+                    operator = ">=" if start_inclusive else ">"
+                    query = (
+                        f"{select_sql} WHERE ({order_expression}) {operator} "
+                        f"({placeholders}) ORDER BY {order_expression} LIMIT ?"
+                    )
+                    parameters.extend(start_key)
             else:
                 placeholders = ", ".join("?" for _ in key_columns)
                 query = (
@@ -153,10 +164,12 @@ def _iter_query_rows(
             return
 
 
-def _iter_series_prices(path: Path, series: sqlite3.Row) -> Iterator[dict]:
+def _iter_series_prices(
+    path: Path, series: sqlite3.Row, *, start_session: str | None = None
+) -> Iterator[dict]:
     """Read one series through its primary-key order without a join sort."""
 
-    last_session: str | None = None
+    last_session = start_session
     while True:
         conn = _read_connection(path, snapshot=False)
         if conn is None:
@@ -189,30 +202,135 @@ def _iter_series_prices(path: Path, series: sqlite3.Row) -> Iterator[dict]:
             return
 
 
-def _iter_cross_provider_rows(path: Path) -> Iterator[dict]:
+def _iter_cross_provider_rows(
+    path: Path, *, start_key: dict[str, str] | None = None
+) -> Iterator[dict]:
     """Merge per-series primary-key streams in Python instead of SQL-sorting bars."""
 
+    series_start_key = None
+    if start_key is not None:
+        # Start at the first provider for the checkpoint's instrument group;
+        # the per-series streams below then seek past the completed session.
+        series_start_key = (
+            start_key["symbol"],
+            start_key["frequency"],
+            start_key["adjustment"],
+            "",
+            -1,
+        )
     series_rows = _iter_query_rows(
         path,
         select_sql=("SELECT id, symbol, provider, frequency, adjustment FROM series"),
         order_expression="symbol, frequency, adjustment, provider, id",
         key_columns=("symbol", "frequency", "adjustment", "provider", "id"),
+        start_key=series_start_key,
+        start_inclusive=True,
     )
     for (symbol, frequency, adjustment), grouped in groupby(
         series_rows,
         key=lambda row: (row["symbol"], row["frequency"], row["adjustment"]),
     ):
         series_group = list(grouped)
-        streams = [_iter_series_prices(path, series) for series in series_group]
+        group_start_session = (
+            start_key["session_date"]
+            if start_key is not None
+            and (symbol, frequency, adjustment)
+            == (start_key["symbol"], start_key["frequency"], start_key["adjustment"])
+            else None
+        )
+        streams = [
+            _iter_series_prices(path, series, start_session=group_start_session)
+            for series in series_group
+        ]
         yield from heapq.merge(
             *streams,
             key=lambda row: (row["session_date"], row["provider"], row["series_id"]),
         )
 
 
+def _equity_cursor_previous(path: Path, source_key: dict[str, object] | None):
+    if source_key is None:
+        return None
+    conn = _read_connection(path)
+    if conn is None:
+        raise FileNotFoundError(path)
+    try:
+        row = conn.execute(
+            "SELECT session_date, close FROM daily_prices WHERE series_id = ? AND session_date = ?",
+            (source_key["series_id"], source_key["session_date"]),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    try:
+        previous_date = date.fromisoformat(row["session_date"])
+    except (TypeError, ValueError):
+        return None
+    previous_close = _decimal(row["close"])
+    if previous_close is None:
+        return None
+    return previous_date, previous_close, row["session_date"]
+
+
+def _index_cursor_previous(path: Path, source_key: dict[str, object] | None):
+    if source_key is None:
+        return None
+    conn = _read_connection(path)
+    if conn is None:
+        raise FileNotFoundError(path)
+    try:
+        row = conn.execute(
+            "SELECT session_date, close FROM index_daily_closes "
+            "WHERE index_code = ? AND provider = ? AND session_date = ?",
+            (source_key["symbol"], source_key["provider"], source_key["session_date"]),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    try:
+        previous_date = date.fromisoformat(row["session_date"])
+    except (TypeError, ValueError):
+        return None
+    previous_close = _decimal(row["close"])
+    if previous_close is None:
+        return None
+    return previous_date, previous_close
+
+
 def _read_candidates(
-    path: Path, max_findings: int, *, start_after: int = 0
-) -> tuple[list[dict], int]:
+    path: Path,
+    max_findings: int,
+    *,
+    checkpoint: dict[str, object] | None = None,
+) -> tuple[list[dict], int, dict[str, object], bool]:
+    checkpoint = checkpoint or {"phase": "equity", "source_key": None}
+    checkpoint_phase = str(checkpoint.get("phase", "equity"))
+    checkpoint_key = checkpoint.get("source_key")
+    if not isinstance(checkpoint_key, dict):
+        checkpoint_key = None
+    if checkpoint_phase not in {"equity", "index", "cross_provider", "complete"}:
+        checkpoint_phase = "equity"
+        checkpoint_key = None
+
+    equity_start = None
+    index_start = None
+    cross_start = None
+    if checkpoint_phase == "equity" and checkpoint_key is not None:
+        equity_start = (
+            checkpoint_key["series_id"],
+            checkpoint_key["session_date"],
+        )
+    elif checkpoint_phase == "index" and checkpoint_key is not None:
+        index_start = (
+            checkpoint_key["symbol"],
+            checkpoint_key["provider"],
+            checkpoint_key["session_date"],
+        )
+    elif checkpoint_phase == "cross_provider" and checkpoint_key is not None:
+        cross_start = checkpoint_key
+
     rows = _iter_query_rows(
         path,
         select_sql=(
@@ -222,6 +340,7 @@ def _read_candidates(
         ),
         order_expression="s.id, dp.session_date",
         key_columns=("series_id", "session_date"),
+        start_key=equity_start,
     )
     index_rows = _iter_query_rows(
         path,
@@ -230,6 +349,7 @@ def _read_candidates(
         ),
         order_expression="index_code, provider, session_date",
         key_columns=("symbol", "provider", "session_date"),
+        start_key=index_start,
     )
 
     # These cursors are consumed in indexed order. Only one series (and later
@@ -237,82 +357,64 @@ def _read_candidates(
     # price database is never materialized in memory.
     findings: list[dict] = []
     findings_examined = 0
+    page_full = False
+    resume_cursor: dict[str, object] = checkpoint
+    current_source_key: dict[str, object] | None = None
+    current_source_total = 0
+    current_source_stored = 0
+    current_source_was_full = False
+
+    def begin_source(source_key: dict[str, object]) -> None:
+        nonlocal current_source_key, current_source_total, current_source_stored
+        nonlocal current_source_was_full
+        current_source_key = source_key
+        current_source_total = 0
+        current_source_stored = 0
+        current_source_was_full = page_full
+
+    def finish_source() -> None:
+        nonlocal resume_cursor
+        if (
+            current_source_key is not None
+            and not current_source_was_full
+            and current_source_stored == current_source_total
+        ):
+            resume_cursor = {
+                "phase": current_source_key["phase"],
+                "source_key": {
+                    key: value for key, value in current_source_key.items() if key != "phase"
+                },
+            }
 
     def add(item: dict) -> bool:
-        nonlocal findings_examined
+        nonlocal findings_examined, current_source_total, current_source_stored, page_full
         findings_examined += 1
-        if findings_examined <= start_after:
-            return True
-        if len(findings) >= max_findings:
+        current_source_total += 1
+        # Finish the current source item even if it takes the page a little
+        # over its cap. This keeps the traversal cursor after a complete item
+        # instead of losing a sibling candidate from the same observation.
+        if len(findings) >= max_findings and current_source_was_full:
+            page_full = True
             return False
         findings.append(item)
+        current_source_stored += 1
+        if len(findings) >= max_findings:
+            page_full = True
         return True
 
-    for series_id, series_rows in groupby(rows, key=lambda row: row["series_id"]):
-        previous: tuple[date, object, str] | None = None
-        for row in series_rows:
-            session_date = row["session_date"]
-            try:
-                current_date = date.fromisoformat(session_date)
-            except (TypeError, ValueError):
-                add(
-                    _candidate(
-                        series_id=series_id,
-                        code=row["symbol"],
-                        provider=row["provider"],
-                        adjustment=row["adjustment"],
-                        frequency=row["frequency"],
-                        session_date=session_date,
-                        finding_type="ohlcv_anomaly",
-                        severity="error",
-                        confidence="high",
-                        rule="invalid_session_date",
-                        evidence={"session_date": str(session_date)},
-                    )
+    if checkpoint_phase == "equity":
+        for series_id, series_rows in groupby(rows, key=lambda row: row["series_id"]):
+            previous: tuple[date, object, str] | None = None
+            if checkpoint_key is not None and series_id == checkpoint_key.get("series_id"):
+                previous = _equity_cursor_previous(path, checkpoint_key)
+            for row in series_rows:
+                begin_source(
+                    {"phase": "equity", "series_id": series_id, "session_date": row["session_date"]}
                 )
-                continue
-
-            values = {name: _decimal(row[name]) for name in ("open", "high", "low", "close")}
-            volume = row["volume"]
-            invalid = [name for name, value in values.items() if value is None]
-            try:
-                volume_value = int(volume)
-            except (TypeError, ValueError):
-                volume_value = None
-            if volume_value is None or volume_value < 0:
-                invalid.append("volume")
-            if not invalid and not (
-                values["low"] <= values["open"] <= values["high"]
-                and values["low"] <= values["close"] <= values["high"]
-            ):
-                invalid.append("ohlc_order")
-            if invalid:
-                add(
-                    _candidate(
-                        series_id=series_id,
-                        code=row["symbol"],
-                        provider=row["provider"],
-                        adjustment=row["adjustment"],
-                        frequency=row["frequency"],
-                        session_date=session_date,
-                        finding_type="ohlcv_anomaly",
-                        severity="error",
-                        confidence="high",
-                        rule="validated_ohlcv_constraints",
-                        evidence={"invalid_fields": invalid},
-                    )
-                )
-
-            close = values["close"]
-            if (
-                previous
-                and close is not None
-                and close > 0
-                and previous[1] is not None
-                and previous[1] > 0
-            ):
-                ratio = close / previous[1]
-                if ratio >= 2 or ratio <= 0.5:
+                session_date = row["session_date"]
+                try:
+                    current_date = date.fromisoformat(session_date)
+                except (TypeError, ValueError):
                     add(
                         _candidate(
                             series_id=series_id,
@@ -321,186 +423,279 @@ def _read_candidates(
                             adjustment=row["adjustment"],
                             frequency=row["frequency"],
                             session_date=session_date,
-                            finding_type="price_anomaly",
-                            severity="warning",
-                            confidence="low",
-                            rule="close_jump_over_2x_or_under_half",
-                            evidence={
-                                "previous_session": previous[0].isoformat(),
-                                "previous_close": str(previous[1]),
-                                "close": str(close),
-                                "ratio": str(ratio),
-                            },
+                            finding_type="ohlcv_anomaly",
+                            severity="error",
+                            confidence="high",
+                            rule="invalid_session_date",
+                            evidence={"session_date": str(session_date)},
                         )
                     )
-
-            if previous and current_date > previous[0] + timedelta(days=1):
-                missing_weekdays = []
-                cursor = previous[0] + timedelta(days=1)
-                while cursor < current_date:
-                    if cursor.weekday() < 5:
-                        missing_weekdays.append(cursor.isoformat())
-                    cursor += timedelta(days=1)
-                if missing_weekdays:
-                    add(
-                        _candidate(
-                            series_id=series_id,
-                            code=row["symbol"],
-                            provider=row["provider"],
-                            adjustment=row["adjustment"],
-                            frequency=row["frequency"],
-                            session_date=current_date.isoformat(),
-                            finding_type="missing_session",
-                            severity="warning",
-                            confidence="low",
-                            rule="weekday_gap_candidate",
-                            evidence={
-                                "previous_session": previous[0].isoformat(),
-                                "next_session": current_date.isoformat(),
-                                "weekday_candidates": missing_weekdays[:31],
-                                "calendar_applied": False,
-                            },
-                        )
-                    )
-            if close is not None:
-                previous = (current_date, close, row["session_date"])
-
-    for (index_code, provider), index_series in groupby(
-        index_rows, key=lambda row: (row["symbol"], row["provider"])
-    ):
-        previous: tuple[date, object] | None = None
-        for row in index_series:
-            session_date = row["session_date"]
-            try:
-                current_date = date.fromisoformat(session_date)
-            except (TypeError, ValueError):
-                add(
-                    _candidate(
-                        instrument_kind="index",
-                        series_id=None,
-                        code=index_code,
-                        provider=provider,
-                        session_date=session_date,
-                        finding_type="price_anomaly",
-                        severity="error",
-                        confidence="high",
-                        rule="invalid_index_session_date",
-                        evidence={"session_date": str(session_date)},
-                    )
-                )
-                continue
-            close = _decimal(row["close"])
-            if close is None or close <= 0:
-                add(
-                    _candidate(
-                        instrument_kind="index",
-                        series_id=None,
-                        code=index_code,
-                        provider=provider,
-                        session_date=session_date,
-                        finding_type="price_anomaly",
-                        severity="error",
-                        confidence="high",
-                        rule="positive_finite_index_close",
-                        evidence={"close": str(row["close"])},
-                    )
-                )
-            if previous and close is not None and close > 0 and previous[1] > 0:
-                ratio = close / previous[1]
-                if ratio >= 2 or ratio <= 0.5:
-                    add(
-                        _candidate(
-                            instrument_kind="index",
-                            series_id=None,
-                            code=index_code,
-                            provider=provider,
-                            session_date=session_date,
-                            finding_type="price_anomaly",
-                            severity="warning",
-                            confidence="low",
-                            rule="close_jump_over_2x_or_under_half",
-                            evidence={
-                                "previous_session": previous[0].isoformat(),
-                                "previous_close": str(previous[1]),
-                                "close": str(close),
-                                "ratio": str(ratio),
-                            },
-                        )
-                    )
-            if previous and current_date > previous[0] + timedelta(days=1):
-                missing_weekdays = []
-                cursor = previous[0] + timedelta(days=1)
-                while cursor < current_date:
-                    if cursor.weekday() < 5:
-                        missing_weekdays.append(cursor.isoformat())
-                    cursor += timedelta(days=1)
-                if missing_weekdays:
-                    add(
-                        _candidate(
-                            instrument_kind="index",
-                            series_id=None,
-                            code=index_code,
-                            provider=provider,
-                            session_date=current_date.isoformat(),
-                            finding_type="missing_session",
-                            severity="warning",
-                            confidence="low",
-                            rule="weekday_gap_candidate",
-                            evidence={
-                                "previous_session": previous[0].isoformat(),
-                                "next_session": current_date.isoformat(),
-                                "weekday_candidates": missing_weekdays[:31],
-                                "calendar_applied": False,
-                            },
-                        )
-                    )
-            if close is not None and close > 0:
-                previous = (current_date, close)
-
-    provider_rows = _iter_cross_provider_rows(path)
-    for (symbol, frequency, adjustment, session), observation_group in groupby(
-        provider_rows,
-        key=lambda row: (
-            row["symbol"],
-            row["frequency"],
-            row["adjustment"],
-            row["session_date"],
-        ),
-    ):
-        observations = list(observation_group)
-        if len(observations) < 2:
-            continue
-        valid = [(row, _decimal(row["close"])) for row in observations]
-        valid = [(row, close) for row, close in valid if close is not None and close > 0]
-        for index, (left, left_close) in enumerate(valid):
-            for right, right_close in valid[index + 1 :]:
-                ratio = abs(left_close - right_close) / left_close
-                if ratio <= 0.01:
+                    finish_source()
                     continue
-                provider = "|".join(sorted((left["provider"], right["provider"])))
-                add(
-                    _candidate(
-                        series_id=left["series_id"],
-                        code=symbol,
-                        provider=provider,
-                        adjustment=adjustment,
-                        frequency=frequency,
-                        session_date=session,
-                        finding_type="provider_divergence",
-                        severity="warning",
-                        confidence="low",
-                        rule="overlapping_close_differs_over_1pct",
-                        evidence={
-                            "adjustment": adjustment,
-                            "left_provider": left["provider"],
-                            "right_provider": right["provider"],
-                            "left_close": str(left_close),
-                            "right_close": str(right_close),
-                            "relative_difference": str(ratio),
-                        },
+
+                values = {name: _decimal(row[name]) for name in ("open", "high", "low", "close")}
+                volume = row["volume"]
+                invalid = [name for name, value in values.items() if value is None]
+                try:
+                    volume_value = int(volume)
+                except (TypeError, ValueError):
+                    volume_value = None
+                if volume_value is None or volume_value < 0:
+                    invalid.append("volume")
+                if not invalid and not (
+                    values["low"] <= values["open"] <= values["high"]
+                    and values["low"] <= values["close"] <= values["high"]
+                ):
+                    invalid.append("ohlc_order")
+                if invalid:
+                    add(
+                        _candidate(
+                            series_id=series_id,
+                            code=row["symbol"],
+                            provider=row["provider"],
+                            adjustment=row["adjustment"],
+                            frequency=row["frequency"],
+                            session_date=session_date,
+                            finding_type="ohlcv_anomaly",
+                            severity="error",
+                            confidence="high",
+                            rule="validated_ohlcv_constraints",
+                            evidence={"invalid_fields": invalid},
+                        )
                     )
+
+                close = values["close"]
+                if (
+                    previous
+                    and close is not None
+                    and close > 0
+                    and previous[1] is not None
+                    and previous[1] > 0
+                ):
+                    ratio = close / previous[1]
+                    if ratio >= 2 or ratio <= 0.5:
+                        add(
+                            _candidate(
+                                series_id=series_id,
+                                code=row["symbol"],
+                                provider=row["provider"],
+                                adjustment=row["adjustment"],
+                                frequency=row["frequency"],
+                                session_date=session_date,
+                                finding_type="price_anomaly",
+                                severity="warning",
+                                confidence="low",
+                                rule="close_jump_over_2x_or_under_half",
+                                evidence={
+                                    "previous_session": previous[0].isoformat(),
+                                    "previous_close": str(previous[1]),
+                                    "close": str(close),
+                                    "ratio": str(ratio),
+                                },
+                            )
+                        )
+
+                if previous and current_date > previous[0] + timedelta(days=1):
+                    missing_weekdays = []
+                    cursor = previous[0] + timedelta(days=1)
+                    while cursor < current_date:
+                        if cursor.weekday() < 5:
+                            missing_weekdays.append(cursor.isoformat())
+                        cursor += timedelta(days=1)
+                    if missing_weekdays:
+                        add(
+                            _candidate(
+                                series_id=series_id,
+                                code=row["symbol"],
+                                provider=row["provider"],
+                                adjustment=row["adjustment"],
+                                frequency=row["frequency"],
+                                session_date=current_date.isoformat(),
+                                finding_type="missing_session",
+                                severity="warning",
+                                confidence="low",
+                                rule="weekday_gap_candidate",
+                                evidence={
+                                    "previous_session": previous[0].isoformat(),
+                                    "next_session": current_date.isoformat(),
+                                    "weekday_candidates": missing_weekdays[:31],
+                                    "calendar_applied": False,
+                                },
+                            )
+                        )
+                if close is not None:
+                    previous = (current_date, close, row["session_date"])
+                finish_source()
+
+    if checkpoint_phase in {"equity", "index"}:
+        for (index_code, provider), index_series in groupby(
+            index_rows, key=lambda row: (row["symbol"], row["provider"])
+        ):
+            previous: tuple[date, object] | None = None
+            if (
+                checkpoint_phase == "index"
+                and checkpoint_key is not None
+                and index_code == checkpoint_key.get("symbol")
+                and provider == checkpoint_key.get("provider")
+            ):
+                previous = _index_cursor_previous(path, checkpoint_key)
+            for row in index_series:
+                begin_source(
+                    {
+                        "phase": "index",
+                        "symbol": index_code,
+                        "provider": provider,
+                        "session_date": row["session_date"],
+                    }
                 )
-    return findings, findings_examined
+                session_date = row["session_date"]
+                try:
+                    current_date = date.fromisoformat(session_date)
+                except (TypeError, ValueError):
+                    add(
+                        _candidate(
+                            instrument_kind="index",
+                            series_id=None,
+                            code=index_code,
+                            provider=provider,
+                            session_date=session_date,
+                            finding_type="price_anomaly",
+                            severity="error",
+                            confidence="high",
+                            rule="invalid_index_session_date",
+                            evidence={"session_date": str(session_date)},
+                        )
+                    )
+                    finish_source()
+                    continue
+                close = _decimal(row["close"])
+                if close is None or close <= 0:
+                    add(
+                        _candidate(
+                            instrument_kind="index",
+                            series_id=None,
+                            code=index_code,
+                            provider=provider,
+                            session_date=session_date,
+                            finding_type="price_anomaly",
+                            severity="error",
+                            confidence="high",
+                            rule="positive_finite_index_close",
+                            evidence={"close": str(row["close"])},
+                        )
+                    )
+                if previous and close is not None and close > 0 and previous[1] > 0:
+                    ratio = close / previous[1]
+                    if ratio >= 2 or ratio <= 0.5:
+                        add(
+                            _candidate(
+                                instrument_kind="index",
+                                series_id=None,
+                                code=index_code,
+                                provider=provider,
+                                session_date=session_date,
+                                finding_type="price_anomaly",
+                                severity="warning",
+                                confidence="low",
+                                rule="close_jump_over_2x_or_under_half",
+                                evidence={
+                                    "previous_session": previous[0].isoformat(),
+                                    "previous_close": str(previous[1]),
+                                    "close": str(close),
+                                    "ratio": str(ratio),
+                                },
+                            )
+                        )
+                if previous and current_date > previous[0] + timedelta(days=1):
+                    missing_weekdays = []
+                    cursor = previous[0] + timedelta(days=1)
+                    while cursor < current_date:
+                        if cursor.weekday() < 5:
+                            missing_weekdays.append(cursor.isoformat())
+                        cursor += timedelta(days=1)
+                    if missing_weekdays:
+                        add(
+                            _candidate(
+                                instrument_kind="index",
+                                series_id=None,
+                                code=index_code,
+                                provider=provider,
+                                session_date=current_date.isoformat(),
+                                finding_type="missing_session",
+                                severity="warning",
+                                confidence="low",
+                                rule="weekday_gap_candidate",
+                                evidence={
+                                    "previous_session": previous[0].isoformat(),
+                                    "next_session": current_date.isoformat(),
+                                    "weekday_candidates": missing_weekdays[:31],
+                                    "calendar_applied": False,
+                                },
+                            )
+                        )
+                if close is not None and close > 0:
+                    previous = (current_date, close)
+                finish_source()
+
+    if checkpoint_phase in {"equity", "index", "cross_provider"}:
+        provider_rows = _iter_cross_provider_rows(path, start_key=cross_start)
+        for (symbol, frequency, adjustment, session), observation_group in groupby(
+            provider_rows,
+            key=lambda row: (
+                row["symbol"],
+                row["frequency"],
+                row["adjustment"],
+                row["session_date"],
+            ),
+        ):
+            begin_source(
+                {
+                    "phase": "cross_provider",
+                    "symbol": symbol,
+                    "frequency": frequency,
+                    "adjustment": adjustment,
+                    "session_date": session,
+                }
+            )
+            observations = list(observation_group)
+            if len(observations) >= 2:
+                valid = [(row, _decimal(row["close"])) for row in observations]
+                valid = [(row, close) for row, close in valid if close is not None and close > 0]
+                for index, (left, left_close) in enumerate(valid):
+                    for right, right_close in valid[index + 1 :]:
+                        ratio = abs(left_close - right_close) / left_close
+                        if ratio <= 0.01:
+                            continue
+                        provider = "|".join(sorted((left["provider"], right["provider"])))
+                        add(
+                            _candidate(
+                                series_id=left["series_id"],
+                                code=symbol,
+                                provider=provider,
+                                adjustment=adjustment,
+                                frequency=frequency,
+                                session_date=session,
+                                finding_type="provider_divergence",
+                                severity="warning",
+                                confidence="low",
+                                rule="overlapping_close_differs_over_1pct",
+                                evidence={
+                                    "adjustment": adjustment,
+                                    "left_provider": left["provider"],
+                                    "right_provider": right["provider"],
+                                    "left_close": str(left_close),
+                                    "right_close": str(right_close),
+                                    "relative_difference": str(ratio),
+                                },
+                            )
+                        )
+            finish_source()
+
+    if page_full and resume_cursor == checkpoint:
+        # A single source row can yield more candidates than the configured
+        # page size. Repeating that one row is safer than skipping evidence.
+        resume_cursor = checkpoint
+    return findings, findings_examined, resume_cursor, not page_full
 
 
 @serialized_storage_write
@@ -661,6 +856,9 @@ def _source_identity(path: Path) -> str:
     try:
         facts = {
             "schema_version": conn.execute("PRAGMA user_version").fetchone()[0],
+            "source_version": conn.execute(
+                "SELECT source_version FROM data_quality_source_state WHERE id = 1"
+            ).fetchone()[0],
             "series": conn.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM series").fetchone(),
             "daily_prices": conn.execute(
                 "SELECT COUNT(*), COALESCE(MAX(rowid), 0), "
@@ -682,6 +880,44 @@ def _source_identity(path: Path) -> str:
         conn.close()
 
 
+def _source_data_version(path: Path) -> int:
+    conn = _read_connection(path, snapshot=False)
+    if conn is None:
+        raise FileNotFoundError(path)
+    try:
+        row = conn.execute(
+            "SELECT source_version FROM data_quality_source_state WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            raise sqlite3.OperationalError("Missing data-quality source state")
+        return int(row[0])
+    finally:
+        conn.close()
+
+
+def _progress_checkpoint(progress: dict | None) -> dict[str, object]:
+    if progress is None:
+        return {"phase": "equity", "source_key": None}
+    phase = progress.get("cursor_phase") or "equity"
+    source_key = None
+    encoded = progress.get("cursor_source_key")
+    if encoded:
+        try:
+            decoded = json.loads(encoded)
+        except (TypeError, ValueError):
+            decoded = None
+        if isinstance(decoded, dict):
+            source_key = decoded
+    return {"phase": phase, "source_key": source_key}
+
+
+def _encode_source_key(checkpoint: dict[str, object]) -> str | None:
+    source_key = checkpoint.get("source_key")
+    if not isinstance(source_key, dict):
+        return None
+    return json.dumps(source_key, sort_keys=True, separators=(",", ":"))
+
+
 def _scan_progress(path: Path) -> dict | None:
     conn = _read_connection(path)
     if conn is None:
@@ -695,12 +931,19 @@ def _scan_progress(path: Path) -> dict | None:
             is None
         ):
             return None
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(data_quality_scan_progress)")}
+        cursor_fields = (
+            "cursor_phase,cursor_source_key"
+            if {"cursor_phase", "cursor_source_key"}.issubset(columns)
+            else "'equity' AS cursor_phase,NULL AS cursor_source_key"
+        )
         row = conn.execute(
             "SELECT scan_key,source_identity,source_data_version_start,"
             "source_data_version_end,cursor_start,cursor_next,max_findings,"
             "findings_examined,findings_stored,total_known_findings,"
-            "persisted_findings_total,status,stale,updated_at,last_run_key "
-            "FROM data_quality_scan_progress WHERE scan_key = ?",
+            "persisted_findings_total,status,stale,updated_at,last_run_key,"
+            + cursor_fields
+            + " FROM data_quality_scan_progress WHERE scan_key = ?",
             (_SCAN_KEY,),
         ).fetchone()
         return dict(row) if row is not None else None
@@ -726,6 +969,8 @@ def _persist_scan_progress(
     stale: bool,
     updated_at: str,
     last_run_key: str,
+    cursor_phase: str,
+    cursor_source_key: str | None,
 ) -> None:
     conn = _write_connection(path)
     try:
@@ -734,8 +979,9 @@ def _persist_scan_progress(
             "INSERT INTO data_quality_scan_progress("
             "scan_key,source_identity,source_data_version_start,source_data_version_end,"
             "cursor_start,cursor_next,max_findings,findings_examined,findings_stored,"
-            "total_known_findings,persisted_findings_total,status,stale,updated_at,last_run_key) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "total_known_findings,persisted_findings_total,status,stale,updated_at,last_run_key,"
+            "cursor_phase,cursor_source_key) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(scan_key) DO UPDATE SET "
             "source_identity=excluded.source_identity,"
             "source_data_version_start=excluded.source_data_version_start,"
@@ -747,7 +993,8 @@ def _persist_scan_progress(
             "total_known_findings=excluded.total_known_findings,"
             "persisted_findings_total=excluded.persisted_findings_total,"
             "status=excluded.status,stale=excluded.stale,updated_at=excluded.updated_at,"
-            "last_run_key=excluded.last_run_key",
+            "last_run_key=excluded.last_run_key,cursor_phase=excluded.cursor_phase,"
+            "cursor_source_key=excluded.cursor_source_key",
             (
                 _SCAN_KEY,
                 source_identity,
@@ -764,6 +1011,8 @@ def _persist_scan_progress(
                 int(stale),
                 updated_at,
                 last_run_key,
+                cursor_phase,
+                cursor_source_key,
             ),
         )
         conn.commit()
@@ -788,28 +1037,23 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
     started_at = _iso_now()
     _ensure_quality_schema(path)
     source_identity = _source_identity(path)
-    version_connection = _read_connection(path, snapshot=False)
-    if version_connection is None:
-        raise FileNotFoundError(path)
-    source_data_version_start = int(version_connection.execute("PRAGMA data_version").fetchone()[0])
+    source_data_version_start = _source_data_version(path)
     progress = _scan_progress(path)
+    checkpoint = {"phase": "equity", "source_key": None}
     cursor_start = 0
     if (
         progress is not None
         and progress["status"] == "partial"
         and not progress["stale"]
         and progress["source_identity"] == source_identity
+        and progress.get("cursor_source_key")
     ):
         cursor_start = int(progress["cursor_next"])
-    try:
-        candidates, findings_examined = _read_candidates(
-            path, max_findings, start_after=cursor_start
-        )
-        source_data_version_end = int(
-            version_connection.execute("PRAGMA data_version").fetchone()[0]
-        )
-    finally:
-        version_connection.close()
+        checkpoint = _progress_checkpoint(progress)
+    candidates, findings_seen, next_checkpoint, exhausted = _read_candidates(
+        path, max_findings, checkpoint=checkpoint
+    )
+    source_data_version_end = _source_data_version(path)
     source_changed = (
         source_data_version_end != source_data_version_start
         or _source_identity(path) != source_identity
@@ -817,9 +1061,17 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
     _persist(path, candidates)
     findings_stored = len(candidates)
     total_known_findings, _ = _stored_finding_summary(path)
+    previous_known_findings = (
+        int(progress["total_known_findings"])
+        if progress is not None
+        and progress["source_identity"] == source_identity
+        and not progress["stale"]
+        else 0
+    )
+    findings_examined = max(previous_known_findings, findings_seen)
     cursor_next = cursor_start + findings_stored
-    truncated = findings_examined > cursor_next
     stale = source_changed
+    truncated = not exhausted and not stale
     complete = not truncated and not stale
     status = "completed" if complete else "partial"
     completed_at = _iso_now()
@@ -851,6 +1103,12 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
         stale=stale,
         updated_at=completed_at,
         last_run_key=run_key,
+        cursor_phase="equity"
+        if stale
+        else next_checkpoint["phase"]
+        if not complete
+        else "complete",
+        cursor_source_key=None if stale or complete else _encode_source_key(next_checkpoint),
     )
     counts = Counter(item["finding_type"] for item in candidates)
     severity = Counter(item["severity"] for item in candidates)
@@ -864,7 +1122,9 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
         "source_data_version_end": source_data_version_end,
         "cursor_start": cursor_start,
         "cursor_next": 0 if stale or complete else cursor_next,
-        "resumed": cursor_start > 0,
+        "cursor_phase": "equity" if stale or complete else next_checkpoint["phase"],
+        "cursor_source_key": None if stale or complete else next_checkpoint.get("source_key"),
+        "resumed": checkpoint.get("source_key") is not None,
         "max_findings": max_findings,
         "findings_examined": findings_examined,
         "findings_stored": findings_stored,
@@ -878,6 +1138,7 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
             "Findings are candidates and do not modify stored observations.",
             "Weekday gaps are not exchange-calendar confirmation; holidays, suspensions, and listings require review.",
             "Evidence contains normalized local values only; credentials and raw provider payloads are excluded.",
+            "Partial scans resume from a phase and source key; total_known_findings is exact after the first bounded pass.",
         ],
     }
 
@@ -1019,7 +1280,10 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
     scan_metadata_available = (
         scan_run is not None
         and progress is not None
-        and progress["last_run_key"] == scan_run["run_key"]
+        and (
+            progress["stale"]
+            or (scan_run is not None and progress["last_run_key"] == scan_run["run_key"])
+        )
     )
     pagination_truncated = bool(findings["truncated"])
     scan_truncated = bool(scan_run["truncated"]) if scan_metadata_available else False
@@ -1073,6 +1337,12 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
                 "source_data_version_end": progress["source_data_version_end"],
                 "cursor_start": progress["cursor_start"],
                 "cursor_next": progress["cursor_next"],
+                "cursor_phase": progress["cursor_phase"],
+                "cursor_source_key": (
+                    json.loads(progress["cursor_source_key"])
+                    if progress["cursor_source_key"]
+                    else None
+                ),
             }
             if scan_metadata_available
             else None

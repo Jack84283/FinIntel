@@ -4,7 +4,12 @@ import sqlite3
 
 import pytest
 
-from finintel.market_data.quality import list_findings, review_finding, run_quality_scan
+from finintel.market_data.quality import (
+    list_findings,
+    quality_report,
+    review_finding,
+    run_quality_scan,
+)
 from finintel.storage.backup import (
     create_backup,
     inspect_backup,
@@ -157,6 +162,15 @@ def test_merge_imports_quality_findings_reviews_and_scan_metadata(tmp_path):
             == confirmed[0][0]
         )
         assert db.execute("SELECT COUNT(*) FROM data_quality_scan_runs").fetchone()[0] == 1
+        progress = db.execute(
+            "SELECT status,stale,cursor_phase,cursor_source_key FROM data_quality_scan_progress"
+        ).fetchone()
+        assert progress == ("stale", 1, "equity", None)
+
+    merged_report = quality_report(target, limit=100)
+    assert merged_report["status"] == "stale"
+    assert merged_report["complete"] is False
+    assert merged_report["scan_completeness"]["stale"] is True
 
     run_quality_scan(target)
     with sqlite3.connect(target) as db:

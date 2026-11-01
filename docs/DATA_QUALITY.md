@@ -39,12 +39,17 @@ use that lock, so daily acquisition, imports, backups, and reviews can commit
 between scan pages.
 
 When a scan reaches its finding cap, `data_quality_scan_progress` stores the
-candidate cursor and the next run resumes from that cursor. A scan keeps the
-SQLite `data_version` observed at its start and end; if source data changes
-during the read, the result is marked `stale` and the next run restarts from
-the beginning. Cross-provider comparison reads use the series scan index and
-merge per-series primary-key streams, avoiding repeated temporary database
-sorts.
+current traversal phase (`equity`, `index`, or `cross_provider`) and a source
+key for that phase. The next run seeks directly to that key instead of
+re-scanning earlier observations. A source-only revision maintained by SQLite
+triggers is compared at scan start and end; review, finding, and scan-metadata
+writes do not invalidate a scan, while source observation changes mark it
+`stale`. Cross-provider comparison reads use the series scan index and merge
+per-series primary-key streams, avoiding repeated temporary database sorts.
+
+Backup merges retain imported scan runs for audit history but invalidate all
+scan progress in the merged database. The destination must be scanned again
+because it may contain observations that were not part of the imported scan.
 
 Review transitions are recorded in `data_quality_reviews` and the current
 state is kept on `data_quality_findings` (`candidate`, `confirmed`, `rejected`,

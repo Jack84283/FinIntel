@@ -211,6 +211,21 @@ def _merge(staging: Path, source: Path) -> None:
                     "SELECT name FROM incoming.sqlite_master WHERE type='table'"
                 )
             }
+            incoming_progress_columns = (
+                {
+                    row[1]
+                    for row in dest.execute(
+                        "PRAGMA incoming.table_info(data_quality_scan_progress)"
+                    )
+                }
+                if "data_quality_scan_progress" in incoming_tables
+                else set()
+            )
+            incoming_cursor_fields = (
+                "cursor_phase,cursor_source_key"
+                if {"cursor_phase", "cursor_source_key"}.issubset(incoming_progress_columns)
+                else "'equity',NULL"
+            )
             with dest:
                 dest.execute("INSERT OR IGNORE INTO instruments SELECT * FROM incoming.instruments")
                 dest.execute(
@@ -382,12 +397,14 @@ def _merge(staging: Path, source: Path) -> None:
                             "scan_key,source_identity,source_data_version_start,"
                             "source_data_version_end,cursor_start,cursor_next,max_findings,"
                             "findings_examined,findings_stored,total_known_findings,"
-                            "persisted_findings_total,status,stale,updated_at,last_run_key) "
+                            "persisted_findings_total,status,stale,updated_at,last_run_key,"
+                            "cursor_phase,cursor_source_key) "
                             "SELECT scan_key,source_identity,source_data_version_start,"
                             "source_data_version_end,cursor_start,cursor_next,max_findings,"
                             "findings_examined,findings_stored,total_known_findings,"
-                            "persisted_findings_total,status,stale,updated_at,last_run_key "
-                            "FROM incoming.data_quality_scan_progress WHERE 1 "
+                            "persisted_findings_total,status,stale,updated_at,last_run_key,"
+                            + incoming_cursor_fields
+                            + " FROM incoming.data_quality_scan_progress WHERE 1 "
                             "ON CONFLICT(scan_key) DO UPDATE SET "
                             "source_identity=excluded.source_identity,"
                             "source_data_version_start=excluded.source_data_version_start,"
@@ -399,7 +416,8 @@ def _merge(staging: Path, source: Path) -> None:
                             "total_known_findings=excluded.total_known_findings,"
                             "persisted_findings_total=excluded.persisted_findings_total,"
                             "status=excluded.status,stale=excluded.stale,"
-                            "updated_at=excluded.updated_at,last_run_key=excluded.last_run_key "
+                            "updated_at=excluded.updated_at,last_run_key=excluded.last_run_key,"
+                            "cursor_phase=excluded.cursor_phase,cursor_source_key=excluded.cursor_source_key "
                             "WHERE excluded.updated_at > data_quality_scan_progress.updated_at"
                         )
                 dest.execute(
@@ -546,6 +564,15 @@ def _merge(staging: Path, source: Path) -> None:
                     "WHERE d.occurred_at=e.occurred_at AND d.action=e.action "
                     "AND d.status=e.status AND d.symbol=e.symbol "
                     "AND d.provider=e.provider AND d.duration_ms=e.duration_ms)"
+                )
+                # A merged database has a different source universe from any
+                # scan that was run against either input. Keep the historical
+                # run for audit/reporting, but require a fresh scan before a
+                # continuation can be considered complete or resumed.
+                dest.execute(
+                    "UPDATE data_quality_scan_progress SET status='stale',stale=1,"
+                    "cursor_start=0,cursor_next=0,cursor_phase='equity',"
+                    "cursor_source_key=NULL,updated_at=datetime('now')"
                 )
                 if "data_quality_findings" in incoming_tables:
                     dest.execute("DROP TABLE _quality_finding_map")

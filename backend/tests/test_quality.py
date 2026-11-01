@@ -191,6 +191,36 @@ def test_truncated_quality_scan_resumes_from_durable_cursor(tmp_path):
         assert progress == ("completed", 0, 0)
 
 
+def test_resumed_quality_scan_seeks_from_phase_source_key(tmp_path, monkeypatch):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    first = run_quality_scan(db, max_findings=2)
+    assert first["cursor_phase"] == "equity"
+    assert first["cursor_source_key"] == {
+        "series_id": 1,
+        "session_date": "2026-10-21",
+    }
+
+    observed_start_keys = []
+    original = quality_module._iter_query_rows
+
+    def tracked_rows(*args, **kwargs):
+        observed_start_keys.append(kwargs.get("start_key"))
+        yield from original(*args, **kwargs)
+
+    monkeypatch.setattr(quality_module, "_iter_query_rows", tracked_rows)
+    second = run_quality_scan(db, max_findings=2)
+
+    assert second["resumed"] is True
+    assert (1, "2026-10-21") in observed_start_keys
+    with sqlite3.connect(db) as conn:
+        progress = conn.execute(
+            "SELECT cursor_phase,cursor_source_key FROM data_quality_scan_progress"
+        ).fetchone()
+        assert progress[0] in {"equity", "index", "cross_provider"}
+        assert progress[1] is not None
+
+
 def test_quality_scan_reports_truncation_and_report_counts_all_known_findings(tmp_path):
     db = tmp_path / "quality.sqlite3"
     seed_quality_database(db)
@@ -321,7 +351,10 @@ def test_quality_scan_allows_a_real_sqlite_writer_between_read_chunks(tmp_path, 
     def writer():
         try:
             with sqlite3.connect(db, timeout=0.5) as conn:
-                conn.execute("UPDATE instruments SET created_at='2026-11-01' WHERE symbol='AAPL'")
+                conn.execute(
+                    "UPDATE daily_prices SET close='101',retrieved_at='2026-11-01' "
+                    "WHERE series_id=1 AND session_date='2026-10-19'"
+                )
                 conn.commit()
         except sqlite3.Error as exc:  # pragma: no cover - asserted below
             writer_errors.append(exc)
@@ -348,6 +381,60 @@ def test_quality_scan_allows_a_real_sqlite_writer_between_read_chunks(tmp_path, 
     assert report["status"] == "stale"
     assert report["complete"] is False
     assert report["scan_completeness"]["stale"] is True
+
+
+def test_quality_review_write_does_not_mark_scan_stale(tmp_path, monkeypatch):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    run_quality_scan(db)
+    finding_id = list_findings(db, limit=1)["items"][0]["id"]
+    scan_paused = threading.Event()
+    allow_scan = threading.Event()
+    review_done = threading.Event()
+    results = []
+    errors = []
+    original = quality_module._iter_query_rows
+
+    def paused_rows(*args, **kwargs):
+        paused = False
+        for row in original(*args, **kwargs):
+            if not paused:
+                paused = True
+                scan_paused.set()
+                if not allow_scan.wait(5):
+                    raise AssertionError("test did not release the scan")
+            yield row
+
+    monkeypatch.setattr(quality_module, "_iter_query_rows", paused_rows)
+
+    def scan():
+        try:
+            results.append(run_quality_scan(db))
+        except (AssertionError, OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
+            errors.append(exc)
+
+    def reviewer():
+        try:
+            review_finding(db, finding_id, "confirmed", "Reviewed during scan")
+        except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
+            errors.append(exc)
+        finally:
+            review_done.set()
+
+    scan_thread = threading.Thread(target=scan)
+    scan_thread.start()
+    assert scan_paused.wait(5)
+    review_thread = threading.Thread(target=reviewer)
+    review_thread.start()
+    assert review_done.wait(3)
+    allow_scan.set()
+    scan_thread.join(10)
+    review_thread.join(3)
+
+    assert errors == []
+    assert not scan_thread.is_alive()
+    assert results and results[0]["status"] == "completed"
+    assert results[0]["stale"] is False
 
 
 def test_cross_provider_scan_handles_realistic_history_without_materializing_rows(tmp_path):
