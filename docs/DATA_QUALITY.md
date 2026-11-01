@@ -1,7 +1,7 @@
 # Historical data quality
 
 FinIntel's local Data Validation page includes a durable quality scan. The scan
-stores candidate findings in SQLite schema v8 and never changes an observation.
+stores candidate findings in SQLite schema v14 and never changes an observation.
 Each finding includes the symbol, provider, session, rule, severity,
 confidence, normalized evidence, and a stable fingerprint. Re-running a scan
 updates the evidence for the same candidate without resetting its review state.
