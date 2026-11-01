@@ -1833,7 +1833,10 @@ def test_reconciliation_backup_merge_remaps_series_without_losing_review(tmp_pat
     assert rescanned["review_state"] == "confirmed"
     with sqlite3.connect(destination) as conn:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-        assert conn.execute(
-            "SELECT COUNT(*) FROM data_quality_reviews WHERE finding_id=?",
-            (rescanned["id"],),
-        ).fetchone()[0] == 1
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM data_quality_reviews WHERE finding_id=?",
+                (rescanned["id"],),
+            ).fetchone()[0]
+            == 1
+        )
