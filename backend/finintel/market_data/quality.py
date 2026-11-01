@@ -9,12 +9,23 @@ import heapq
 import json
 import sqlite3
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from itertools import groupby
 from pathlib import Path
 
+from finintel.market_data.anomaly_quality import (
+    ANOMALY_RULE_VERSION,
+    AnomalyThresholds,
+    invalid_ohlcv_fields,
+    normalize_thresholds,
+    parse_timestamp,
+    price_jump_candidate,
+    thresholds_identity,
+    volume_spike_candidate,
+    zero_volume_candidate,
+)
 from finintel.storage.db import _read_connection, _write_connection, serialized_storage_write
 
 FINDING_TYPES = (
@@ -91,6 +102,8 @@ def _candidate(
         "confidence": confidence,
         "rule": rule,
         "evidence": evidence,
+        "adjustment": adjustment,
+        "frequency": frequency,
         "fingerprint": _fingerprint(
             instrument_kind=instrument_kind,
             series_id=series_id,
@@ -113,6 +126,248 @@ def _decimal(value: object) -> object:
     except (InvalidOperation, ValueError):
         return None
     return parsed if parsed.is_finite() else None
+
+
+def _ingestion_anomaly_candidates(
+    path: Path,
+    *,
+    instrument_kind: str,
+    series_id: int | None,
+    code: str,
+    provider: str,
+    adjustment: str,
+    frequency: str,
+    latest_session: str | None,
+    as_of: date,
+    thresholds: AnomalyThresholds,
+    index: bool = False,
+) -> list[dict]:
+    """Build metadata candidates without retaining raw provider payloads."""
+
+    conn = _read_connection(path)
+    if conn is None:
+        raise FileNotFoundError(path)
+    try:
+        if index:
+            rows = conn.execute(
+                "SELECT id,retrieved_at,observation_sha256,"
+                "COALESCE(payload_sha256,observation_sha256) AS payload_sha256,"
+                "first_session,last_session,observations,updated,unchanged "
+                "FROM index_ingestion_runs WHERE index_code=? AND provider=? "
+                "ORDER BY retrieved_at,id",
+                (code, provider),
+            ).fetchall()
+            latest_observation = conn.execute(
+                "SELECT session_date,retrieved_at FROM index_daily_closes "
+                "WHERE index_code=? AND provider=? ORDER BY session_date DESC LIMIT 1",
+                (code, provider),
+            ).fetchone()
+        else:
+            rows = conn.execute(
+                "SELECT id,retrieved_at,provider_last_refreshed,payload_sha256,"
+                "first_session,last_session,observations,stale "
+                "FROM ingestion_runs WHERE series_id=? ORDER BY retrieved_at,id",
+                (series_id,),
+            ).fetchall()
+            latest_observation = conn.execute(
+                "SELECT session_date,retrieved_at FROM daily_prices "
+                "WHERE series_id=? ORDER BY session_date DESC LIMIT 1",
+                (series_id,),
+            ).fetchone()
+    finally:
+        conn.close()
+
+    if not rows and latest_observation is None:
+        return []
+    if latest_observation is not None:
+        latest_session = str(latest_observation["session_date"])
+    elif latest_session is None:
+        latest_session = str(rows[-1]["last_session"])
+    policy = thresholds_identity(thresholds)
+    candidates: list[dict] = []
+    payload_groups: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        payload = row["payload_sha256"]
+        if payload:
+            payload_groups.setdefault(str(payload), []).append(row)
+    for payload, occurrences in payload_groups.items():
+        if len(occurrences) < 2:
+            continue
+        candidates.append(
+            _candidate(
+                instrument_kind=instrument_kind,
+                series_id=series_id,
+                code=code,
+                provider=provider,
+                session_date=None,
+                finding_type="duplicate",
+                severity="info",
+                confidence="high",
+                rule="repeated_ingestion_payload",
+                adjustment=adjustment,
+                frequency=frequency,
+                evidence={
+                    "anomaly_rule_version": ANOMALY_RULE_VERSION,
+                    "candidate_only": True,
+                    "duplicate_source_observations": True,
+                    "payload_sha256": payload,
+                    "occurrences": len(occurrences),
+                    "ingestion_ids": [int(row["id"]) for row in occurrences],
+                    "retrieved_at": [str(row["retrieved_at"]) for row in occurrences],
+                    "first_session": str(occurrences[0]["first_session"]),
+                    "last_session": str(occurrences[-1]["last_session"]),
+                    "thresholds": policy,
+                },
+            )
+        )
+
+    revision_events: list[dict[str, object]] = []
+    stale_imports: list[dict[str, object]] = []
+    newest_provider_revision = None
+    previous_index_observation = None
+    previous_index_window = None
+    for row in rows:
+        if not index:
+            stale_count = int(row["stale"] or 0)
+            if stale_count:
+                stale_imports.append(
+                    {
+                        "ingestion_id": int(row["id"]),
+                        "stale_observations": stale_count,
+                        "retrieved_at": str(row["retrieved_at"]),
+                        "provider_last_refreshed": row["provider_last_refreshed"],
+                    }
+                )
+            provider_revision = parse_timestamp(row["provider_last_refreshed"])
+            if provider_revision is not None:
+                if (
+                    newest_provider_revision is not None
+                    and provider_revision < newest_provider_revision[0]
+                ):
+                    revision_events.append(
+                        {
+                            "ingestion_id": int(row["id"]),
+                            "provider_last_refreshed": provider_revision.isoformat(),
+                            "newer_revision": newest_provider_revision[1],
+                        }
+                    )
+                if (
+                    newest_provider_revision is None
+                    or provider_revision > newest_provider_revision[0]
+                ):
+                    newest_provider_revision = (provider_revision, provider_revision.isoformat())
+        else:
+            observation_hash = row["observation_sha256"]
+            window = (row["first_session"], row["last_session"])
+            if (
+                observation_hash
+                and previous_index_observation
+                and observation_hash != previous_index_observation
+                and window == previous_index_window
+            ):
+                revision_events.append(
+                    {
+                        "ingestion_id": int(row["id"]),
+                        "observation_revision": str(observation_hash),
+                        "previous_observation_revision": str(previous_index_observation),
+                        "window": list(window),
+                    }
+                )
+            previous_index_observation = observation_hash
+            previous_index_window = window
+
+    if stale_imports or revision_events:
+        candidates.append(
+            _candidate(
+                instrument_kind=instrument_kind,
+                series_id=series_id,
+                code=code,
+                provider=provider,
+                session_date=latest_session,
+                finding_type="stale_observation",
+                severity="warning",
+                confidence="medium",
+                rule="outdated_provider_revision",
+                adjustment=adjustment,
+                frequency=frequency,
+                evidence={
+                    "anomaly_rule_version": ANOMALY_RULE_VERSION,
+                    "candidate_only": True,
+                    "stale_imports": stale_imports,
+                    "revision_events": revision_events,
+                    "revision_status": "provider_revision_requires_review",
+                    "thresholds": policy,
+                },
+            )
+        )
+
+    latest = rows[-1] if rows else None
+    latest_retrieved = parse_timestamp(latest["retrieved_at"]) if latest is not None else None
+    latest_provider_revision = (
+        None if index or latest is None else parse_timestamp(latest["provider_last_refreshed"])
+    )
+    latest_observation_retrieved = (
+        parse_timestamp(latest_observation["retrieved_at"])
+        if latest_observation is not None
+        else None
+    )
+    as_of_timestamp = datetime.combine(as_of, datetime.min.time(), tzinfo=UTC)
+    stale_reasons = []
+    if latest_retrieved is not None and as_of_timestamp - latest_retrieved > timedelta(
+        days=thresholds.stale_after_days
+    ):
+        stale_reasons.append("latest_ingestion_retrieved_at")
+    if (
+        latest_provider_revision is not None
+        and as_of_timestamp - latest_provider_revision > timedelta(days=thresholds.stale_after_days)
+    ):
+        stale_reasons.append("provider_last_refreshed")
+    if (
+        latest_observation_retrieved is not None
+        and as_of_timestamp - latest_observation_retrieved
+        > timedelta(days=thresholds.stale_after_days)
+    ):
+        stale_reasons.append("latest_observation_retrieved_at")
+    if stale_reasons:
+        candidates.append(
+            _candidate(
+                instrument_kind=instrument_kind,
+                series_id=series_id,
+                code=code,
+                provider=provider,
+                session_date=latest_session,
+                finding_type="stale_observation",
+                severity="warning",
+                confidence="low",
+                rule="stale_latest_observation",
+                adjustment=adjustment,
+                frequency=frequency,
+                evidence={
+                    "anomaly_rule_version": ANOMALY_RULE_VERSION,
+                    "candidate_only": True,
+                    "stale_after_days": thresholds.stale_after_days,
+                    "stale_reasons": stale_reasons,
+                    "latest_retrieved_at": (
+                        str(latest["retrieved_at"]) if latest is not None else None
+                    ),
+                    "latest_observation_retrieved_at": (
+                        str(latest_observation["retrieved_at"])
+                        if latest_observation is not None
+                        else None
+                    ),
+                    "provider_last_refreshed": (
+                        str(latest["provider_last_refreshed"])
+                        if not index
+                        and latest is not None
+                        and latest["provider_last_refreshed"] is not None
+                        else None
+                    ),
+                    "as_of": as_of.isoformat(),
+                    "thresholds": policy,
+                },
+            )
+        )
+    return candidates
 
 
 def _iter_query_rows(
@@ -256,9 +511,15 @@ def _equity_cursor_previous(path: Path, source_key: dict[str, object] | None):
         raise FileNotFoundError(path)
     try:
         row = conn.execute(
-            "SELECT session_date, close FROM daily_prices WHERE series_id = ? AND session_date = ?",
+            "SELECT session_date, close, volume FROM daily_prices "
+            "WHERE series_id = ? AND session_date = ?",
             (source_key["series_id"], source_key["session_date"]),
         ).fetchone()
+        history_rows = conn.execute(
+            "SELECT volume FROM daily_prices WHERE series_id = ? AND session_date < ? "
+            "ORDER BY session_date DESC LIMIT 20",
+            (source_key["series_id"], source_key["session_date"]),
+        ).fetchall()
     finally:
         conn.close()
     if row is None:
@@ -270,7 +531,8 @@ def _equity_cursor_previous(path: Path, source_key: dict[str, object] | None):
     previous_close = _decimal(row["close"])
     if previous_close is None:
         return None
-    return previous_date, previous_close, row["session_date"]
+    history = [item[0] for item in history_rows]
+    return previous_date, previous_close, row["session_date"], row["volume"], history
 
 
 def _index_cursor_previous(path: Path, source_key: dict[str, object] | None):
@@ -304,7 +566,11 @@ def _read_candidates(
     max_findings: int,
     *,
     checkpoint: dict[str, object] | None = None,
+    thresholds: AnomalyThresholds | Mapping[str, object] | None = None,
+    as_of: date | None = None,
 ) -> tuple[list[dict], int, dict[str, object], bool]:
+    thresholds = normalize_thresholds(thresholds)
+    as_of = as_of or datetime.now(UTC).date()
     checkpoint = checkpoint or {"phase": "equity", "source_key": None}
     checkpoint_phase = str(checkpoint.get("phase", "equity"))
     checkpoint_key = checkpoint.get("source_key")
@@ -335,7 +601,8 @@ def _read_candidates(
         path,
         select_sql=(
             "SELECT s.id AS series_id, s.symbol, s.provider, s.frequency, s.adjustment, "
-            "dp.session_date, dp.open, dp.high, dp.low, dp.close, dp.volume "
+            "dp.session_date, dp.open, dp.high, dp.low, dp.close, dp.volume, "
+            "dp.ingestion_id, dp.retrieved_at "
             "FROM series AS s JOIN daily_prices AS dp ON dp.series_id = s.id"
         ),
         order_expression="s.id, dp.session_date",
@@ -404,13 +671,39 @@ def _read_candidates(
 
     if checkpoint_phase == "equity":
         for series_id, series_rows in groupby(rows, key=lambda row: row["series_id"]):
-            previous: tuple[date, object, str] | None = None
+            previous: tuple[date, object, str, int | None] | None = None
+            volume_history: list[object] = []
             if checkpoint_key is not None and series_id == checkpoint_key.get("series_id"):
-                previous = _equity_cursor_previous(path, checkpoint_key)
+                context = _equity_cursor_previous(path, checkpoint_key)
+                if context is not None:
+                    previous = context[:4]
+                    volume_history = list(context[4])
+            metadata_emitted = False
             for row in series_rows:
                 begin_source(
                     {"phase": "equity", "series_id": series_id, "session_date": row["session_date"]}
                 )
+                if not metadata_emitted:
+                    metadata_was_processed = (
+                        checkpoint_phase == "equity"
+                        and checkpoint_key is not None
+                        and series_id == checkpoint_key.get("series_id")
+                    )
+                    if not metadata_was_processed:
+                        for item in _ingestion_anomaly_candidates(
+                            path,
+                            instrument_kind="equity",
+                            series_id=series_id,
+                            code=row["symbol"],
+                            provider=row["provider"],
+                            adjustment=row["adjustment"],
+                            frequency=row["frequency"],
+                            latest_session=None,
+                            as_of=as_of,
+                            thresholds=thresholds,
+                        ):
+                            add(item)
+                    metadata_emitted = True
                 session_date = row["session_date"]
                 try:
                     current_date = date.fromisoformat(session_date)
@@ -437,18 +730,7 @@ def _read_candidates(
 
                 values = {name: _decimal(row[name]) for name in ("open", "high", "low", "close")}
                 volume = row["volume"]
-                invalid = [name for name, value in values.items() if value is None]
-                try:
-                    volume_value = int(volume)
-                except (TypeError, ValueError):
-                    volume_value = None
-                if volume_value is None or volume_value < 0:
-                    invalid.append("volume")
-                if not invalid and not (
-                    values["low"] <= values["open"] <= values["high"]
-                    and values["low"] <= values["close"] <= values["high"]
-                ):
-                    invalid.append("ohlc_order")
+                invalid = invalid_ohlcv_fields(values, volume)
                 if invalid:
                     add(
                         _candidate(
@@ -462,20 +744,28 @@ def _read_candidates(
                             severity="error",
                             confidence="high",
                             rule="validated_ohlcv_constraints",
-                            evidence={"invalid_fields": invalid},
+                            evidence={
+                                "anomaly_rule_version": ANOMALY_RULE_VERSION,
+                                "candidate_only": True,
+                                "invalid_fields": invalid,
+                            },
                         )
                     )
 
+                try:
+                    volume_value = int(volume)
+                except (TypeError, ValueError):
+                    volume_value = None
+
                 close = values["close"]
-                if (
-                    previous
-                    and close is not None
-                    and close > 0
-                    and previous[1] is not None
-                    and previous[1] > 0
-                ):
-                    ratio = close / previous[1]
-                    if ratio >= 2 or ratio <= 0.5:
+                if previous:
+                    jump = price_jump_candidate(
+                        previous[1],
+                        close,
+                        adjustment=row["adjustment"],
+                        thresholds=thresholds,
+                    )
+                    if jump is not None:
                         add(
                             _candidate(
                                 series_id=series_id,
@@ -485,17 +775,56 @@ def _read_candidates(
                                 frequency=row["frequency"],
                                 session_date=session_date,
                                 finding_type="price_anomaly",
-                                severity="warning",
-                                confidence="low",
-                                rule="close_jump_over_2x_or_under_half",
+                                severity=jump["severity"],
+                                confidence=jump["confidence"],
+                                rule=jump["rule"],
                                 evidence={
+                                    **jump["evidence"],
                                     "previous_session": previous[0].isoformat(),
-                                    "previous_close": str(previous[1]),
-                                    "close": str(close),
-                                    "ratio": str(ratio),
                                 },
                             )
                         )
+
+                spike = volume_spike_candidate(volume_value, volume_history, thresholds=thresholds)
+                if spike is not None:
+                    add(
+                        _candidate(
+                            series_id=series_id,
+                            code=row["symbol"],
+                            provider=row["provider"],
+                            adjustment=row["adjustment"],
+                            frequency=row["frequency"],
+                            session_date=session_date,
+                            finding_type="ohlcv_anomaly",
+                            severity=spike["severity"],
+                            confidence=spike["confidence"],
+                            rule=spike["rule"],
+                            evidence=spike["evidence"],
+                        )
+                    )
+                zero_volume = zero_volume_candidate(
+                    previous[1] if previous else None,
+                    close,
+                    volume_value,
+                    volume_history,
+                    thresholds=thresholds,
+                )
+                if zero_volume is not None:
+                    add(
+                        _candidate(
+                            series_id=series_id,
+                            code=row["symbol"],
+                            provider=row["provider"],
+                            adjustment=row["adjustment"],
+                            frequency=row["frequency"],
+                            session_date=session_date,
+                            finding_type="ohlcv_anomaly",
+                            severity=zero_volume["severity"],
+                            confidence=zero_volume["confidence"],
+                            rule=zero_volume["rule"],
+                            evidence=zero_volume["evidence"],
+                        )
+                    )
 
                 if previous and current_date > previous[0] + timedelta(days=1):
                     missing_weekdays = []
@@ -525,8 +854,11 @@ def _read_candidates(
                                 },
                             )
                         )
-                if close is not None:
-                    previous = (current_date, close, row["session_date"])
+                if volume_value is not None and volume_value >= 0:
+                    volume_history.append(volume_value)
+                    del volume_history[: -thresholds.volume_lookback]
+                if close is not None and close > 0:
+                    previous = (current_date, close, row["session_date"], volume_value)
                 finish_source()
                 if page_full:
                     break
@@ -545,6 +877,7 @@ def _read_candidates(
                 and provider == checkpoint_key.get("provider")
             ):
                 previous = _index_cursor_previous(path, checkpoint_key)
+            metadata_emitted = False
             for row in index_series:
                 begin_source(
                     {
@@ -554,6 +887,29 @@ def _read_candidates(
                         "session_date": row["session_date"],
                     }
                 )
+                if not metadata_emitted:
+                    metadata_was_processed = (
+                        checkpoint_phase == "index"
+                        and checkpoint_key is not None
+                        and index_code == checkpoint_key.get("symbol")
+                        and provider == checkpoint_key.get("provider")
+                    )
+                    if not metadata_was_processed:
+                        for item in _ingestion_anomaly_candidates(
+                            path,
+                            instrument_kind="index",
+                            series_id=None,
+                            code=index_code,
+                            provider=provider,
+                            adjustment="price_index",
+                            frequency="1d",
+                            latest_session=None,
+                            as_of=as_of,
+                            thresholds=thresholds,
+                            index=True,
+                        ):
+                            add(item)
+                    metadata_emitted = True
                 session_date = row["session_date"]
                 try:
                     current_date = date.fromisoformat(session_date)
@@ -592,25 +948,30 @@ def _read_candidates(
                             evidence={"close": str(row["close"])},
                         )
                     )
-                if previous and close is not None and close > 0 and previous[1] > 0:
-                    ratio = close / previous[1]
-                    if ratio >= 2 or ratio <= 0.5:
+                if previous:
+                    jump = price_jump_candidate(
+                        previous[1],
+                        close,
+                        adjustment="price_index",
+                        thresholds=thresholds,
+                    )
+                    if jump is not None:
                         add(
                             _candidate(
                                 instrument_kind="index",
                                 series_id=None,
                                 code=index_code,
                                 provider=provider,
+                                adjustment="price_index",
+                                frequency="1d",
                                 session_date=session_date,
                                 finding_type="price_anomaly",
-                                severity="warning",
-                                confidence="low",
-                                rule="close_jump_over_2x_or_under_half",
+                                severity=jump["severity"],
+                                confidence=jump["confidence"],
+                                rule=jump["rule"],
                                 evidence={
+                                    **jump["evidence"],
                                     "previous_session": previous[0].isoformat(),
-                                    "previous_close": str(previous[1]),
-                                    "close": str(close),
-                                    "ratio": str(ratio),
                                 },
                             )
                         )
@@ -723,13 +1084,47 @@ def _persist(path: Path, candidates: list[dict]) -> None:
         conn.execute("BEGIN")
         now = _iso_now()
         for item in candidates:
+            # PR #38 used the fixed threshold rule name. Upgrade that row to
+            # the configurable rule identity before the normal upsert so a
+            # scan after this feature does not strand its review history on a
+            # duplicate finding.
+            if item["rule"] == "price_jump_candidate":
+                legacy_fingerprint = _fingerprint(
+                    instrument_kind=item["instrument_kind"],
+                    series_id=item["series_id"],
+                    code=item["code"],
+                    provider=item["provider"],
+                    session_date=item["session_date"],
+                    finding_type=item["finding_type"],
+                    rule="close_jump_over_2x_or_under_half",
+                    adjustment=(
+                        item["adjustment"] if item["instrument_kind"] == "equity" else None
+                    ),
+                    frequency=(item["frequency"] if item["instrument_kind"] == "equity" else None),
+                )
+                if legacy_fingerprint != item["fingerprint"]:
+                    legacy_row = conn.execute(
+                        "SELECT id FROM data_quality_findings WHERE fingerprint=?",
+                        (legacy_fingerprint,),
+                    ).fetchone()
+                    current_row = conn.execute(
+                        "SELECT id FROM data_quality_findings WHERE fingerprint=?",
+                        (item["fingerprint"],),
+                    ).fetchone()
+                    if legacy_row is not None and current_row is None:
+                        conn.execute(
+                            "UPDATE data_quality_findings SET fingerprint=? WHERE id=?",
+                            (item["fingerprint"], legacy_row["id"]),
+                        )
             conn.execute(
                 "INSERT INTO data_quality_findings "
                 "(instrument_kind, code, series_id, provider, session_date, finding_type, "
                 "severity, confidence, rule, evidence_json, fingerprint, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(fingerprint) DO UPDATE SET "
-                "evidence_json=excluded.evidence_json, updated_at=excluded.updated_at",
+                "severity=excluded.severity, confidence=excluded.confidence, "
+                "rule=excluded.rule, evidence_json=excluded.evidence_json, "
+                "updated_at=excluded.updated_at",
                 (
                     item["instrument_kind"],
                     item["code"],
@@ -878,6 +1273,14 @@ def _source_identity(path: Path) -> str:
                 "SELECT COUNT(*), COALESCE(MAX(rowid), 0), "
                 "COALESCE(MAX(retrieved_at), '') FROM index_daily_closes"
             ).fetchone(),
+            "ingestion_runs": conn.execute(
+                "SELECT COUNT(*), COALESCE(MAX(id), 0), "
+                "COALESCE(MAX(retrieved_at), '') FROM ingestion_runs"
+            ).fetchone(),
+            "index_ingestion_runs": conn.execute(
+                "SELECT COUNT(*), COALESCE(MAX(id), 0), "
+                "COALESCE(MAX(retrieved_at), '') FROM index_ingestion_runs"
+            ).fetchone(),
         }
         normalized = {
             key: list(value) if isinstance(value, sqlite3.Row) else value
@@ -888,6 +1291,11 @@ def _source_identity(path: Path) -> str:
         ).hexdigest()
     finally:
         conn.close()
+
+
+def _scan_source_identity(source_identity: str, thresholds: AnomalyThresholds) -> str:
+    policy = {"source_identity": source_identity, "thresholds": thresholds_identity(thresholds)}
+    return sha256(json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def _source_data_version(path: Path) -> int | None:
@@ -1039,20 +1447,29 @@ def _persist_scan_progress(
         conn.close()
 
 
-def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
+def run_quality_scan(
+    path: Path,
+    *,
+    max_findings: int = 1000,
+    thresholds: AnomalyThresholds | Mapping[str, object] | None = None,
+    as_of: date | None = None,
+) -> dict:
     """Scan local observations and persist candidate findings without repairing data."""
 
     if not 1 <= max_findings <= 10_000:
         raise ValueError("max_findings must be between 1 and 10000")
     if not path.is_file():
         raise FileNotFoundError(path)
+    thresholds = normalize_thresholds(thresholds)
+    as_of = as_of or datetime.now(UTC).date()
     # Quality scans may be the first write after an older database is opened.
     # Migrate before reading so legacy v1-v13 databases have all required tables.
     # Only this short migration and the later persistence transaction are locked;
     # the potentially long read-only scan does not hold the process write lock.
     started_at = _iso_now()
     _ensure_quality_schema(path)
-    source_identity = _source_identity(path)
+    database_identity = _source_identity(path)
+    source_identity = _scan_source_identity(database_identity, thresholds)
     source_data_version_start = _source_data_version(path)
     progress = _scan_progress(path)
     checkpoint = {"phase": "equity", "source_key": None}
@@ -1069,12 +1486,16 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
         cursor_start = int(progress["cursor_next"])
         checkpoint = _progress_checkpoint(progress)
     candidates, findings_seen, next_checkpoint, exhausted = _read_candidates(
-        path, max_findings, checkpoint=checkpoint
+        path,
+        max_findings,
+        checkpoint=checkpoint,
+        thresholds=thresholds,
+        as_of=as_of,
     )
     source_data_version_end = _source_data_version(path)
     source_changed = (
         source_data_version_end != source_data_version_start
-        or _source_identity(path) != source_identity
+        or _source_identity(path) != database_identity
     )
     _persist(path, candidates)
     findings_stored = len(candidates)
@@ -1141,6 +1562,8 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
         "complete": complete,
         "truncated": truncated,
         "stale": stale,
+        "anomaly_rule_version": ANOMALY_RULE_VERSION,
+        "thresholds": thresholds_identity(thresholds),
         "source_data_version_start": source_data_version_start,
         "source_data_version_end": source_data_version_end,
         "cursor_start": cursor_start,

@@ -12,10 +12,25 @@ resetting its review state, including after a backup merge remaps series IDs.
 The current deterministic rules cover:
 
 - invalid OHLCV values and candle ordering;
-- unusually large close changes, reported as candidates rather than confirmed
-  corporate actions;
+- unusual close changes, reported as candidates rather than confirmed
+  corporate actions, with raw/unadjusted series explicitly marked for
+  corporate-action review;
+- liquid-baseline volume spikes and suspicious zero-volume price moves;
+- repeated source payloads, duplicate source observations, and provider
+  revision metadata that is stale or arrives out of order;
+- a stale latest observation candidate when the most recent retrieval or
+  provider revision exceeds the configured age;
 - weekday gaps, explicitly marked as not exchange-calendar confirmed; and
 - overlapping provider closes that differ by more than one percent.
+
+Advanced anomaly rules use the documented `anomaly-detection-v1` defaults:
+two-times close changes, ten-times volume spikes with a minimum current volume
+of 10,000 and a baseline of 100, a ten-percent zero-volume price move with a
+baseline of 100, and a 30-day stale age. The scan API accepts a `thresholds`
+object for explicit local overrides; the selected thresholds are included in
+the scan result, evidence, and checkpoint identity. Low-volume baselines do
+not produce volume-spike findings, and all anomaly results remain candidates
+for review.
 
 The same session-gap and level-jump checks apply to persisted FRED index
 levels; index findings are labeled separately from equity series.

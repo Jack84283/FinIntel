@@ -140,6 +140,194 @@ def test_quality_fingerprint_includes_full_series_identity(tmp_path):
         assert conn.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0] == 3
 
 
+def test_quality_scan_detects_repeated_ingestion_payloads(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO ingestion_runs "
+            "(id,series_id,retrieved_at,imported_at,payload_sha256,source_url,"
+            "provider_terms_url,first_session,last_session,observations,inserted,"
+            "updated,unchanged,stale) VALUES "
+            "(4,1,'2026-10-31T01:00:00+00:00','2026-10-31T01:00:00+00:00',"
+            "'hash-1','https://example.test/alpaca','https://example.test/terms',"
+            "'2026-10-19','2026-10-21',2,0,0,2,0)"
+        )
+
+    run_quality_scan(db, as_of=date(2026, 11, 1))
+    findings = list_findings(db, finding_type="duplicate", code="AAPL", limit=10)
+
+    assert findings["total"] == 1
+    evidence = findings["items"][0]["evidence"]
+    assert evidence["duplicate_source_observations"] is True
+    assert evidence["occurrences"] == 2
+    assert evidence["anomaly_rule_version"] == "anomaly-detection-v1"
+
+
+def test_quality_scan_preserves_legacy_price_jump_review_history(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    legacy = _candidate(
+        series_id=1,
+        code="AAPL",
+        provider="alpaca_sip",
+        adjustment="raw_unadjusted",
+        frequency="1d",
+        session_date="2026-10-21",
+        finding_type="price_anomaly",
+        severity="warning",
+        confidence="low",
+        rule="close_jump_over_2x_or_under_half",
+        evidence={"previous_close": "100", "close": "250"},
+    )
+    _persist(db, [legacy])
+    before = list_findings(db, finding_type="price_anomaly", code="AAPL", limit=10)
+    finding_id = before["items"][0]["id"]
+    review_finding(db, finding_id, "confirmed", "Reviewed as a candidate split.")
+
+    run_quality_scan(db)
+
+    after = list_findings(db, finding_type="price_anomaly", code="AAPL", limit=10)
+    upgraded = [item for item in after["items"] if item["rule"] == "price_jump_candidate"]
+    assert len(upgraded) == 1
+    assert upgraded[0]["id"] == finding_id
+    assert upgraded[0]["review_state"] == "confirmed"
+
+
+def test_quality_report_marks_ingestion_metadata_revision_stale(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    run_quality_scan(db, as_of=date(2026, 11, 1))
+    assert quality_report(db)["complete"] is True
+
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO ingestion_runs "
+            "(id,series_id,retrieved_at,imported_at,payload_sha256,source_url,"
+            "provider_terms_url,first_session,last_session,observations,inserted,"
+            "updated,unchanged,stale) VALUES "
+            "(4,1,'2026-10-31T01:00:00+00:00','2026-10-31T01:00:00+00:00',"
+            "'hash-1','https://example.test/alpaca','https://example.test/terms',"
+            "'2026-10-19','2026-10-21',2,0,0,2,0)"
+        )
+        conn.commit()
+
+    report = quality_report(db)
+    assert report["stale"] is True
+    assert report["complete"] is False
+    assert report["scan_completeness"]["source_revision_changed"] is True
+
+
+def test_quality_scan_detects_outdated_provider_revision(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO ingestion_runs "
+            "(id,series_id,retrieved_at,imported_at,payload_sha256,source_url,"
+            "provider_terms_url,provider_last_refreshed,first_session,last_session,"
+            "observations,inserted,updated,unchanged,stale) VALUES "
+            "(4,1,'2026-10-31T01:00:00+00:00','2026-10-31T01:00:00+00:00',"
+            "'hash-revision','https://example.test/alpaca','https://example.test/terms',"
+            "'2026-10-20T00:00:00+00:00','2026-10-19','2026-10-21',2,0,0,0,1)"
+        )
+
+    run_quality_scan(db, as_of=date(2026, 11, 1))
+    findings = list_findings(db, finding_type="stale_observation", code="AAPL", limit=10)
+
+    assert findings["total"] == 1
+    evidence = findings["items"][0]["evidence"]
+    assert evidence["revision_status"] == "provider_revision_requires_review"
+    assert evidence["stale_imports"][0]["stale_observations"] == 1
+
+
+def test_quality_scan_detects_stale_latest_observation_with_configured_age(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+
+    run_quality_scan(db, as_of=date(2026, 12, 10), thresholds={"stale_after_days": 30})
+    findings = list_findings(db, finding_type="stale_observation", code="AAPL", limit=10)
+
+    assert any(item["rule"] == "stale_latest_observation" for item in findings["items"])
+
+
+def test_quality_scan_flags_liquid_volume_spike_but_not_illiquid_noise(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    with sqlite3.connect(db) as conn:
+        conn.executemany(
+            "INSERT INTO daily_prices "
+            "(series_id,session_date,open,high,low,close,volume,retrieved_at,ingestion_id) "
+            "VALUES (3,?,'10','11','9','10',?,'2026-10-31T00:00:00+00:00',3)",
+            [("2026-10-17", 1_000), ("2026-10-18", 1_100), ("2026-10-19", 20_000)],
+        )
+        conn.commit()
+
+    run_quality_scan(db, as_of=date(2026, 11, 1))
+    findings = list_findings(db, finding_type="ohlcv_anomaly", code="TSLA", limit=50)
+
+    assert any(item["rule"] == "volume_spike_candidate" for item in findings["items"])
+    assert all(item["evidence"].get("baseline_volume", "0") != "1" for item in findings["items"])
+
+
+def test_quality_scan_detects_repeated_index_payloads(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    with sqlite3.connect(db) as conn:
+        conn.executemany(
+            "INSERT INTO index_ingestion_runs "
+            "(id,index_code,provider,requested_start,requested_end,retrieved_at,source_url,"
+            "observation_sha256,payload_sha256,first_session,last_session,observations,"
+            "inserted,updated,unchanged) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    1,
+                    "SP500",
+                    "fred",
+                    "2026-10-19",
+                    "2026-10-21",
+                    "2026-10-31T00:00:00+00:00",
+                    "https://example.test/fred",
+                    "observation-hash",
+                    "payload-hash",
+                    "2026-10-19",
+                    "2026-10-21",
+                    2,
+                    2,
+                    0,
+                    0,
+                ),
+                (
+                    2,
+                    "SP500",
+                    "fred",
+                    "2026-10-19",
+                    "2026-10-21",
+                    "2026-10-31T01:00:00+00:00",
+                    "https://example.test/fred",
+                    "observation-hash-revised",
+                    "payload-hash",
+                    "2026-10-19",
+                    "2026-10-21",
+                    2,
+                    0,
+                    0,
+                    2,
+                ),
+            ],
+        )
+        conn.commit()
+
+    run_quality_scan(db, as_of=date(2026, 11, 1))
+    findings = list_findings(db, finding_type="duplicate", code="SP500", limit=10)
+
+    assert findings["total"] == 1
+    assert findings["items"][0]["instrument_kind"] == "index"
+    revisions = list_findings(db, finding_type="stale_observation", code="SP500", limit=10)
+    assert revisions["total"] == 1
+    assert revisions["items"][0]["rule"] == "outdated_provider_revision"
+
+
 def test_repeated_quality_scans_reuse_finding_rows(tmp_path):
     db = tmp_path / "quality.sqlite3"
     seed_quality_database(db)
@@ -652,9 +840,13 @@ def test_quality_api_scans_filters_and_reviews_with_managed_token(tmp_path, monk
     monkeypatch.setenv("FININTEL_DB_PATH", str(db))
     monkeypatch.setenv("FININTEL_PROCESS_TOKEN", token)
     with TestClient(app, headers={"x-finintel-process-token": token}) as client:
-        scan = client.post("/api/v1/quality/scan", json={"max_findings": 10})
+        scan = client.post(
+            "/api/v1/quality/scan",
+            json={"max_findings": 10, "thresholds": {"price_jump_ratio": "1.5"}},
+        )
         assert scan.status_code == 200
         scan_payload = scan.json()
+        assert scan_payload["thresholds"]["price_jump_ratio"] == "1.5"
         assert scan_payload["findings_examined"] == scan_payload["total_known_findings"]
         assert scan_payload["findings_stored"] == scan_payload["finding_count"]
         assert scan_payload["truncated"] is False

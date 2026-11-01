@@ -1,5 +1,6 @@
 """HTTP API for durable, reviewable local data-quality findings."""
 
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -19,8 +20,20 @@ from finintel.storage.db import database_path
 router = APIRouter(prefix="/api/v1/quality", tags=["data-quality"])
 
 
+class AnomalyThresholdRequest(BaseModel):
+    price_jump_ratio: Decimal | None = Field(default=None, gt=1)
+    volume_spike_ratio: Decimal | None = Field(default=None, gt=1)
+    volume_spike_minimum: int | None = Field(default=None, ge=1)
+    volume_baseline_minimum: int | None = Field(default=None, ge=1)
+    zero_volume_price_move_ratio: Decimal | None = Field(default=None, gt=0, le=1)
+    zero_volume_baseline_minimum: int | None = Field(default=None, ge=1)
+    stale_after_days: int | None = Field(default=None, ge=1)
+    volume_lookback: int | None = Field(default=None, ge=2)
+
+
 class ScanRequest(BaseModel):
     max_findings: int = Field(default=1000, ge=1, le=10_000)
+    thresholds: AnomalyThresholdRequest | None = None
 
 
 class ReviewRequest(BaseModel):
@@ -32,7 +45,14 @@ class ReviewRequest(BaseModel):
 def scan(request: ScanRequest, http_request: Request) -> dict:
     _require_managed(http_request)
     try:
-        return run_quality_scan(database_path(), max_findings=request.max_findings)
+        thresholds = (
+            request.thresholds.model_dump(exclude_none=True)
+            if request.thresholds is not None
+            else None
+        )
+        return run_quality_scan(
+            database_path(), max_findings=request.max_findings, thresholds=thresholds
+        )
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=503, detail="Local market database is unavailable."

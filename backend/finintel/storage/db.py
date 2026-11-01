@@ -517,6 +517,48 @@ SCHEMA_V14_QUALITY_SOURCE_TRIGGERS = (
         UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
     END;
     """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_ingestion_insert
+    AFTER INSERT ON ingestion_runs
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_ingestion_update
+    AFTER UPDATE ON ingestion_runs
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_ingestion_delete
+    AFTER DELETE ON ingestion_runs
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_index_ingestion_insert
+    AFTER INSERT ON index_ingestion_runs
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_index_ingestion_update
+    AFTER UPDATE ON index_ingestion_runs
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_index_ingestion_delete
+    AFTER DELETE ON index_ingestion_runs
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
 )
 
 # Keep this seed data in the storage migration so a read-only API can expose a
