@@ -34,6 +34,11 @@ from finintel.market_data.calendar_quality import (
     evidence_identity,
     normalize_evidence,
 )
+from finintel.market_data.reconciliation import (
+    ReconciliationPolicy,
+    coverage_bounds,
+    reconcile_session,
+)
 from finintel.storage.db import _read_connection, _write_connection, serialized_storage_write
 
 FINDING_TYPES = (
@@ -496,7 +501,8 @@ def _iter_series_prices(
             raise FileNotFoundError(path)
         try:
             parameters: list[object] = [series["id"]]
-            query = "SELECT session_date, close FROM daily_prices WHERE series_id = ?"
+            query = ("SELECT session_date, close, retrieved_at, ingestion_id "
+                     "FROM daily_prices WHERE series_id = ?")
             if last_session is not None:
                 query += " AND session_date > ?"
                 parameters.append(last_session)
@@ -516,6 +522,8 @@ def _iter_series_prices(
                 "adjustment": series["adjustment"],
                 "session_date": row["session_date"],
                 "close": row["close"],
+                "retrieved_at": row["retrieved_at"],
+                "ingestion_id": row["ingestion_id"],
             }
         last_session = rows[-1]["session_date"]
         if len(rows) < _SCAN_BATCH_SIZE:
@@ -562,10 +570,15 @@ def _iter_cross_provider_rows(
             _iter_series_prices(path, series, start_session=group_start_session)
             for series in series_group
         ]
-        yield from heapq.merge(
+        # Share the series catalog for this group so missing provider sessions
+        # can only be reported inside that provider's actual coverage boundaries.
+        provider_series = [dict(item) for item in series_group]
+        for row in heapq.merge(
             *streams,
-            key=lambda row: (row["session_date"], row["provider"], row["series_id"]),
-        )
+            key=lambda item: (item["session_date"], item["provider"], item["series_id"]),
+        ):
+            row["reconciliation_series"] = provider_series
+            yield row
 
 
 def _equity_cursor_previous(
@@ -1109,6 +1122,12 @@ def _read_candidates(
 
     if not page_full and checkpoint_phase in {"equity", "index", "cross_provider"}:
         provider_rows = _iter_cross_provider_rows(path, start_key=cross_start)
+        provider_bounds = coverage_bounds(path)
+        provider_policy = ReconciliationPolicy(
+            relative_tolerance=thresholds.reconciliation_relative_tolerance,
+            absolute_tolerance=thresholds.reconciliation_absolute_tolerance,
+            provider_priority=thresholds.reconciliation_provider_priority,
+        )
         for (symbol, frequency, adjustment, session), observation_group in groupby(
             provider_rows,
             key=lambda row: (
@@ -1128,37 +1147,13 @@ def _read_candidates(
                 }
             )
             observations = list(observation_group)
-            if len(observations) >= 2:
-                valid = [(row, _decimal(row["close"])) for row in observations]
-                valid = [(row, close) for row, close in valid if close is not None and close > 0]
-                for index, (left, left_close) in enumerate(valid):
-                    for right, right_close in valid[index + 1 :]:
-                        ratio = abs(left_close - right_close) / left_close
-                        if ratio <= 0.01:
-                            continue
-                        provider = "|".join(sorted((left["provider"], right["provider"])))
-                        add(
-                            _candidate(
-                                series_id=left["series_id"],
-                                code=symbol,
-                                provider=provider,
-                                adjustment=adjustment,
-                                frequency=frequency,
-                                session_date=session,
-                                finding_type="provider_divergence",
-                                severity="warning",
-                                confidence="low",
-                                rule="overlapping_close_differs_over_1pct",
-                                evidence={
-                                    "adjustment": adjustment,
-                                    "left_provider": left["provider"],
-                                    "right_provider": right["provider"],
-                                    "left_close": str(left_close),
-                                    "right_close": str(right_close),
-                                    "relative_difference": str(ratio),
-                                },
-                            )
-                        )
+            for item in reconcile_session(
+                observations,
+                series_group=observations[0]["reconciliation_series"],
+                bounds=provider_bounds,
+                policy=provider_policy,
+            ):
+                add(item)
             finish_source()
             if page_full:
                 break
@@ -1693,6 +1688,11 @@ def _scan_source_identity(
         "source_identity": source_identity,
         "thresholds": thresholds_identity(thresholds),
         "calendar_rule_version": CALENDAR_RULE_VERSION,
+        "reconciliation_policy": ReconciliationPolicy(
+            relative_tolerance=thresholds.reconciliation_relative_tolerance,
+            absolute_tolerance=thresholds.reconciliation_absolute_tolerance,
+            provider_priority=thresholds.reconciliation_provider_priority,
+        ).identity(),
         "calendar_evidence": _calendar_policy_identity(calendar_evidence),
         "validation_reference_date": (
             validation_reference_date.isoformat() if validation_reference_date else None
@@ -2055,7 +2055,7 @@ def run_quality_scan(
         "examples": candidates[:50],
         "notes": [
             "Findings are candidates and do not modify stored observations.",
-            "Weekday gaps are not exchange-calendar confirmation; holidays, suspensions, and listings require review.",
+            "Calendar gaps and cross-provider differences are candidates, not confirmed defects.",
             "Evidence contains normalized local values only; credentials and raw provider payloads are excluded.",
             "Partial scans resume from a phase and source key; total_known_findings is exact for completed scans or a previously completed source revision.",
         ],
