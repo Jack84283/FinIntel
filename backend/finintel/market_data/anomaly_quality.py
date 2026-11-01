@@ -36,7 +36,7 @@ class AnomalyThresholds:
     stale_after_days: int = 30
     volume_lookback: int = 20
     reconciliation_relative_tolerance: Decimal = Decimal("0.01")
-    reconciliation_absolute_tolerance: Decimal = Decimal("0")
+    reconciliation_absolute_tolerance: Decimal = Decimal(0)
     reconciliation_provider_priority: tuple[str, ...] = (
         "alpaca_sip", "tiingo", "alpha_vantage"
     )
