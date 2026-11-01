@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from finintel.market_data.quality import _fingerprint
 from finintel.storage.db import (
     SCHEMA_VERSION,
     StorageError,
@@ -65,6 +66,10 @@ def _validated(path: Path, *, version: bool = True) -> dict[str, object]:
                     "index_series_catalog",
                     "index_ingestion_runs",
                     "index_membership_snapshots",
+                    "data_quality_findings",
+                    "data_quality_reviews",
+                    "data_quality_scan_runs",
+                    "data_quality_scan_progress",
                 )
                 if table in tables
             }
@@ -182,6 +187,10 @@ def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, obje
                     "index_series_catalog",
                     "index_ingestion_runs",
                     "index_membership_snapshots",
+                    "data_quality_findings",
+                    "data_quality_reviews",
+                    "data_quality_scan_runs",
+                    "data_quality_scan_progress",
                 )
                 if table in tables
             }
@@ -191,7 +200,7 @@ def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, obje
 
 
 def _merge(staging: Path, source: Path) -> None:
-    """Merge all schema-v6 data; use original source IDs only through mapping tables."""
+    """Merge supported data; use source IDs only through mapping tables."""
     with sqlite3.connect(staging, timeout=30) as dest:
         dest.execute("PRAGMA foreign_keys = ON")
         dest.execute("ATTACH DATABASE ? AS incoming", (str(source.resolve()),))
@@ -202,6 +211,21 @@ def _merge(staging: Path, source: Path) -> None:
                     "SELECT name FROM incoming.sqlite_master WHERE type='table'"
                 )
             }
+            incoming_progress_columns = (
+                {
+                    row[1]
+                    for row in dest.execute(
+                        "PRAGMA incoming.table_info(data_quality_scan_progress)"
+                    )
+                }
+                if "data_quality_scan_progress" in incoming_tables
+                else set()
+            )
+            incoming_cursor_fields = (
+                "cursor_phase,cursor_source_key"
+                if {"cursor_phase", "cursor_source_key"}.issubset(incoming_progress_columns)
+                else "'equity',NULL"
+            )
             with dest:
                 dest.execute("INSERT OR IGNORE INTO instruments SELECT * FROM incoming.instruments")
                 dest.execute(
@@ -249,6 +273,153 @@ def _merge(staging: Path, source: Path) -> None:
                     "retrieved_at=excluded.retrieved_at,ingestion_id=excluded.ingestion_id "
                     "WHERE excluded.retrieved_at > daily_prices.retrieved_at"
                 )
+                if "data_quality_findings" in incoming_tables:
+                    # Findings refer to source-database series IDs. Recompute
+                    # each fingerprint after applying the destination series
+                    # map; retaining the source hash would create a duplicate
+                    # on the next scan of the restored database.
+                    source_rows = dest.execute(
+                        "SELECT f.id,f.instrument_kind,f.code,f.provider,f.session_date,"
+                        "f.finding_type,f.severity,f.confidence,f.rule,f.evidence_json,"
+                        "f.review_state,f.resolution_note,f.created_at,f.updated_at,"
+                        "map.new_id,dst_series.adjustment,dst_series.frequency "
+                        "FROM incoming.data_quality_findings f "
+                        "LEFT JOIN _series_map map ON map.old_id=f.series_id "
+                        "LEFT JOIN series dst_series ON dst_series.id=map.new_id "
+                        "WHERE f.series_id IS NULL OR map.old_id IS NOT NULL "
+                        "ORDER BY f.id"
+                    ).fetchall()
+                    transformed = []
+                    source_fingerprints = []
+                    for row in source_rows:
+                        fingerprint = _fingerprint(
+                            instrument_kind=row[1],
+                            series_id=row[14],
+                            code=row[2],
+                            provider=row[3],
+                            session_date=row[4],
+                            finding_type=row[5],
+                            rule=row[8],
+                            adjustment=row[15],
+                            frequency=row[16],
+                        )
+                        source_fingerprints.append((row[0], fingerprint))
+                        transformed.append(
+                            (
+                                fingerprint,
+                                row[0],
+                                row[1],
+                                row[2],
+                                row[14],
+                                row[3],
+                                row[4],
+                                row[5],
+                                row[6],
+                                row[7],
+                                row[8],
+                                row[9],
+                                row[10],
+                                row[11],
+                                row[12],
+                                row[13],
+                            )
+                        )
+                    # Multiple source rows can collapse to one destination
+                    # fingerprint. Keep the newest source evidence
+                    # deterministically, while mapping every source ID to the
+                    # one surviving destination finding for review import.
+                    winners = {}
+                    for item in transformed:
+                        fingerprint = item[0]
+                        previous = winners.get(fingerprint)
+                        if previous is None or (item[15], item[1]) > (previous[15], previous[1]):
+                            winners[fingerprint] = item
+                    for item in winners.values():
+                        dest.execute(
+                            "INSERT INTO data_quality_findings("
+                            "instrument_kind,code,series_id,provider,session_date,finding_type,"
+                            "severity,confidence,rule,evidence_json,fingerprint,review_state,"
+                            "resolution_note,created_at,updated_at) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                            "ON CONFLICT(fingerprint) DO UPDATE SET "
+                            "instrument_kind=excluded.instrument_kind,code=excluded.code,"
+                            "series_id=excluded.series_id,provider=excluded.provider,"
+                            "session_date=excluded.session_date,finding_type=excluded.finding_type,"
+                            "severity=excluded.severity,confidence=excluded.confidence,"
+                            "rule=excluded.rule,evidence_json=excluded.evidence_json,"
+                            "review_state=excluded.review_state,"
+                            "resolution_note=excluded.resolution_note,updated_at=excluded.updated_at "
+                            "WHERE excluded.updated_at > data_quality_findings.updated_at",
+                            item[2:12] + (item[0],) + item[12:],
+                        )
+                    dest.execute(
+                        "CREATE TEMP TABLE _quality_finding_source_map("
+                        "old_id INTEGER PRIMARY KEY,fingerprint TEXT NOT NULL)"
+                    )
+                    dest.executemany(
+                        "INSERT INTO _quality_finding_source_map(old_id,fingerprint) VALUES (?,?)",
+                        source_fingerprints,
+                    )
+                    dest.execute(
+                        "CREATE TEMP TABLE _quality_finding_map AS "
+                        "SELECT source.old_id,destination.id AS new_id "
+                        "FROM _quality_finding_source_map source "
+                        "JOIN data_quality_findings destination "
+                        "ON destination.fingerprint=source.fingerprint"
+                    )
+                    if "data_quality_reviews" in incoming_tables:
+                        dest.execute(
+                            "INSERT INTO data_quality_reviews("
+                            "finding_id,from_state,to_state,note,reviewed_at) "
+                            "SELECT map.new_id,r.from_state,r.to_state,r.note,r.reviewed_at "
+                            "FROM incoming.data_quality_reviews r "
+                            "JOIN _quality_finding_map map ON map.old_id=r.finding_id "
+                            "WHERE NOT EXISTS (SELECT 1 FROM data_quality_reviews current "
+                            "WHERE current.finding_id=map.new_id "
+                            "AND current.from_state=r.from_state "
+                            "AND current.to_state=r.to_state "
+                            "AND current.note IS r.note "
+                            "AND current.reviewed_at=r.reviewed_at)"
+                        )
+                    if "data_quality_scan_runs" in incoming_tables:
+                        dest.execute(
+                            "INSERT OR IGNORE INTO data_quality_scan_runs("
+                            "started_at,completed_at,max_findings,findings_examined,"
+                            "findings_stored,total_known_findings,persisted_findings_total,"
+                            "status,truncated,run_key) "
+                            "SELECT started_at,completed_at,max_findings,findings_examined,"
+                            "findings_stored,total_known_findings,persisted_findings_total,"
+                            "status,truncated,run_key FROM incoming.data_quality_scan_runs"
+                        )
+                    if "data_quality_scan_progress" in incoming_tables:
+                        dest.execute(
+                            "INSERT INTO data_quality_scan_progress("
+                            "scan_key,source_identity,source_data_version_start,"
+                            "source_data_version_end,cursor_start,cursor_next,max_findings,"
+                            "findings_examined,findings_stored,total_known_findings,"
+                            "persisted_findings_total,status,stale,updated_at,last_run_key,"
+                            "cursor_phase,cursor_source_key) "
+                            "SELECT scan_key,source_identity,source_data_version_start,"
+                            "source_data_version_end,cursor_start,cursor_next,max_findings,"
+                            "findings_examined,findings_stored,total_known_findings,"
+                            "persisted_findings_total,status,stale,updated_at,last_run_key,"
+                            + incoming_cursor_fields
+                            + " FROM incoming.data_quality_scan_progress WHERE 1 "
+                            "ON CONFLICT(scan_key) DO UPDATE SET "
+                            "source_identity=excluded.source_identity,"
+                            "source_data_version_start=excluded.source_data_version_start,"
+                            "source_data_version_end=excluded.source_data_version_end,"
+                            "cursor_start=excluded.cursor_start,cursor_next=excluded.cursor_next,"
+                            "max_findings=excluded.max_findings,"
+                            "findings_examined=excluded.findings_examined,"
+                            "findings_stored=excluded.findings_stored,"
+                            "total_known_findings=excluded.total_known_findings,"
+                            "persisted_findings_total=excluded.persisted_findings_total,"
+                            "status=excluded.status,stale=excluded.stale,"
+                            "updated_at=excluded.updated_at,last_run_key=excluded.last_run_key,"
+                            "cursor_phase=excluded.cursor_phase,cursor_source_key=excluded.cursor_source_key "
+                            "WHERE excluded.updated_at > data_quality_scan_progress.updated_at"
+                        )
                 dest.execute(
                     "INSERT OR IGNORE INTO symbol_catalog SELECT * FROM incoming.symbol_catalog"
                 )
@@ -394,6 +565,18 @@ def _merge(staging: Path, source: Path) -> None:
                     "AND d.status=e.status AND d.symbol=e.symbol "
                     "AND d.provider=e.provider AND d.duration_ms=e.duration_ms)"
                 )
+                # A merged database has a different source universe from any
+                # scan that was run against either input. Keep the historical
+                # run for audit/reporting, but require a fresh scan before a
+                # continuation can be considered complete or resumed.
+                dest.execute(
+                    "UPDATE data_quality_scan_progress SET status='stale',stale=1,"
+                    "cursor_start=0,cursor_next=0,cursor_phase='equity',"
+                    "cursor_source_key=NULL,updated_at=datetime('now')"
+                )
+                if "data_quality_findings" in incoming_tables:
+                    dest.execute("DROP TABLE _quality_finding_map")
+                    dest.execute("DROP TABLE _quality_finding_source_map")
                 dest.execute("DROP TABLE _ingestion_map")
                 dest.execute("DROP TABLE _series_map")
         finally:

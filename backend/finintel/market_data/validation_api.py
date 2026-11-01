@@ -11,18 +11,19 @@ from finintel.market_data.corporate_reference import verify_events
 from finintel.market_data.diagnostics import diagnostics
 from finintel.market_data.performance import benchmark
 from finintel.market_data.provider import ProviderError
+from finintel.market_data.quality import run_quality_scan
 from finintel.market_data.validation import validate
 from finintel.settings.api import _require_managed
 from finintel.storage.db import database_path
 
 router = APIRouter(prefix="/api/v1/validation", tags=["data-validation"])
-CHECKS = ("coverage", "integrity", "corporate", "provider", "performance")
+CHECKS = ("coverage", "integrity", "corporate", "provider", "performance", "quality")
 _lock = threading.Lock()
 _job: dict | None = None
 
 
 class StartRequest(BaseModel):
-    checks: list[str] = Field(min_length=1, max_length=5)
+    checks: list[str] = Field(min_length=1, max_length=6)
 
 
 def _snapshot() -> dict:
@@ -92,6 +93,11 @@ def _run(job_id: str, checks: list[str]) -> None:
                 assert _job is not None
                 _job["stage"] = "Benchmarking indexed SQLite queries"
             results["performance"] = benchmark(database_path())
+        if "quality" in checks:
+            with _lock:
+                assert _job is not None
+                _job["stage"] = "Persisting data-quality candidates"
+            results["quality"] = run_quality_scan(database_path())
         with _lock:
             if _job and _job["id"] == job_id:
                 _job.update(

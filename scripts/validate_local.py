@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-CHECKS = ["coverage", "integrity", "corporate", "provider", "performance"]
+CHECKS = ["coverage", "integrity", "corporate", "provider", "performance", "quality"]
 BASE = "http://127.0.0.1:8765/api/v1/validation"
 
 
@@ -48,7 +48,7 @@ def start_or_join() -> str:
             raise RuntimeError(
                 "Another validation is running with different checks; cannot reuse its results."
             ) from exc
-        print("Joining already-running five-check validation", flush=True)
+        print("Joining already-running six-check validation", flush=True)
     job_id = job.get("id")
     if not job_id:
         raise RuntimeError("Validation backend did not return a job identifier.")
@@ -63,7 +63,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.timeout < 1:
         parser.error("--timeout must be positive")
-    print("Starting read-only local validation of all five checks", flush=True)
+    print("Starting local validation of all six checks", flush=True)
     job_id = start_or_join()
     deadline = time.monotonic() + args.timeout
     while True:
@@ -100,6 +100,7 @@ def main() -> int:
     performance = result.get("performance", {})
     print("Performance targets met:", performance.get("all_acceptance_targets_met"))
     print("Provider pairs compared:", result.get("provider", {}).get("cross_provider_pairs_compared"))
+    print("Quality findings:", result.get("quality", {}).get("finding_count"))
     if reference_error:
         print("Optional corporate lookup failed:", reference_error, file=sys.stderr)
         print("Core scan report was saved; corporate reference needs review.", file=sys.stderr)

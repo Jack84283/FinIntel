@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import HistoricalBatch
 from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -346,6 +346,179 @@ CREATE INDEX IF NOT EXISTS index_membership_snapshots_source
     ON index_membership_snapshots(index_code, as_of DESC, source_kind);
 """
 
+# Quality findings are additive review metadata. They never replace or mutate
+# observations, acquisition history, index coverage, or membership snapshots.
+SCHEMA_V14_QUALITY_TABLE = """
+CREATE TABLE IF NOT EXISTS data_quality_findings (
+    id INTEGER PRIMARY KEY,
+    instrument_kind TEXT NOT NULL CHECK(instrument_kind IN ('equity', 'index')),
+    code TEXT NOT NULL,
+    series_id INTEGER REFERENCES series(id) ON DELETE SET NULL,
+    provider TEXT NOT NULL,
+    session_date TEXT,
+    finding_type TEXT NOT NULL CHECK(finding_type IN (
+        'missing_session', 'price_anomaly', 'ohlcv_anomaly',
+        'provider_divergence', 'duplicate', 'stale_observation'
+    )),
+    severity TEXT NOT NULL CHECK(severity IN ('info', 'warning', 'error')),
+    confidence TEXT NOT NULL CHECK(confidence IN ('low', 'medium', 'high')),
+    rule TEXT NOT NULL,
+    evidence_json TEXT NOT NULL,
+    fingerprint TEXT NOT NULL UNIQUE,
+    review_state TEXT NOT NULL DEFAULT 'candidate' CHECK(
+        review_state IN ('candidate', 'confirmed', 'rejected', 'accepted_correction')
+    ),
+    resolution_note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+SCHEMA_V14_QUALITY_INDEX = """
+CREATE INDEX IF NOT EXISTS data_quality_findings_filter
+ON data_quality_findings(review_state, finding_type, provider, session_date);
+CREATE INDEX IF NOT EXISTS data_quality_findings_series
+ON data_quality_findings(series_id, code, session_date);
+CREATE INDEX IF NOT EXISTS data_quality_series_scan_order
+ON series(symbol, frequency, adjustment, provider, id);
+CREATE TABLE IF NOT EXISTS data_quality_reviews (
+    id INTEGER PRIMARY KEY,
+    finding_id INTEGER NOT NULL REFERENCES data_quality_findings(id) ON DELETE CASCADE,
+    from_state TEXT NOT NULL,
+    to_state TEXT NOT NULL,
+    note TEXT,
+    reviewed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS data_quality_reviews_finding
+ON data_quality_reviews(finding_id, reviewed_at DESC, id DESC);
+"""
+
+SCHEMA_V14_QUALITY_SCAN_TABLE = """
+CREATE TABLE IF NOT EXISTS data_quality_scan_runs (
+    id INTEGER PRIMARY KEY,
+    started_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    max_findings INTEGER NOT NULL CHECK(max_findings > 0),
+    findings_examined INTEGER NOT NULL CHECK(findings_examined >= 0),
+    findings_stored INTEGER NOT NULL CHECK(findings_stored >= 0),
+    total_known_findings INTEGER NOT NULL CHECK(total_known_findings >= 0),
+    persisted_findings_total INTEGER NOT NULL CHECK(persisted_findings_total >= 0),
+    status TEXT NOT NULL CHECK(status IN ('completed', 'partial')),
+    truncated INTEGER NOT NULL CHECK(truncated IN (0, 1)),
+    run_key TEXT NOT NULL UNIQUE
+);
+"""
+
+SCHEMA_V14_QUALITY_SCAN_INDEX = """
+CREATE INDEX IF NOT EXISTS data_quality_scan_runs_completed
+ON data_quality_scan_runs(completed_at DESC, id DESC);
+"""
+
+SCHEMA_V14_QUALITY_PROGRESS_TABLE = """
+CREATE TABLE IF NOT EXISTS data_quality_scan_progress (
+    scan_key TEXT PRIMARY KEY,
+    source_identity TEXT NOT NULL,
+    source_data_version_start INTEGER NOT NULL,
+    source_data_version_end INTEGER NOT NULL,
+    cursor_start INTEGER NOT NULL CHECK(cursor_start >= 0),
+    cursor_next INTEGER NOT NULL CHECK(cursor_next >= 0),
+    max_findings INTEGER NOT NULL CHECK(max_findings > 0),
+    findings_examined INTEGER NOT NULL CHECK(findings_examined >= 0),
+    findings_stored INTEGER NOT NULL CHECK(findings_stored >= 0),
+    total_known_findings INTEGER NOT NULL CHECK(total_known_findings >= 0),
+    persisted_findings_total INTEGER NOT NULL CHECK(persisted_findings_total >= 0),
+    status TEXT NOT NULL CHECK(status IN ('partial', 'completed', 'stale')),
+    stale INTEGER NOT NULL CHECK(stale IN (0, 1)),
+    updated_at TEXT NOT NULL,
+    last_run_key TEXT,
+    cursor_phase TEXT NOT NULL DEFAULT 'equity',
+    cursor_source_key TEXT
+);
+"""
+
+SCHEMA_V14_QUALITY_PROGRESS_INDEX = """
+CREATE INDEX IF NOT EXISTS data_quality_scan_progress_updated
+ON data_quality_scan_progress(updated_at DESC);
+"""
+
+SCHEMA_V14_QUALITY_SOURCE_TABLE = """
+CREATE TABLE IF NOT EXISTS data_quality_source_state (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    source_version INTEGER NOT NULL CHECK(source_version >= 0)
+);
+INSERT OR IGNORE INTO data_quality_source_state(id, source_version) VALUES (1, 0);
+"""
+
+# SQLite's PRAGMA data_version is database-wide: a review transition can
+# change it just like an imported observation. These triggers maintain a
+# source-only revision instead, so a scan is invalidated only by changes to
+# tables that feed candidate generation.
+SCHEMA_V14_QUALITY_SOURCE_TRIGGERS = (
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_series_insert
+    AFTER INSERT ON series
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_series_update
+    AFTER UPDATE ON series
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_series_delete
+    AFTER DELETE ON series
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_daily_prices_insert
+    AFTER INSERT ON daily_prices
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_daily_prices_update
+    AFTER UPDATE ON daily_prices
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_daily_prices_delete
+    AFTER DELETE ON daily_prices
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_index_closes_insert
+    AFTER INSERT ON index_daily_closes
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_index_closes_update
+    AFTER UPDATE ON index_daily_closes
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_index_closes_delete
+    AFTER DELETE ON index_daily_closes
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+)
+
 # Keep this seed data in the storage migration so a read-only API can expose a
 # truthful capability catalog without mutating a user's database on first read.
 INDEX_SERIES_CATALOG_SEED = (
@@ -428,6 +601,30 @@ def serialized_storage_write(function):
 def database_path() -> Path:
     """Use a single local database path for the CLI and development backend."""
     return Path(os.environ.get("FININTEL_DB_PATH", "data/finintel.sqlite3")).expanduser()
+
+
+def _ensure_quality_progress_columns(conn: sqlite3.Connection) -> None:
+    """Upgrade v14 progress rows created before traversal cursors existed."""
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(data_quality_scan_progress)")}
+    if "cursor_phase" not in columns:
+        conn.execute(
+            "ALTER TABLE data_quality_scan_progress ADD COLUMN cursor_phase TEXT "
+            "NOT NULL DEFAULT 'equity'"
+        )
+    if "cursor_source_key" not in columns:
+        conn.execute("ALTER TABLE data_quality_scan_progress ADD COLUMN cursor_source_key TEXT")
+
+
+def _ensure_quality_source_tracking(conn: sqlite3.Connection) -> None:
+    """Install the source-only revision used to detect scan-invalidating writes."""
+
+    for statement in SCHEMA_V14_QUALITY_SOURCE_TABLE.split(";"):
+        statement = statement.strip()
+        if statement:
+            conn.execute(statement)
+    for statement in SCHEMA_V14_QUALITY_SOURCE_TRIGGERS:
+        conn.execute(statement)
 
 
 def _ensure_version(conn: sqlite3.Connection, *, allow_missing: bool) -> bool:
@@ -751,6 +948,27 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if conn.in_transaction:
                 conn.rollback()
             raise StorageError("Unable to migrate index membership metadata to v13") from exc
+        version = 13
+    if version == 13:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(SCHEMA_V14_QUALITY_TABLE)
+            for statement in SCHEMA_V14_QUALITY_INDEX.split(";"):
+                statement = statement.strip()
+                if statement:
+                    conn.execute(statement)
+            conn.execute(SCHEMA_V14_QUALITY_SCAN_TABLE)
+            conn.execute(SCHEMA_V14_QUALITY_SCAN_INDEX)
+            conn.execute(SCHEMA_V14_QUALITY_PROGRESS_TABLE)
+            conn.execute(SCHEMA_V14_QUALITY_PROGRESS_INDEX)
+            _ensure_quality_progress_columns(conn)
+            _ensure_quality_source_tracking(conn)
+            conn.execute("PRAGMA user_version = 14")
+            conn.commit()
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to initialize data-quality storage v14") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:
@@ -773,13 +991,25 @@ def _write_connection(path: Path) -> sqlite3.Connection:
 
             _snapshot(path, "pre-restore")
         _migrate(conn)
+        if conn.execute("PRAGMA user_version").fetchone()[0] >= 14:
+            for statement in SCHEMA_V14_QUALITY_INDEX.split(";"):
+                statement = statement.strip()
+                if statement:
+                    conn.execute(statement)
+            conn.execute(SCHEMA_V14_QUALITY_SCAN_TABLE)
+            conn.execute(SCHEMA_V14_QUALITY_SCAN_INDEX)
+            conn.execute(SCHEMA_V14_QUALITY_PROGRESS_TABLE)
+            conn.execute(SCHEMA_V14_QUALITY_PROGRESS_INDEX)
+            _ensure_quality_progress_columns(conn)
+            _ensure_quality_source_tracking(conn)
+            conn.commit()
         return conn
     except (sqlite3.Error, StorageError):
         conn.close()
         raise
 
 
-def _read_connection(path: Path) -> sqlite3.Connection | None:
+def _read_connection(path: Path, *, snapshot: bool = True) -> sqlite3.Connection | None:
     if not path.is_file():
         return None
     try:
@@ -791,8 +1021,9 @@ def _read_connection(path: Path) -> sqlite3.Connection | None:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA query_only = ON")
         _ensure_version(conn, allow_missing=False)
-        # Keep all queries made through this connection on one committed snapshot.
-        conn.execute("BEGIN")
+        if snapshot:
+            # Keep all queries made through this connection on one committed snapshot.
+            conn.execute("BEGIN")
         return conn
     except (sqlite3.Error, StorageError) as exc:
         conn.close()

@@ -232,7 +232,7 @@ def test_import_idempotency_and_exact_provenance(tmp_path):
     assert read_index_closes("SP500", db=db)["observations"][-1]["close"] == "6012.50"
     assert index_catalog(db=db)[0]["sessions"] == 2
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 14
         assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 0
 
 
@@ -300,7 +300,7 @@ def test_version_six_migrates_without_erasing_equity_data(tmp_path):
     result = store_index_closes("VIX", [("2026-10-23", "21.25")], db=db)
     assert result["inserted"] == 1
     with sqlite3.connect(db) as check:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 14
         assert check.execute("SELECT symbol FROM instruments").fetchone()[0] == "AAPL"
     assert list((db.parent / "backups").glob("finintel-pre-restore-*.sqlite3"))
 

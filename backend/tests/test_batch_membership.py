@@ -34,4 +34,4 @@ def test_batch_selection_only_uses_supported_catalog_and_skips_downloaded(tmp_pa
     assert "MSFT" in symbols
     assert "SPY" not in symbols
     with sqlite3.connect(path) as check:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 14
