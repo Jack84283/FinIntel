@@ -790,7 +790,9 @@ def _persist(path: Path, candidates: list[dict]) -> None:
                 "severity, confidence, rule, evidence_json, fingerprint, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(fingerprint) DO UPDATE SET "
-                "evidence_json=excluded.evidence_json, updated_at=excluded.updated_at",
+                "severity=excluded.severity, confidence=excluded.confidence, "
+                "rule=excluded.rule, evidence_json=excluded.evidence_json, "
+                "updated_at=excluded.updated_at",
                 (
                     item["instrument_kind"],
                     item["code"],
@@ -925,6 +927,22 @@ def _source_identity(path: Path) -> str:
     if conn is None:
         raise FileNotFoundError(path)
     try:
+        catalog_calendar_digest = None
+        if (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='symbol_catalog'"
+            ).fetchone()
+            is not None
+        ):
+            digest = sha256()
+            for row in conn.execute("SELECT symbol, exchange FROM symbol_catalog ORDER BY symbol"):
+                digest.update(
+                    json.dumps([row[0], row[1]], separators=(",", ":"), ensure_ascii=False).encode(
+                        "utf-8"
+                    )
+                )
+                digest.update(b"\n")
+            catalog_calendar_digest = digest.hexdigest()
         facts = {
             "schema_version": conn.execute("PRAGMA user_version").fetchone()[0],
             "source_version": conn.execute(
@@ -939,6 +957,11 @@ def _source_identity(path: Path) -> str:
                 "SELECT COUNT(*), COALESCE(MAX(rowid), 0), "
                 "COALESCE(MAX(retrieved_at), '') FROM index_daily_closes"
             ).fetchone(),
+            # The scanner consumes symbol_catalog.exchange to select an
+            # exchange calendar. Counts and max(rowid) do not detect an
+            # in-place exchange correction, so include a deterministic digest
+            # of the exact symbol/venue mapping used by the read query.
+            "symbol_catalog_calendar": catalog_calendar_digest,
         }
         normalized = {
             key: list(value) if isinstance(value, sqlite3.Row) else value
@@ -1232,7 +1255,7 @@ def run_quality_scan(
         "examples": candidates[:50],
         "notes": [
             "Findings are candidates and do not modify stored observations.",
-            "Weekday gaps are not exchange-calendar confirmation; holidays, suspensions, and listings require review.",
+            "Missing-session candidates use exchange-calendar evidence when available; holidays, suspensions, listings, and provider delays remain reviewable classifications.",
             "Evidence contains normalized local values only; credentials and raw provider payloads are excluded.",
             "Partial scans resume from a phase and source key; total_known_findings is exact for completed scans or a previously completed source revision.",
         ],

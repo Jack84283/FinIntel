@@ -10,7 +10,7 @@ from finintel.market_data.calendar_quality import (
     classify_missing_sessions,
     default_calendar_name,
 )
-from finintel.market_data.quality import list_findings, run_quality_scan
+from finintel.market_data.quality import list_findings, review_finding, run_quality_scan
 from finintel.storage.db import _write_connection
 
 
@@ -221,3 +221,70 @@ def test_scan_persists_calendar_evidence_with_missing_session_finding(tmp_path):
     assert item["evidence"]["calendar_name"] == "XNAS"
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 2
+
+
+def test_missing_session_classification_updates_one_reviewed_finding(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    _seed_quality_calendar_database(db)
+
+    first = run_quality_scan(db, as_of=date(2026, 10, 21))
+    assert first["complete"] is True
+    initial = list_findings(db, finding_type="missing_session", code="AAPL", limit=10)
+    assert initial["total"] == 1
+    assert initial["items"][0]["evidence"]["classification"] == "suspected_missing"
+    finding_id = initial["items"][0]["id"]
+    review_finding(db, finding_id, "confirmed", "Needs sourced session evidence")
+
+    second = run_quality_scan(
+        db,
+        calendar_evidence={
+            1: {
+                "suspensions": [
+                    {
+                        "start": "2026-10-20",
+                        "end": "2026-10-20",
+                        "source": "exchange-halt-bulletin",
+                        "reason": "documented trading halt",
+                    }
+                ]
+            }
+        },
+        as_of=date(2026, 10, 21),
+    )
+
+    assert second["complete"] is True
+    updated = list_findings(db, finding_type="missing_session", code="AAPL", limit=10)
+    assert updated["total"] == 1
+    item = updated["items"][0]
+    assert item["id"] == finding_id
+    assert item["rule"] == "calendar_missing_session"
+    assert item["severity"] == "info"
+    assert item["confidence"] == "high"
+    assert item["evidence"]["classification"] == "expected_closure"
+    assert item["review_state"] == "confirmed"
+
+
+def test_symbol_catalog_exchange_changes_invalidate_scan_checkpoint(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    _seed_quality_calendar_database(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE symbol_catalog SET exchange='' WHERE symbol='AAPL'")
+        conn.commit()
+
+    first = run_quality_scan(db, max_findings=1, as_of=date(2026, 10, 21))
+    assert first["status"] == "partial"
+
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "UPDATE symbol_catalog SET exchange='NASDAQ',updated_at='2026-11-01' "
+            "WHERE symbol='AAPL'"
+        )
+        conn.commit()
+
+    second = run_quality_scan(db, max_findings=1, as_of=date(2026, 10, 21))
+    assert second["resumed"] is False
+    assert second["cursor_start"] == 0
+    findings = list_findings(db, finding_type="missing_session", code="AAPL", limit=10)
+    assert findings["total"] == 1
+    assert findings["items"][0]["evidence"]["calendar_available"] is True
+    assert findings["items"][0]["evidence"]["calendar_name"] == "XNAS"

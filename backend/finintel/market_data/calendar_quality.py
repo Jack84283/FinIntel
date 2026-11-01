@@ -15,6 +15,7 @@ from functools import lru_cache
 
 CALENDAR_RULE_VERSION = "calendar-missing-session-v1"
 CALENDAR_SOURCE = "exchange_calendars"
+MISSING_SESSION_RULE = "calendar_missing_session"
 
 CALENDAR_ALIASES = {
     "NYSE": "XNYS",
@@ -292,11 +293,16 @@ def _record(
     return {
         "session_date": session,
         "classification": classification,
+        # The classification is evidence, not part of the finding identity.
+        # A later scan may learn that the same gap was a documented suspension
+        # or a pending publication. Keeping the rule stable lets persistence
+        # update that candidate instead of creating a second finding.
         "severity": attributes[0],
         "confidence": attributes[1],
-        "rule": f"calendar_missing_session:{classification}",
+        "rule": MISSING_SESSION_RULE,
         "evidence": {
             "classification": classification,
+            "classification_rule": f"{MISSING_SESSION_RULE}:{classification}",
             "calendar_source": CALENDAR_SOURCE if calendar_available else "unavailable",
             "calendar_rule_version": CALENDAR_RULE_VERSION,
             "calendar_name": calendar_name,
