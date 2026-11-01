@@ -273,21 +273,43 @@ def reconciliation_summary(path: Path, *, code: str | None = None) -> dict:
         if code is not None:
             where = " AND code = ?"
             args.append(code)
-        findings = conn.execute(
-            "SELECT COUNT(*) AS total, "
-            "SUM(CASE WHEN superseded_at IS NULL THEN 1 ELSE 0 END) AS active, "
-            "SUM(CASE WHEN review_state <> 'candidate' THEN 1 ELSE 0 END) AS reviewed "
-            "FROM data_quality_findings WHERE finding_type = 'provider_divergence'" + where,
-            args,
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='data_quality_findings'"
         ).fetchone()
+        findings = (
+            conn.execute(
+                "SELECT COUNT(*) AS total, "
+                "SUM(CASE WHEN superseded_at IS NULL THEN 1 ELSE 0 END) AS active, "
+                "SUM(CASE WHEN review_state <> 'candidate' THEN 1 ELSE 0 END) AS reviewed "
+                "FROM data_quality_findings WHERE finding_type = 'provider_divergence'" + where,
+                args,
+            ).fetchone()
+            if exists
+            else {"total": 0, "active": 0, "reviewed": 0}
+        )
         series_where = " WHERE symbol = ?" if code is not None else ""
         coverage = conn.execute(
             "SELECT provider, COUNT(*) AS series_count FROM series"
             + series_where + " GROUP BY provider ORDER BY provider",
             args,
         ).fetchall()
+        details = []
+        if code is not None:
+            series_coverage = conn.execute(
+                "SELECT s.provider, s.frequency, s.adjustment, "
+                "MIN(d.session_date) AS first_session, "
+                "MAX(d.session_date) AS last_session, "
+                "COUNT(d.session_date) AS sessions "
+                "FROM series AS s LEFT JOIN daily_prices AS d ON d.series_id = s.id "
+                "WHERE s.symbol = ? "
+                "GROUP BY s.id ORDER BY s.provider, s.frequency, s.adjustment",
+                (code,),
+            ).fetchall()
+            details = [dict(row) for row in series_coverage]
         return {
             "scope": code or "all",
+            "coverage_by_series": details,
             "findings": {
                 "total": findings["total"],
                 "active": findings["active"] or 0,
