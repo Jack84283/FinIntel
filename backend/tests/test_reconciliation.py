@@ -66,7 +66,9 @@ def test_material_difference_has_two_stored_observations_and_stable_fingerprint(
     assert finding["evidence"]["right_observation"]["close"] == "120"
     assert finding["evidence"]["left_observation"]["source_revision"]["ingestion_id"] == 100
     assert finding["evidence"]["automatic_price_selection"] is False
-    assert scan(observations[::-1], "alpaca_sip", "tiingo")[0]["fingerprint"] == finding["fingerprint"]
+    assert (
+        scan(observations[::-1], "alpaca_sip", "tiingo")[0]["fingerprint"] == finding["fingerprint"]
+    )
 
 
 def test_tolerance_is_configurable_without_moving_finding_identity():
@@ -74,9 +76,7 @@ def test_tolerance_is_configurable_without_moving_finding_identity():
     assert len(scan(observations, "alpaca_sip", "tiingo")) == 1
     policy = ReconciliationPolicy(relative_tolerance=Decimal("0.02"))
     assert not scan(observations, "alpaca_sip", "tiingo", policy=policy)
-    reordered = ReconciliationPolicy(
-        provider_priority=("tiingo", "alpaca_sip", "alpha_vantage")
-    )
+    reordered = ReconciliationPolicy(provider_priority=("tiingo", "alpaca_sip", "alpha_vantage"))
     a = scan(observations, "alpaca_sip", "tiingo")[0]
     b = scan(observations, "alpaca_sip", "tiingo", policy=reordered)[0]
     assert a["fingerprint"] == b["fingerprint"]
