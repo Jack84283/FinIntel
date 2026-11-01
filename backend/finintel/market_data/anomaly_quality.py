@@ -35,6 +35,11 @@ class AnomalyThresholds:
     zero_volume_baseline_minimum: int = 100
     stale_after_days: int = 30
     volume_lookback: int = 20
+    reconciliation_relative_tolerance: Decimal = Decimal("0.01")
+    reconciliation_absolute_tolerance: Decimal = Decimal("0")
+    reconciliation_provider_priority: tuple[str, ...] = (
+        "alpaca_sip", "tiingo", "alpha_vantage"
+    )
 
     def __post_init__(self) -> None:
         if self.price_jump_ratio <= 1:
@@ -53,6 +58,20 @@ class AnomalyThresholds:
             raise ValueError("stale_after_days must be positive")
         if self.volume_lookback < 2:
             raise ValueError("volume_lookback must be at least 2")
+        if (
+            not self.reconciliation_relative_tolerance.is_finite()
+            or not 0 <= self.reconciliation_relative_tolerance <= 1
+        ):
+            raise ValueError("reconciliation_relative_tolerance must be between 0 and 1")
+        if (
+            not self.reconciliation_absolute_tolerance.is_finite()
+            or self.reconciliation_absolute_tolerance < 0
+        ):
+            raise ValueError("reconciliation_absolute_tolerance must be nonnegative")
+        if set(self.reconciliation_provider_priority) != {
+            "alpaca_sip", "tiingo", "alpha_vantage"
+        } or len(self.reconciliation_provider_priority) != 3:
+            raise ValueError("reconciliation_provider_priority must list the three providers once")
 
 
 def normalize_thresholds(
@@ -75,6 +94,9 @@ def normalize_thresholds(
         "zero_volume_baseline_minimum",
         "stale_after_days",
         "volume_lookback",
+        "reconciliation_relative_tolerance",
+        "reconciliation_absolute_tolerance",
+        "reconciliation_provider_priority",
     }
     unknown = set(value) - fields
     if unknown:
@@ -84,8 +106,10 @@ def normalize_thresholds(
         "price_jump_ratio",
         "volume_spike_ratio",
         "zero_volume_price_move_ratio",
+        "reconciliation_relative_tolerance",
+        "reconciliation_absolute_tolerance",
     }
-    integer_fields = fields - decimal_fields
+    integer_fields = fields - decimal_fields - {"reconciliation_provider_priority"}
     converted: dict[str, object] = {}
     for field in fields:
         if field not in value:
@@ -96,6 +120,10 @@ def normalize_thresholds(
             if parsed is None:
                 raise ValueError(f"{field} must be a finite decimal")
             converted[field] = parsed
+        elif field == "reconciliation_provider_priority":
+            if not isinstance(raw, (list, tuple)) or any(not isinstance(p, str) for p in raw):
+                raise ValueError("reconciliation_provider_priority must be a provider list")
+            converted[field] = tuple(raw)
         elif field in integer_fields:
             if isinstance(raw, bool):
                 raise ValueError(f"{field} must be an integer")
@@ -122,6 +150,9 @@ def thresholds_identity(
         "zero_volume_baseline_minimum": normalized.zero_volume_baseline_minimum,
         "stale_after_days": normalized.stale_after_days,
         "volume_lookback": normalized.volume_lookback,
+        "reconciliation_relative_tolerance": str(normalized.reconciliation_relative_tolerance),
+        "reconciliation_absolute_tolerance": str(normalized.reconciliation_absolute_tolerance),
+        "reconciliation_provider_priority": list(normalized.reconciliation_provider_priority),
     }
 
 
