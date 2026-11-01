@@ -39,7 +39,9 @@ class ReconciliationPolicy:
             or len(set(self.provider_priority)) != len(self.provider_priority)
             or set(self.provider_priority) != set(ELIGIBLE_PROVIDERS)
         ):
-            raise ValueError("reconciliation provider priority must list each eligible provider once")
+            raise ValueError(
+                "reconciliation provider priority must list each eligible provider once"
+            )
 
     def identity(self) -> dict:
         return {
@@ -52,7 +54,9 @@ class ReconciliationPolicy:
         }
 
 
-def normalize_reconciliation_policy(value: Mapping[str, object] | None = None) -> ReconciliationPolicy:
+def normalize_reconciliation_policy(
+    value: Mapping[str, object] | None = None,
+) -> ReconciliationPolicy:
     if value is None:
         return ReconciliationPolicy()
     allowed = {"relative_tolerance", "absolute_tolerance", "provider_priority"}
@@ -176,8 +180,15 @@ def reconcile_session(
         if left_contract is None or right_contract is None:
             continue
         # Don't conflate instruments, units, adjustments or return conventions.
-        dimensions = ("instrument", "session_date", "frequency", "adjustment",
-                      "currency", "unit", "return_type")
+        dimensions = (
+            "instrument",
+            "session_date",
+            "frequency",
+            "adjustment",
+            "currency",
+            "unit",
+            "return_type",
+        )
         if any(left_contract[dim] != right_contract[dim] for dim in dimensions):
             continue
         a, b = _decimal(lrow["close"]), _decimal(rrow["close"])
@@ -274,8 +285,7 @@ def reconciliation_summary(path: Path, *, code: str | None = None) -> dict:
             where = " AND code = ?"
             args.append(code)
         exists = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' "
-            "AND name='data_quality_findings'"
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='data_quality_findings'"
         ).fetchone()
         findings = (
             conn.execute(
@@ -291,7 +301,8 @@ def reconciliation_summary(path: Path, *, code: str | None = None) -> dict:
         series_where = " WHERE symbol = ?" if code is not None else ""
         coverage = conn.execute(
             "SELECT provider, COUNT(*) AS series_count FROM series"
-            + series_where + " GROUP BY provider ORDER BY provider",
+            + series_where
+            + " GROUP BY provider ORDER BY provider",
             args,
         ).fetchall()
         details = []
