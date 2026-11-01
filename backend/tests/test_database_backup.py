@@ -270,6 +270,83 @@ def test_index_finding_fingerprint_survives_backup_merge_and_rescan(tmp_path):
         )
 
 
+def test_index_price_anomaly_fingerprint_survives_backup_merge_and_rescan(tmp_path):
+    source = tmp_path / "source.sqlite3"
+    target = tmp_path / "target.sqlite3"
+    seed(source, "AAPL", "90", "2026-10-20T00:00:00")
+    with _write_connection(source) as conn:
+        conn.executemany(
+            "INSERT INTO index_daily_closes"
+            "(index_code,provider,session_date,close,retrieved_at,source_url) "
+            "VALUES ('SP500','fred',?,?,?,?)",
+            [
+                (
+                    "2026-10-19",
+                    "5000",
+                    "2026-10-31T00:00:00+00:00",
+                    "https://fred.stlouisfed.org/series/SP500",
+                ),
+                (
+                    "2026-10-20",
+                    "0",
+                    "2026-10-31T00:00:00+00:00",
+                    "https://fred.stlouisfed.org/series/SP500",
+                ),
+            ],
+        )
+    conn.close()
+
+    scan = run_quality_scan(source, as_of=date(2026, 10, 20))
+    index_findings = list_findings(source, finding_type="price_anomaly", code="SP500", limit=10)
+    assert scan["complete"] is True
+    assert index_findings["total"] == 1
+    source_finding = index_findings["items"][0]
+    assert source_finding["rule"] == "positive_finite_index_close"
+    review_finding(source, source_finding["id"], "confirmed", "Reviewed index close")
+    snapshot = create_backup(db=source)
+
+    _write_connection(target).close()
+    restore_backup(snapshot["id"], "merge", db=target)
+
+    expected_fingerprint = _fingerprint(
+        instrument_kind="index",
+        series_id=None,
+        code="SP500",
+        provider="fred",
+        session_date="2026-10-20",
+        finding_type="price_anomaly",
+        rule="positive_finite_index_close",
+        adjustment="price_index",
+        frequency="1d",
+    )
+    with sqlite3.connect(target) as conn:
+        row = conn.execute(
+            "SELECT fingerprint,review_state FROM data_quality_findings "
+            "WHERE instrument_kind='index' AND code='SP500' "
+            "AND finding_type='price_anomaly'"
+        ).fetchone()
+        assert row == (expected_fingerprint, "confirmed")
+
+    run_quality_scan(target, as_of=date(2026, 10, 20))
+    with sqlite3.connect(target) as conn:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM data_quality_findings "
+                "WHERE instrument_kind='index' AND code='SP500' "
+                "AND finding_type='price_anomaly'"
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            conn.execute(
+                "SELECT review_state FROM data_quality_findings "
+                "WHERE instrument_kind='index' AND code='SP500' "
+                "AND finding_type='price_anomaly'"
+            ).fetchone()[0]
+            == "confirmed"
+        )
+
+
 def test_replace_and_undo_using_recovery_backup(tmp_path):
     target = tmp_path / "main.sqlite3"
     source = tmp_path / "source.sqlite3"

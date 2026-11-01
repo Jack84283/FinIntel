@@ -624,6 +624,8 @@ def _read_candidates(
                             confidence="high",
                             rule="invalid_index_session_date",
                             evidence={"session_date": str(session_date)},
+                            adjustment="price_index",
+                            frequency="1d",
                         )
                     )
                     finish_source()
@@ -644,6 +646,8 @@ def _read_candidates(
                             confidence="high",
                             rule="positive_finite_index_close",
                             evidence={"close": str(row["close"])},
+                            adjustment="price_index",
+                            frequency="1d",
                         )
                     )
                 if previous and close is not None and close > 0 and previous[1] > 0:
@@ -666,6 +670,8 @@ def _read_candidates(
                                     "close": str(close),
                                     "ratio": str(ratio),
                                 },
+                                adjustment="price_index",
+                                frequency="1d",
                             )
                         )
                 if previous and current_date > previous[0] + timedelta(days=1):
