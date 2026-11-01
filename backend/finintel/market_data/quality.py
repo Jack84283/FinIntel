@@ -9,12 +9,20 @@ import heapq
 import json
 import sqlite3
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from itertools import groupby
 from pathlib import Path
 
+from finintel.market_data.calendar_quality import (
+    CALENDAR_RULE_VERSION,
+    CalendarEvidence,
+    classify_missing_session_gap,
+    default_calendar_name,
+    evidence_identity,
+    normalize_evidence,
+)
 from finintel.storage.db import _read_connection, _write_connection, serialized_storage_write
 
 FINDING_TYPES = (
@@ -113,6 +121,41 @@ def _decimal(value: object) -> object:
     except (InvalidOperation, ValueError):
         return None
     return parsed if parsed.is_finite() else None
+
+
+def _calendar_evidence_for(
+    calendar_evidence: Mapping[object, object] | None,
+    *,
+    series_id: int | None,
+    symbol: str,
+    provider: str,
+) -> CalendarEvidence:
+    """Resolve explicit evidence by series, symbol/provider pair, or symbol."""
+
+    if not calendar_evidence:
+        return CalendarEvidence()
+    for key in (series_id, (symbol, provider), symbol):
+        if key in calendar_evidence:
+            return normalize_evidence(calendar_evidence[key])
+    return CalendarEvidence()
+
+
+def _calendar_policy_identity(calendar_evidence: object) -> dict:
+    if isinstance(calendar_evidence, Mapping):
+        return {
+            str(key): evidence_identity(value)
+            for key, value in sorted(calendar_evidence.items(), key=lambda item: str(item[0]))
+        }
+    return evidence_identity(calendar_evidence)
+
+
+def _scan_source_identity(database_identity: str, calendar_evidence: object) -> str:
+    policy = {
+        "database_identity": database_identity,
+        "calendar_rule_version": CALENDAR_RULE_VERSION,
+        "calendar_evidence": _calendar_policy_identity(calendar_evidence),
+    }
+    return sha256(json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def _iter_query_rows(
@@ -304,6 +347,8 @@ def _read_candidates(
     max_findings: int,
     *,
     checkpoint: dict[str, object] | None = None,
+    calendar_evidence: Mapping[object, object] | None = None,
+    as_of: date | None = None,
 ) -> tuple[list[dict], int, dict[str, object], bool]:
     checkpoint = checkpoint or {"phase": "equity", "source_key": None}
     checkpoint_phase = str(checkpoint.get("phase", "equity"))
@@ -335,8 +380,10 @@ def _read_candidates(
         path,
         select_sql=(
             "SELECT s.id AS series_id, s.symbol, s.provider, s.frequency, s.adjustment, "
-            "dp.session_date, dp.open, dp.high, dp.low, dp.close, dp.volume "
-            "FROM series AS s JOIN daily_prices AS dp ON dp.series_id = s.id"
+            "dp.session_date, dp.open, dp.high, dp.low, dp.close, dp.volume, "
+            "c.exchange AS exchange "
+            "FROM series AS s JOIN daily_prices AS dp ON dp.series_id = s.id "
+            "LEFT JOIN symbol_catalog AS c ON c.symbol = s.symbol"
         ),
         order_expression="s.id, dp.session_date",
         key_columns=("series_id", "session_date"),
@@ -498,13 +545,25 @@ def _read_candidates(
                         )
 
                 if previous and current_date > previous[0] + timedelta(days=1):
-                    missing_weekdays = []
-                    cursor = previous[0] + timedelta(days=1)
-                    while cursor < current_date:
-                        if cursor.weekday() < 5:
-                            missing_weekdays.append(cursor.isoformat())
-                        cursor += timedelta(days=1)
-                    if missing_weekdays:
+                    evidence = _calendar_evidence_for(
+                        calendar_evidence,
+                        series_id=series_id,
+                        symbol=row["symbol"],
+                        provider=row["provider"],
+                    )
+                    calendar_name = evidence.calendar_name or default_calendar_name(
+                        instrument_kind="equity",
+                        code=row["symbol"],
+                        exchange=row["exchange"],
+                    )
+                    for missing in classify_missing_session_gap(
+                        previous[0],
+                        current_date,
+                        calendar_name=calendar_name,
+                        provider=row["provider"],
+                        evidence=evidence,
+                        as_of=as_of,
+                    ):
                         add(
                             _candidate(
                                 series_id=series_id,
@@ -512,17 +571,12 @@ def _read_candidates(
                                 provider=row["provider"],
                                 adjustment=row["adjustment"],
                                 frequency=row["frequency"],
-                                session_date=current_date.isoformat(),
+                                session_date=missing["session_date"].isoformat(),
                                 finding_type="missing_session",
-                                severity="warning",
-                                confidence="low",
-                                rule="weekday_gap_candidate",
-                                evidence={
-                                    "previous_session": previous[0].isoformat(),
-                                    "next_session": current_date.isoformat(),
-                                    "weekday_candidates": missing_weekdays[:31],
-                                    "calendar_applied": False,
-                                },
+                                severity=missing["severity"],
+                                confidence=missing["confidence"],
+                                rule=missing["rule"],
+                                evidence=missing["evidence"],
                             )
                         )
                 if close is not None:
@@ -615,30 +669,37 @@ def _read_candidates(
                             )
                         )
                 if previous and current_date > previous[0] + timedelta(days=1):
-                    missing_weekdays = []
-                    cursor = previous[0] + timedelta(days=1)
-                    while cursor < current_date:
-                        if cursor.weekday() < 5:
-                            missing_weekdays.append(cursor.isoformat())
-                        cursor += timedelta(days=1)
-                    if missing_weekdays:
+                    evidence = _calendar_evidence_for(
+                        calendar_evidence,
+                        series_id=None,
+                        symbol=index_code,
+                        provider=provider,
+                    )
+                    calendar_name = evidence.calendar_name or default_calendar_name(
+                        instrument_kind="index", code=index_code
+                    )
+                    for missing in classify_missing_session_gap(
+                        previous[0],
+                        current_date,
+                        calendar_name=calendar_name,
+                        provider=provider,
+                        evidence=evidence,
+                        as_of=as_of,
+                    ):
                         add(
                             _candidate(
                                 instrument_kind="index",
                                 series_id=None,
                                 code=index_code,
                                 provider=provider,
-                                session_date=current_date.isoformat(),
+                                session_date=missing["session_date"].isoformat(),
                                 finding_type="missing_session",
-                                severity="warning",
-                                confidence="low",
-                                rule="weekday_gap_candidate",
-                                evidence={
-                                    "previous_session": previous[0].isoformat(),
-                                    "next_session": current_date.isoformat(),
-                                    "weekday_candidates": missing_weekdays[:31],
-                                    "calendar_applied": False,
-                                },
+                                severity=missing["severity"],
+                                confidence=missing["confidence"],
+                                rule=missing["rule"],
+                                evidence=missing["evidence"],
+                                adjustment="price_index",
+                                frequency="1d",
                             )
                         )
                 if close is not None and close > 0:
@@ -1039,7 +1100,13 @@ def _persist_scan_progress(
         conn.close()
 
 
-def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
+def run_quality_scan(
+    path: Path,
+    *,
+    max_findings: int = 1000,
+    calendar_evidence: Mapping[object, object] | None = None,
+    as_of: date | None = None,
+) -> dict:
     """Scan local observations and persist candidate findings without repairing data."""
 
     if not 1 <= max_findings <= 10_000:
@@ -1052,7 +1119,8 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
     # the potentially long read-only scan does not hold the process write lock.
     started_at = _iso_now()
     _ensure_quality_schema(path)
-    source_identity = _source_identity(path)
+    database_identity = _source_identity(path)
+    source_identity = _scan_source_identity(database_identity, calendar_evidence)
     source_data_version_start = _source_data_version(path)
     progress = _scan_progress(path)
     checkpoint = {"phase": "equity", "source_key": None}
@@ -1069,12 +1137,16 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
         cursor_start = int(progress["cursor_next"])
         checkpoint = _progress_checkpoint(progress)
     candidates, findings_seen, next_checkpoint, exhausted = _read_candidates(
-        path, max_findings, checkpoint=checkpoint
+        path,
+        max_findings,
+        checkpoint=checkpoint,
+        calendar_evidence=calendar_evidence,
+        as_of=as_of,
     )
     source_data_version_end = _source_data_version(path)
     source_changed = (
         source_data_version_end != source_data_version_start
-        or _source_identity(path) != source_identity
+        or _source_identity(path) != database_identity
     )
     _persist(path, candidates)
     findings_stored = len(candidates)
@@ -1141,6 +1213,7 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
         "complete": complete,
         "truncated": truncated,
         "stale": stale,
+        "calendar_rule_version": CALENDAR_RULE_VERSION,
         "source_data_version_start": source_data_version_start,
         "source_data_version_end": source_data_version_end,
         "cursor_start": cursor_start,
