@@ -1124,7 +1124,8 @@ def _read_candidates(
 
     if not page_full and checkpoint_phase in {"equity", "index", "cross_provider"}:
         provider_rows = _iter_cross_provider_rows(path, start_key=cross_start)
-        provider_bounds = coverage_bounds(path)
+        provider_bounds: dict[int, dict] = {}
+        previous_group: tuple[str, str, str] | None = None
         provider_policy = ReconciliationPolicy(
             relative_tolerance=thresholds.reconciliation_relative_tolerance,
             absolute_tolerance=thresholds.reconciliation_absolute_tolerance,
@@ -1149,6 +1150,12 @@ def _read_candidates(
                 }
             )
             observations = list(observation_group)
+            current_group = (symbol, frequency, adjustment)
+            if current_group != previous_group:
+                provider_bounds = coverage_bounds(
+                    path, [series["id"] for series in observations[0]["reconciliation_series"]]
+                )
+                previous_group = current_group
             for item in reconcile_session(
                 observations,
                 series_group=observations[0]["reconciliation_series"],
