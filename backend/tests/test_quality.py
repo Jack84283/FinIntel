@@ -181,7 +181,7 @@ def test_pr38_index_anomaly_upgrade_reuses_reviewed_finding(tmp_path):
 
     # Recreate the PR #38 quality tables around a real populated database. In
     # particular, the old table has no lifecycle columns and the stored hash
-    # is the pre-v14 pipe-delimited index anomaly fingerprint.
+    # is the PR #38 JSON identity with null index dimensions.
     conn.execute("DROP TABLE data_quality_reviews")
     conn.execute("DROP TABLE data_quality_findings")
     conn.execute(
@@ -301,6 +301,136 @@ def test_pr38_index_anomaly_upgrade_reuses_reviewed_finding(tmp_path):
         assert check.execute(
             "SELECT id,finding_id,from_state,to_state,note FROM data_quality_reviews"
         ).fetchall() == [(73, 41, "candidate", "confirmed", "Confirmed during PR #38 review")]
+
+
+def test_pr38_index_anomaly_collision_preserves_legacy_review_state(tmp_path):
+    db = tmp_path / "pr38-collision.sqlite3"
+    conn = _write_connection(db)
+    conn.execute(
+        "INSERT INTO index_daily_closes"
+        "(index_code,provider,session_date,close,retrieved_at,source_url) "
+        "VALUES ('SP500','fred',?,?,?,?)",
+        (
+            "2026-10-20",
+            "0",
+            "2026-10-31T00:00:00+00:00",
+            "https://fred.stlouisfed.org/series/SP500",
+        ),
+    )
+    finding = {
+        "instrument_kind": "index",
+        "code": "SP500",
+        "series_id": None,
+        "provider": "fred",
+        "session_date": "2026-10-20",
+        "finding_type": "price_anomaly",
+        "severity": "error",
+        "confidence": "high",
+        "rule": "positive_finite_index_close",
+        "evidence_json": '{"close":"0"}',
+    }
+    legacy_fingerprint = _legacy_fingerprint(
+        code=finding["code"],
+        provider=finding["provider"],
+        session_date=finding["session_date"],
+        finding_type=finding["finding_type"],
+        rule=finding["rule"],
+    )
+    current_fingerprint = _fingerprint(
+        instrument_kind="index",
+        series_id=None,
+        code=finding["code"],
+        provider=finding["provider"],
+        session_date=finding["session_date"],
+        finding_type=finding["finding_type"],
+        rule=finding["rule"],
+        adjustment="price_index",
+        frequency="1d",
+    )
+    conn.executemany(
+        "INSERT INTO data_quality_findings("
+        "id,instrument_kind,code,series_id,provider,session_date,finding_type,"
+        "severity,confidence,rule,evidence_json,fingerprint,review_state,"
+        "resolution_note,created_at,updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                41,
+                *finding.values(),
+                legacy_fingerprint,
+                "confirmed",
+                "Confirmed during PR #38 review",
+                "2026-10-31T01:00:00+00:00",
+                "2026-10-31T02:00:00+00:00",
+            ),
+            (
+                42,
+                *finding.values(),
+                current_fingerprint,
+                "rejected",
+                "Duplicate reviewed after restore",
+                "2026-10-31T03:00:00+00:00",
+                "2026-10-31T04:00:00+00:00",
+            ),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO data_quality_reviews"
+        "(id,finding_id,from_state,to_state,note,reviewed_at) "
+        "VALUES (?,?,?,?,?,?)",
+        [
+            (
+                73,
+                41,
+                "candidate",
+                "confirmed",
+                "Confirmed during PR #38 review",
+                "2026-10-31T02:00:00+00:00",
+            ),
+            (
+                74,
+                42,
+                "candidate",
+                "rejected",
+                "Duplicate reviewed after restore",
+                "2026-10-31T04:00:00+00:00",
+            ),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    result = run_quality_scan(db, as_of=date(2026, 10, 20))
+    assert result["complete"] is True
+    with sqlite3.connect(db) as check:
+        rows = check.execute(
+            "SELECT id,fingerprint,review_state,resolution_note,superseded_at "
+            "FROM data_quality_findings WHERE instrument_kind='index' ORDER BY id"
+        ).fetchall()
+        assert rows[0] == (
+            41,
+            current_fingerprint,
+            "confirmed",
+            "Confirmed during PR #38 review",
+            None,
+        )
+        assert rows[1][0] == 42
+        assert rows[1][1] != current_fingerprint
+        assert rows[1][2] == "rejected"
+        assert rows[1][3] == "Duplicate reviewed after restore"
+        assert rows[1][4] is not None
+        assert (
+            check.execute(
+                "SELECT COUNT(*) FROM data_quality_findings WHERE superseded_at IS NULL"
+            ).fetchone()[0]
+            == 1
+        )
+        assert check.execute(
+            "SELECT id,finding_id,from_state,to_state,note FROM data_quality_reviews ORDER BY id"
+        ).fetchall() == [
+            (73, 41, "candidate", "confirmed", "Confirmed during PR #38 review"),
+            (74, 41, "candidate", "rejected", "Duplicate reviewed after restore"),
+        ]
 
 
 def test_truncated_quality_scan_resumes_from_durable_cursor(tmp_path):

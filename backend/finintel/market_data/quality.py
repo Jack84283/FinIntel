@@ -81,10 +81,19 @@ def _legacy_fingerprint(
     finding_type: str,
     rule: str,
 ) -> str:
-    """Return the PR #38 fingerprint used before series dimensions existed."""
+    """Return the PR #38 fingerprint with null index dimensions."""
 
-    value = "|".join((code, provider, session_date or "", finding_type, rule))
-    return sha256(value.encode("utf-8")).hexdigest()
+    return _fingerprint(
+        instrument_kind="index",
+        series_id=None,
+        code=code,
+        provider=provider,
+        session_date=session_date,
+        finding_type=finding_type,
+        rule=rule,
+        adjustment=None,
+        frequency=None,
+    )
 
 
 def _candidate(
