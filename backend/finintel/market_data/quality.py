@@ -1450,6 +1450,7 @@ def _persist(
                 "ON CONFLICT(fingerprint) DO UPDATE SET "
                 "severity=excluded.severity, confidence=excluded.confidence, "
                 "rule=excluded.rule, evidence_json=excluded.evidence_json, "
+                "superseded_at=NULL, supersession_reason=NULL, "
                 "updated_at=excluded.updated_at",
                 (
                     item["instrument_kind"],

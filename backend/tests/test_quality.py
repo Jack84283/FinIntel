@@ -225,7 +225,7 @@ def test_quality_scan_preserves_legacy_price_jump_review_history(tmp_path):
     assert upgraded[0]["review_state"] == "confirmed"
 
 
-def test_completed_scan_supersedes_reviewed_finding_removed_by_threshold_change(tmp_path):
+def test_completed_scan_reactivates_reviewed_finding_after_threshold_restoration(tmp_path):
     db = tmp_path / "threshold-reconciliation.sqlite3"
     seed_quality_database(db)
     first = run_quality_scan(
@@ -271,6 +271,34 @@ def test_completed_scan_supersedes_reviewed_finding_removed_by_threshold_change(
             (finding_id,),
         ).fetchone()[:3] == (finding_id, "candidate", "confirmed")
     assert quality_report(db, limit=100)["complete"] is True
+
+    third = run_quality_scan(
+        db,
+        thresholds={"price_jump_ratio": "2"},
+        as_of=date(2026, 11, 1),
+    )
+
+    assert third["complete"] is True
+    reactivated = next(
+        item
+        for item in list_findings(db, finding_type="price_anomaly", code="AAPL", limit=20)["items"]
+        if item["rule"] == "price_jump_candidate"
+    )
+    assert reactivated["id"] == finding_id
+    assert reactivated["review_state"] == "confirmed"
+    with sqlite3.connect(db) as conn:
+        row = conn.execute(
+            "SELECT review_state,superseded_at,supersession_reason FROM data_quality_findings "
+            "WHERE id=?",
+            (finding_id,),
+        ).fetchone()
+        assert row == ("confirmed", None, None)
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM data_quality_reviews WHERE finding_id=?", (finding_id,)
+            ).fetchone()[0]
+            == 1
+        )
 
 
 def test_completed_scan_supersedes_refreshed_stale_observation(tmp_path):
@@ -326,6 +354,33 @@ def test_completed_scan_supersedes_refreshed_stale_observation(tmp_path):
             == 1
         )
 
+    third = run_quality_scan(db, as_of=date(2027, 2, 20))
+
+    assert third["complete"] is True
+    reactivated = [
+        item
+        for item in list_findings(db, finding_type="stale_observation", code="AAPL", limit=20)[
+            "items"
+        ]
+        if item["id"] == stale_id
+    ]
+    assert len(reactivated) == 1
+    assert reactivated[0]["review_state"] == "confirmed"
+    assert reactivated[0]["evidence"]["validation_reference_date"] == "2027-02-20"
+    with sqlite3.connect(db) as conn:
+        row = conn.execute(
+            "SELECT review_state,superseded_at,supersession_reason FROM data_quality_findings "
+            "WHERE id=?",
+            (stale_id,),
+        ).fetchone()
+        assert row == ("confirmed", None, None)
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM data_quality_reviews WHERE finding_id=?", (stale_id,)
+            ).fetchone()[0]
+            == 1
+        )
+
 
 def test_partial_scan_does_not_supersede_until_full_resume_completes(tmp_path):
     db = tmp_path / "partial-reconciliation.sqlite3"
@@ -369,6 +424,82 @@ def test_partial_scan_does_not_supersede_until_full_resume_completes(tmp_path):
         ).fetchone()
         assert row[0] is not None
         assert row[1] == "rejected"
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM data_quality_reviews WHERE finding_id=?", (finding_id,)
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_resumed_partial_scan_reactivates_finding_when_candidate_is_reached(tmp_path):
+    db = tmp_path / "partial-reactivation.sqlite3"
+    seed_quality_database(db)
+    run_quality_scan(db, thresholds={"price_jump_ratio": "2"}, as_of=date(2026, 11, 1))
+    finding = next(
+        item
+        for item in list_findings(db, finding_type="price_anomaly", code="SP500", limit=20)["items"]
+        if item["rule"] == "price_jump_candidate"
+    )
+    finding_id = finding["id"]
+    review_finding(db, finding_id, "confirmed", "Reviewed before resumed reactivation")
+
+    run_quality_scan(db, thresholds={"price_jump_ratio": "3"}, as_of=date(2026, 11, 1))
+    with sqlite3.connect(db) as conn:
+        assert (
+            conn.execute(
+                "SELECT superseded_at,review_state FROM data_quality_findings WHERE id=?",
+                (finding_id,),
+            ).fetchone()[0]
+            is not None
+        )
+
+    scan_kwargs = {
+        "max_findings": 1,
+        "thresholds": {"price_jump_ratio": "2"},
+        "as_of": date(2026, 11, 1),
+    }
+    result = run_quality_scan(db, **scan_kwargs)
+    assert result["complete"] is False
+    assert result["resumed"] is False
+    assert result["findings_superseded"] == 0
+    with sqlite3.connect(db) as conn:
+        assert (
+            conn.execute(
+                "SELECT superseded_at FROM data_quality_findings WHERE id=?",
+                (finding_id,),
+            ).fetchone()[0]
+            is not None
+        )
+
+    reactivated_during_partial = False
+    for _ in range(20):
+        result = run_quality_scan(db, **scan_kwargs)
+        assert result["findings_superseded"] == 0
+        if result["complete"]:
+            break
+        with sqlite3.connect(db) as conn:
+            superseded_at = conn.execute(
+                "SELECT superseded_at FROM data_quality_findings WHERE id=?",
+                (finding_id,),
+            ).fetchone()[0]
+        if superseded_at is None:
+            assert result["resumed"] is True
+            reactivated_during_partial = True
+            break
+
+    assert reactivated_during_partial is True
+    for _ in range(20):
+        if result["complete"]:
+            break
+        result = run_quality_scan(db, **scan_kwargs)
+    assert result["complete"] is True
+    with sqlite3.connect(db) as conn:
+        assert conn.execute(
+            "SELECT review_state,superseded_at,supersession_reason "
+            "FROM data_quality_findings WHERE id=?",
+            (finding_id,),
+        ).fetchone() == ("confirmed", None, None)
         assert (
             conn.execute(
                 "SELECT COUNT(*) FROM data_quality_reviews WHERE finding_id=?", (finding_id,)
