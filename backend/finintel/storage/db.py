@@ -391,6 +391,27 @@ CREATE INDEX IF NOT EXISTS data_quality_reviews_finding
 ON data_quality_reviews(finding_id, reviewed_at DESC, id DESC);
 """
 
+SCHEMA_V14_QUALITY_SCAN_TABLE = """
+CREATE TABLE IF NOT EXISTS data_quality_scan_runs (
+    id INTEGER PRIMARY KEY,
+    started_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    max_findings INTEGER NOT NULL CHECK(max_findings > 0),
+    findings_examined INTEGER NOT NULL CHECK(findings_examined >= 0),
+    findings_stored INTEGER NOT NULL CHECK(findings_stored >= 0),
+    total_known_findings INTEGER NOT NULL CHECK(total_known_findings >= 0),
+    persisted_findings_total INTEGER NOT NULL CHECK(persisted_findings_total >= 0),
+    status TEXT NOT NULL CHECK(status IN ('completed', 'partial')),
+    truncated INTEGER NOT NULL CHECK(truncated IN (0, 1)),
+    run_key TEXT NOT NULL UNIQUE
+);
+"""
+
+SCHEMA_V14_QUALITY_SCAN_INDEX = """
+CREATE INDEX IF NOT EXISTS data_quality_scan_runs_completed
+ON data_quality_scan_runs(completed_at DESC, id DESC);
+"""
+
 # Keep this seed data in the storage migration so a read-only API can expose a
 # truthful capability catalog without mutating a user's database on first read.
 INDEX_SERIES_CATALOG_SEED = (
@@ -805,6 +826,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 statement = statement.strip()
                 if statement:
                     conn.execute(statement)
+            conn.execute(SCHEMA_V14_QUALITY_SCAN_TABLE)
+            conn.execute(SCHEMA_V14_QUALITY_SCAN_INDEX)
             conn.execute("PRAGMA user_version = 14")
             conn.commit()
         except sqlite3.Error as exc:
@@ -833,13 +856,17 @@ def _write_connection(path: Path) -> sqlite3.Connection:
 
             _snapshot(path, "pre-restore")
         _migrate(conn)
+        if conn.execute("PRAGMA user_version").fetchone()[0] >= 14:
+            conn.execute(SCHEMA_V14_QUALITY_SCAN_TABLE)
+            conn.execute(SCHEMA_V14_QUALITY_SCAN_INDEX)
+            conn.commit()
         return conn
     except (sqlite3.Error, StorageError):
         conn.close()
         raise
 
 
-def _read_connection(path: Path) -> sqlite3.Connection | None:
+def _read_connection(path: Path, *, snapshot: bool = True) -> sqlite3.Connection | None:
     if not path.is_file():
         return None
     try:
@@ -851,8 +878,9 @@ def _read_connection(path: Path) -> sqlite3.Connection | None:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA query_only = ON")
         _ensure_version(conn, allow_missing=False)
-        # Keep all queries made through this connection on one committed snapshot.
-        conn.execute("BEGIN")
+        if snapshot:
+            # Keep all queries made through this connection on one committed snapshot.
+            conn.execute("BEGIN")
         return conn
     except (sqlite3.Error, StorageError) as exc:
         conn.close()

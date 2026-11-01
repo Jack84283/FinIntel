@@ -86,7 +86,7 @@ def review(finding_id: int, request: ReviewRequest, http_request: Request) -> di
 
 
 @router.get("/report")
-def report(limit: int = Query(default=500, ge=1, le=500)) -> dict:
+def report(limit: int = Query(default=500, ge=1, le=10_000)) -> dict:
     try:
         return quality_report(database_path(), limit=limit)
     except FileNotFoundError as exc:

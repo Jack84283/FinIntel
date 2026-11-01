@@ -174,12 +174,15 @@ def test_quality_scan_reports_truncation_and_report_counts_all_known_findings(tm
     assert result["total_known_findings"] == result["findings_examined"]
     assert result["persisted_findings_total"] == 2
 
-    report = quality_report(db, limit=1)
+    report = quality_report(db, limit=2)
     assert report["status"] == "partial"
-    assert report["truncated"] is True
-    assert report["total_known_findings"] == 2
+    assert report["complete"] is False
+    assert report["truncated"] is False
+    assert report["total_known_findings"] == result["total_known_findings"]
     assert report["findings_stored"] == 2
-    assert report["returned_count"] == 1
+    assert report["returned_count"] == 2
+    assert report["pagination"]["truncated"] is False
+    assert report["scan_completeness"]["truncated"] is True
     assert sum(report["review_states"].values()) == 2
 
 
@@ -225,6 +228,68 @@ def test_quality_scan_does_not_hold_write_lock_during_read_only_scan(tmp_path, m
     assert acquired is True
     assert not thread.is_alive()
     assert errors == []
+    assert results and results[0]["status"] == "completed"
+
+
+def test_quality_scan_allows_a_real_sqlite_writer_between_read_chunks(tmp_path, monkeypatch):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    scan_paused = threading.Event()
+    allow_scan = threading.Event()
+    writer_done = threading.Event()
+    results = []
+    errors = []
+    writer_errors = []
+    original = quality_module._iter_query_rows
+
+    def paused_rows(*args, **kwargs):
+        paused = False
+        for row in original(*args, **kwargs):
+            if not paused:
+                paused = True
+                scan_paused.set()
+                if not allow_scan.wait(5):
+                    raise AssertionError("test did not release the scan")
+            yield row
+
+    monkeypatch.setattr(quality_module, "_iter_query_rows", paused_rows)
+
+    def scan():
+        try:
+            results.append(run_quality_scan(db))
+        except (
+            AssertionError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            sqlite3.Error,
+            db_module.StorageError,
+        ) as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    def writer():
+        try:
+            with sqlite3.connect(db, timeout=0.5) as conn:
+                conn.execute("UPDATE instruments SET created_at='2026-11-01' WHERE symbol='AAPL'")
+                conn.commit()
+        except sqlite3.Error as exc:  # pragma: no cover - asserted below
+            writer_errors.append(exc)
+        finally:
+            writer_done.set()
+
+    scan_thread = threading.Thread(target=scan)
+    scan_thread.start()
+    assert scan_paused.wait(5)
+    writer_thread = threading.Thread(target=writer)
+    writer_thread.start()
+    assert writer_done.wait(3)
+    allow_scan.set()
+    scan_thread.join(10)
+    writer_thread.join(3)
+
+    assert writer_errors == []
+    assert errors == []
+    assert not scan_thread.is_alive()
     assert results and results[0]["status"] == "completed"
 
 
@@ -401,4 +466,5 @@ def test_quality_api_scans_filters_and_reviews_with_managed_token(tmp_path, monk
         report = client.get("/api/v1/quality/report", params={"limit": 1})
         assert report.status_code == 200
         assert report.json()["truncated"] is True
+        assert report.json()["scan_completeness"]["complete"] is True
         assert report.json()["total_known_findings"] == scan_payload["findings_stored"]

@@ -65,6 +65,9 @@ def _validated(path: Path, *, version: bool = True) -> dict[str, object]:
                     "index_series_catalog",
                     "index_ingestion_runs",
                     "index_membership_snapshots",
+                    "data_quality_findings",
+                    "data_quality_reviews",
+                    "data_quality_scan_runs",
                 )
                 if table in tables
             }
@@ -182,6 +185,9 @@ def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, obje
                     "index_series_catalog",
                     "index_ingestion_runs",
                     "index_membership_snapshots",
+                    "data_quality_findings",
+                    "data_quality_reviews",
+                    "data_quality_scan_runs",
                 )
                 if table in tables
             }
@@ -191,7 +197,7 @@ def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, obje
 
 
 def _merge(staging: Path, source: Path) -> None:
-    """Merge all schema-v6 data; use original source IDs only through mapping tables."""
+    """Merge supported data; use source IDs only through mapping tables."""
     with sqlite3.connect(staging, timeout=30) as dest:
         dest.execute("PRAGMA foreign_keys = ON")
         dest.execute("ATTACH DATABASE ? AS incoming", (str(source.resolve()),))
@@ -249,6 +255,61 @@ def _merge(staging: Path, source: Path) -> None:
                     "retrieved_at=excluded.retrieved_at,ingestion_id=excluded.ingestion_id "
                     "WHERE excluded.retrieved_at > daily_prices.retrieved_at"
                 )
+                if "data_quality_findings" in incoming_tables:
+                    # Findings refer to source-database series IDs. Insert by
+                    # fingerprint and then map every incoming finding ID to the
+                    # destination row so review history remains attached.
+                    dest.execute(
+                        "INSERT INTO data_quality_findings("
+                        "instrument_kind,code,series_id,provider,session_date,finding_type,"
+                        "severity,confidence,rule,evidence_json,fingerprint,review_state,"
+                        "resolution_note,created_at,updated_at) "
+                        "SELECT f.instrument_kind,f.code,map.new_id,f.provider,f.session_date,"
+                        "f.finding_type,f.severity,f.confidence,f.rule,f.evidence_json,"
+                        "f.fingerprint,f.review_state,f.resolution_note,f.created_at,f.updated_at "
+                        "FROM incoming.data_quality_findings f "
+                        "LEFT JOIN _series_map map ON map.old_id=f.series_id "
+                        "WHERE f.series_id IS NULL OR map.old_id IS NOT NULL "
+                        "ON CONFLICT(fingerprint) DO UPDATE SET "
+                        "instrument_kind=excluded.instrument_kind,code=excluded.code,"
+                        "series_id=excluded.series_id,provider=excluded.provider,"
+                        "session_date=excluded.session_date,finding_type=excluded.finding_type,"
+                        "severity=excluded.severity,confidence=excluded.confidence,"
+                        "rule=excluded.rule,evidence_json=excluded.evidence_json,"
+                        "review_state=excluded.review_state,"
+                        "resolution_note=excluded.resolution_note,updated_at=excluded.updated_at "
+                        "WHERE excluded.updated_at > data_quality_findings.updated_at"
+                    )
+                    dest.execute(
+                        "CREATE TEMP TABLE _quality_finding_map AS "
+                        "SELECT src.id AS old_id,dst.id AS new_id "
+                        "FROM incoming.data_quality_findings src "
+                        "JOIN data_quality_findings dst ON dst.fingerprint=src.fingerprint"
+                    )
+                    if "data_quality_reviews" in incoming_tables:
+                        dest.execute(
+                            "INSERT INTO data_quality_reviews("
+                            "finding_id,from_state,to_state,note,reviewed_at) "
+                            "SELECT map.new_id,r.from_state,r.to_state,r.note,r.reviewed_at "
+                            "FROM incoming.data_quality_reviews r "
+                            "JOIN _quality_finding_map map ON map.old_id=r.finding_id "
+                            "WHERE NOT EXISTS (SELECT 1 FROM data_quality_reviews current "
+                            "WHERE current.finding_id=map.new_id "
+                            "AND current.from_state=r.from_state "
+                            "AND current.to_state=r.to_state "
+                            "AND current.note IS r.note "
+                            "AND current.reviewed_at=r.reviewed_at)"
+                        )
+                    if "data_quality_scan_runs" in incoming_tables:
+                        dest.execute(
+                            "INSERT OR IGNORE INTO data_quality_scan_runs("
+                            "started_at,completed_at,max_findings,findings_examined,"
+                            "findings_stored,total_known_findings,persisted_findings_total,"
+                            "status,truncated,run_key) "
+                            "SELECT started_at,completed_at,max_findings,findings_examined,"
+                            "findings_stored,total_known_findings,persisted_findings_total,"
+                            "status,truncated,run_key FROM incoming.data_quality_scan_runs"
+                        )
                 dest.execute(
                     "INSERT OR IGNORE INTO symbol_catalog SELECT * FROM incoming.symbol_catalog"
                 )
@@ -394,6 +455,8 @@ def _merge(staging: Path, source: Path) -> None:
                     "AND d.status=e.status AND d.symbol=e.symbol "
                     "AND d.provider=e.provider AND d.duration_ms=e.duration_ms)"
                 )
+                if "data_quality_findings" in incoming_tables:
+                    dest.execute("DROP TABLE _quality_finding_map")
                 dest.execute("DROP TABLE _ingestion_map")
                 dest.execute("DROP TABLE _series_map")
         finally:

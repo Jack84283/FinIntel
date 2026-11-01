@@ -4,6 +4,7 @@ import sqlite3
 
 import pytest
 
+from finintel.market_data.quality import list_findings, review_finding, run_quality_scan
 from finintel.storage.backup import (
     create_backup,
     inspect_backup,
@@ -103,6 +104,69 @@ def test_merge_preserves_newer_prices_and_adds_missing_instruments(tmp_path):
     with sqlite3.connect(target) as db:
         assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_merge_imports_quality_findings_reviews_and_scan_metadata(tmp_path):
+    target = tmp_path / "main.sqlite3"
+    source = tmp_path / "source.sqlite3"
+    seed(source, "AAPL", "90", "2026-10-20T00:00:00")
+    with sqlite3.connect(source) as db:
+        series_id, ingestion_id = db.execute(
+            "SELECT s.id,p.ingestion_id FROM series s "
+            "JOIN daily_prices p ON p.series_id=s.id WHERE s.symbol='AAPL'"
+        ).fetchone()
+        db.execute(
+            "INSERT INTO daily_prices VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                series_id,
+                "2026-10-21",
+                "10",
+                "9",
+                "8",
+                "10",
+                100,
+                "2026-10-20T00:00:00",
+                ingestion_id,
+            ),
+        )
+    scan = run_quality_scan(source)
+    finding = list_findings(source, limit=1)["items"][0]
+    review_finding(source, finding["id"], "confirmed", "Reviewed in source backup")
+    snapshot = create_backup(db=source)
+
+    # Insert another series first so the incoming AAPL series ID must be
+    # remapped rather than accidentally reused in the destination.
+    seed(target, "NVDA", "150", "2026-10-21T00:00:00")
+    seed(target, "AAPL", "100", "2026-10-21T00:00:00")
+    restore_backup(snapshot["id"], "merge", db=target)
+
+    with sqlite3.connect(target) as db:
+        finding_rows = db.execute(
+            "SELECT id,series_id,fingerprint,review_state,resolution_note "
+            "FROM data_quality_findings ORDER BY id"
+        ).fetchall()
+        assert len(finding_rows) == scan["findings_stored"]
+        target_aapl_series = db.execute("SELECT id FROM series WHERE symbol='AAPL'").fetchone()[0]
+        assert all(row[1] in (None, target_aapl_series) for row in finding_rows)
+        confirmed = [row for row in finding_rows if row[3] == "confirmed"]
+        assert len(confirmed) == 1
+        assert confirmed[0][4] == "Reviewed in source backup"
+        assert db.execute("SELECT COUNT(*) FROM data_quality_reviews").fetchone()[0] == 1
+        assert (
+            db.execute("SELECT finding_id FROM data_quality_reviews").fetchone()[0]
+            == confirmed[0][0]
+        )
+        assert db.execute("SELECT COUNT(*) FROM data_quality_scan_runs").fetchone()[0] == 1
+
+    # Re-merging the same backup is idempotent by fingerprint, review event,
+    # and scan-run key.
+    restore_backup(snapshot["id"], "merge", db=target)
+    with sqlite3.connect(target) as db:
+        assert db.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0] == len(
+            finding_rows
+        )
+        assert db.execute("SELECT COUNT(*) FROM data_quality_reviews").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM data_quality_scan_runs").fetchone()[0] == 1
 
 
 def test_replace_and_undo_using_recovery_backup(tmp_path):
