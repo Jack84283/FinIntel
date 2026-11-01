@@ -8,11 +8,11 @@ Other instruments or adjustment/return conventions require an explicit contract.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from itertools import combinations
 from pathlib import Path
-from typing import Mapping
 
 from finintel.storage.db import _read_connection
 
@@ -26,7 +26,7 @@ class ReconciliationPolicy:
     """Comparison thresholds and source preference, never a price-selection policy."""
 
     relative_tolerance: Decimal = Decimal("0.01")
-    absolute_tolerance: Decimal = Decimal("0")
+    absolute_tolerance: Decimal = Decimal(0)
     provider_priority: tuple[str, ...] = DEFAULT_PRIORITY
 
     def __post_init__(self) -> None:
@@ -187,7 +187,7 @@ def reconcile_session(
         relative = absolute / a
         if absolute <= policy.absolute_tolerance or relative <= policy.relative_tolerance:
             continue
-        provider_pair = "|".join((left, right))
+        provider_pair = f"{left}|{right}"
         results.append(
             _candidate(
                 series_id=lrow["series_id"],
