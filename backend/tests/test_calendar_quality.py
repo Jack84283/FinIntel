@@ -10,7 +10,13 @@ from finintel.market_data.calendar_quality import (
     classify_missing_sessions,
     default_calendar_name,
 )
-from finintel.market_data.quality import list_findings, review_finding, run_quality_scan
+from finintel.market_data.quality import (
+    _candidate,
+    _persist,
+    list_findings,
+    review_finding,
+    run_quality_scan,
+)
 from finintel.storage.db import _write_connection
 
 
@@ -262,6 +268,56 @@ def test_missing_session_classification_updates_one_reviewed_finding(tmp_path):
     assert item["confidence"] == "high"
     assert item["evidence"]["classification"] == "expected_closure"
     assert item["review_state"] == "confirmed"
+
+
+def test_calendar_scan_supersedes_legacy_weekday_gap_without_losing_review_history(tmp_path):
+    db = tmp_path / "populated-pr38.sqlite3"
+    _seed_quality_calendar_database(db)
+
+    legacy = _candidate(
+        series_id=1,
+        code="AAPL",
+        provider="alpaca_sip",
+        session_date="2026-10-21",
+        finding_type="missing_session",
+        severity="warning",
+        confidence="low",
+        rule="weekday_gap_candidate",
+        adjustment="raw_unadjusted",
+        frequency="1d",
+        evidence={
+            "previous_session": "2026-10-19",
+            "next_session": "2026-10-21",
+            "weekday_candidates": ["2026-10-20"],
+            "calendar_applied": False,
+        },
+    )
+    _persist(db, [legacy])
+    old = list_findings(db, finding_type="missing_session", code="AAPL", limit=10)
+    assert old["total"] == 1
+    old_id = old["items"][0]["id"]
+    review_finding(db, old_id, "confirmed", "Reviewed before calendar validation")
+
+    result = run_quality_scan(db, as_of=date(2026, 10, 21))
+    assert result["complete"] is True
+    active = list_findings(db, finding_type="missing_session", code="AAPL", limit=10)
+    assert active["total"] == 1
+    assert active["items"][0]["rule"] == "calendar_missing_session"
+    assert active["items"][0]["session_date"] == "2026-10-20"
+
+    with sqlite3.connect(db) as conn:
+        legacy_row = conn.execute(
+            "SELECT rule,review_state,superseded_at,supersession_reason "
+            "FROM data_quality_findings WHERE id = ?",
+            (old_id,),
+        ).fetchone()
+        assert legacy_row[0] == "weekday_gap_candidate"
+        assert legacy_row[1] == "confirmed"
+        assert legacy_row[2] is not None
+        assert legacy_row[3] == "Reclassified by calendar-aware missing-session validation"
+        assert conn.execute(
+            "SELECT finding_id FROM data_quality_reviews WHERE finding_id = ?", (old_id,)
+        ).fetchone() == (old_id,)
 
 
 def test_symbol_catalog_exchange_changes_invalidate_scan_checkpoint(tmp_path):

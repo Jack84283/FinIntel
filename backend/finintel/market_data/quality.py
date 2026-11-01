@@ -778,7 +778,7 @@ def _ensure_quality_schema(path: Path) -> None:
 
 
 @serialized_storage_write
-def _persist(path: Path, candidates: list[dict]) -> None:
+def _persist(path: Path, candidates: list[dict], *, supersede_legacy: bool = False) -> None:
     conn = _write_connection(path)
     try:
         conn.execute("BEGIN")
@@ -806,6 +806,24 @@ def _persist(path: Path, candidates: list[dict]) -> None:
                     json.dumps(item["evidence"], sort_keys=True, separators=(",", ":")),
                     item["fingerprint"],
                     now,
+                    now,
+                ),
+            )
+        if supersede_legacy:
+            # PR #38 used one weekday-gap candidate for an entire interval and
+            # stored the next observed session as its date. The calendar-aware
+            # scanner emits one finding per actual session instead. Keep the
+            # old row and its review/audit history, but remove it from active
+            # results once the complete replacement scan has succeeded.
+            conn.execute(
+                "UPDATE data_quality_findings SET superseded_at = ?, "
+                "supersession_reason = ?, updated_at = ? "
+                "WHERE finding_type = 'missing_session' "
+                "AND rule = 'weekday_gap_candidate' "
+                "AND superseded_at IS NULL",
+                (
+                    now,
+                    "Reclassified by calendar-aware missing-session validation",
                     now,
                 ),
             )
@@ -890,10 +908,12 @@ def _stored_finding_summary(path: Path) -> tuple[int, dict[str, int]]:
             is None
         ):
             return 0, {}
-        total = conn.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0]
+        total = conn.execute(
+            "SELECT COUNT(*) FROM data_quality_findings WHERE superseded_at IS NULL"
+        ).fetchone()[0]
         rows = conn.execute(
             "SELECT review_state, COUNT(*) AS count FROM data_quality_findings "
-            "GROUP BY review_state"
+            "WHERE superseded_at IS NULL GROUP BY review_state"
         ).fetchall()
         return int(total), {row["review_state"]: int(row["count"]) for row in rows}
     finally:
@@ -922,27 +942,39 @@ def _latest_scan_run(path: Path) -> dict | None:
         conn.close()
 
 
+def _source_catalog_identity(path: Path) -> str | None:
+    """Return the exact venue mapping consumed by calendar selection."""
+
+    conn = _read_connection(path, snapshot=False)
+    if conn is None:
+        raise FileNotFoundError(path)
+    try:
+        if (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='symbol_catalog'"
+            ).fetchone()
+            is None
+        ):
+            return None
+        digest = sha256()
+        for row in conn.execute("SELECT symbol, exchange FROM symbol_catalog ORDER BY symbol"):
+            digest.update(
+                json.dumps([row[0], row[1]], separators=(",", ":"), ensure_ascii=False).encode(
+                    "utf-8"
+                )
+            )
+            digest.update(b"\n")
+        return digest.hexdigest()
+    finally:
+        conn.close()
+
+
 def _source_identity(path: Path) -> str:
     conn = _read_connection(path, snapshot=False)
     if conn is None:
         raise FileNotFoundError(path)
     try:
-        catalog_calendar_digest = None
-        if (
-            conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='symbol_catalog'"
-            ).fetchone()
-            is not None
-        ):
-            digest = sha256()
-            for row in conn.execute("SELECT symbol, exchange FROM symbol_catalog ORDER BY symbol"):
-                digest.update(
-                    json.dumps([row[0], row[1]], separators=(",", ":"), ensure_ascii=False).encode(
-                        "utf-8"
-                    )
-                )
-                digest.update(b"\n")
-            catalog_calendar_digest = digest.hexdigest()
+        catalog_calendar_digest = _source_catalog_identity(path)
         facts = {
             "schema_version": conn.execute("PRAGMA user_version").fetchone()[0],
             "source_version": conn.execute(
@@ -1037,12 +1069,19 @@ def _scan_progress(path: Path) -> dict | None:
             if {"cursor_phase", "cursor_source_key"}.issubset(columns)
             else "'equity' AS cursor_phase,NULL AS cursor_source_key"
         )
+        catalog_field = (
+            "source_catalog_identity"
+            if "source_catalog_identity" in columns
+            else "NULL AS source_catalog_identity"
+        )
         row = conn.execute(
             "SELECT scan_key,source_identity,source_data_version_start,"
             "source_data_version_end,cursor_start,cursor_next,max_findings,"
             "findings_examined,findings_stored,total_known_findings,"
             "persisted_findings_total,status,stale,updated_at,last_run_key,"
             + cursor_fields
+            + ","
+            + catalog_field
             + " FROM data_quality_scan_progress WHERE scan_key = ?",
             (_SCAN_KEY,),
         ).fetchone()
@@ -1071,6 +1110,7 @@ def _persist_scan_progress(
     last_run_key: str,
     cursor_phase: str,
     cursor_source_key: str | None,
+    source_catalog_identity: str | None,
 ) -> None:
     conn = _write_connection(path)
     try:
@@ -1080,8 +1120,8 @@ def _persist_scan_progress(
             "scan_key,source_identity,source_data_version_start,source_data_version_end,"
             "cursor_start,cursor_next,max_findings,findings_examined,findings_stored,"
             "total_known_findings,persisted_findings_total,status,stale,updated_at,last_run_key,"
-            "cursor_phase,cursor_source_key) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "cursor_phase,cursor_source_key,source_catalog_identity) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(scan_key) DO UPDATE SET "
             "source_identity=excluded.source_identity,"
             "source_data_version_start=excluded.source_data_version_start,"
@@ -1094,7 +1134,8 @@ def _persist_scan_progress(
             "persisted_findings_total=excluded.persisted_findings_total,"
             "status=excluded.status,stale=excluded.stale,updated_at=excluded.updated_at,"
             "last_run_key=excluded.last_run_key,cursor_phase=excluded.cursor_phase,"
-            "cursor_source_key=excluded.cursor_source_key",
+            "cursor_source_key=excluded.cursor_source_key,"
+            "source_catalog_identity=excluded.source_catalog_identity",
             (
                 _SCAN_KEY,
                 source_identity,
@@ -1113,6 +1154,7 @@ def _persist_scan_progress(
                 last_run_key,
                 cursor_phase,
                 cursor_source_key,
+                source_catalog_identity,
             ),
         )
         conn.commit()
@@ -1143,6 +1185,7 @@ def run_quality_scan(
     started_at = _iso_now()
     _ensure_quality_schema(path)
     database_identity = _source_identity(path)
+    source_catalog_identity = _source_catalog_identity(path)
     source_identity = _scan_source_identity(database_identity, calendar_evidence)
     source_data_version_start = _source_data_version(path)
     progress = _scan_progress(path)
@@ -1171,7 +1214,8 @@ def run_quality_scan(
         source_data_version_end != source_data_version_start
         or _source_identity(path) != database_identity
     )
-    _persist(path, candidates)
+    scan_complete = exhausted and not source_changed
+    _persist(path, candidates, supersede_legacy=scan_complete)
     findings_stored = len(candidates)
     persisted_findings_total, _ = _stored_finding_summary(path)
     previous_examined = (
@@ -1190,7 +1234,7 @@ def run_quality_scan(
     cursor_next = cursor_start + findings_stored
     stale = source_changed
     truncated = not exhausted and not stale
-    complete = not truncated and not stale
+    complete = scan_complete
     status = "completed" if complete else "partial"
     completed_at = _iso_now()
     scan_id, run_key = _persist_scan_run(
@@ -1227,6 +1271,7 @@ def run_quality_scan(
         if not complete
         else "complete",
         cursor_source_key=None if stale or complete else _encode_source_key(next_checkpoint),
+        source_catalog_identity=source_catalog_identity,
     )
     counts = Counter(item["finding_type"] for item in candidates)
     severity = Counter(item["severity"] for item in candidates)
@@ -1296,7 +1341,9 @@ def list_findings(
                 "truncated": False,
                 "items": [],
             }
-        clauses = []
+        # Superseded legacy classifications remain queryable through their ID
+        # and retain review history, but are not active findings in reports.
+        clauses = ["superseded_at IS NULL"]
         params: list[object] = []
         for column, value in (
             ("finding_type", finding_type),
@@ -1314,7 +1361,8 @@ def list_findings(
         rows = conn.execute(
             "SELECT id, instrument_kind, code, series_id, provider, session_date, finding_type, "
             "severity, confidence, rule, evidence_json, fingerprint, review_state, "
-            "resolution_note, created_at, updated_at FROM data_quality_findings"
+            "resolution_note, superseded_at, supersession_reason, created_at, updated_at "
+            "FROM data_quality_findings"
             + where
             + " ORDER BY session_date IS NULL, session_date, id LIMIT ? OFFSET ?",
             [*params, limit, offset],
@@ -1323,6 +1371,7 @@ def list_findings(
         for row in rows:
             item = dict(row)
             item["evidence"] = json.loads(item.pop("evidence_json"))
+            item["superseded"] = item["superseded_at"] is not None
             items.append(item)
         returned_count = len(items)
         return {
@@ -1379,13 +1428,15 @@ def _get_finding(path: Path, finding_id: int) -> dict:
         row = conn.execute(
             "SELECT id, instrument_kind, code, series_id, provider, session_date, finding_type, "
             "severity, confidence, rule, evidence_json, fingerprint, review_state, "
-            "resolution_note, created_at, updated_at FROM data_quality_findings WHERE id = ?",
+            "resolution_note, superseded_at, supersession_reason, created_at, updated_at "
+            "FROM data_quality_findings WHERE id = ?",
             (finding_id,),
         ).fetchone()
         if row is None:
             raise KeyError("Finding not found")
         item = dict(row)
         item["evidence"] = json.loads(item.pop("evidence_json"))
+        item["superseded"] = item["superseded_at"] is not None
         return item
     finally:
         conn.close()
@@ -1397,6 +1448,7 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
     scan_run = _latest_scan_run(path)
     progress = _scan_progress(path)
     current_source_data_version = _source_data_version(path)
+    current_source_catalog_identity = _source_catalog_identity(path)
     scan_metadata_available = (
         scan_run is not None
         and progress is not None
@@ -1413,8 +1465,14 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
         and progress["source_data_version_end"] is not None
         and current_source_data_version != progress["source_data_version_end"]
     )
+    source_catalog_identity_changed = scan_metadata_available and (
+        progress.get("source_catalog_identity") is None
+        or current_source_catalog_identity != progress["source_catalog_identity"]
+    )
     scan_stale = (
-        bool(progress["stale"]) or source_revision_changed if scan_metadata_available else False
+        bool(progress["stale"]) or source_revision_changed or source_catalog_identity_changed
+        if scan_metadata_available
+        else False
     )
     scan_complete = (
         scan_metadata_available
@@ -1447,6 +1505,8 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
         "total_known_findings": total_known_findings,
         "persisted_findings_total": persisted_findings_total,
         "source_data_version_current": current_source_data_version,
+        "source_revision_changed": source_revision_changed,
+        "source_catalog_identity_changed": source_catalog_identity_changed,
         "finding_count": total_known_findings,
         "total_returned": len(findings["items"]),
         "returned_count": len(findings["items"]),
@@ -1459,6 +1519,7 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
                 "truncated": scan_truncated,
                 "stale": scan_stale,
                 "source_revision_changed": source_revision_changed,
+                "source_catalog_identity_changed": source_catalog_identity_changed,
                 "max_findings": scan_run["max_findings"],
                 "findings_examined": scan_run["findings_examined"],
                 "findings_stored": scan_run["findings_stored"],
@@ -1467,6 +1528,8 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
                 "source_data_version_start": progress["source_data_version_start"],
                 "source_data_version_end": progress["source_data_version_end"],
                 "source_data_version_current": current_source_data_version,
+                "source_catalog_identity": progress.get("source_catalog_identity"),
+                "source_catalog_identity_current": current_source_catalog_identity,
                 "cursor_start": progress["cursor_start"],
                 "cursor_next": progress["cursor_next"],
                 "cursor_phase": progress["cursor_phase"],

@@ -1,10 +1,12 @@
 """Restore safety: complete backups, merge keys, replacement recovery and bad inputs."""
 
 import sqlite3
+from datetime import date
 
 import pytest
 
 from finintel.market_data.quality import (
+    _fingerprint,
     list_findings,
     quality_report,
     review_finding,
@@ -193,6 +195,79 @@ def test_merge_imports_quality_findings_reviews_and_scan_metadata(tmp_path):
         )
         assert db.execute("SELECT COUNT(*) FROM data_quality_reviews").fetchone()[0] == 1
         assert db.execute("SELECT COUNT(*) FROM data_quality_scan_runs").fetchone()[0] == 2
+
+
+def test_index_finding_fingerprint_survives_backup_merge_and_rescan(tmp_path):
+    source = tmp_path / "source.sqlite3"
+    target = tmp_path / "target.sqlite3"
+    seed(source, "AAPL", "90", "2026-10-20T00:00:00")
+    with _write_connection(source) as conn:
+        conn.executemany(
+            "INSERT INTO index_daily_closes"
+            "(index_code,provider,session_date,close,retrieved_at,source_url) "
+            "VALUES ('SP500','fred',?,?,?,?)",
+            [
+                (
+                    "2026-10-19",
+                    "5000",
+                    "2026-10-31T00:00:00+00:00",
+                    "https://fred.stlouisfed.org/series/SP500",
+                ),
+                (
+                    "2026-10-21",
+                    "5010",
+                    "2026-10-31T00:00:00+00:00",
+                    "https://fred.stlouisfed.org/series/SP500",
+                ),
+            ],
+        )
+    conn.close()
+
+    scan = run_quality_scan(source, as_of=date(2026, 10, 21))
+    index_findings = list_findings(source, finding_type="missing_session", code="SP500", limit=10)
+    assert scan["complete"] is True
+    assert index_findings["total"] == 1
+    source_finding = index_findings["items"][0]
+    review_finding(source, source_finding["id"], "confirmed", "Reviewed index gap")
+    snapshot = create_backup(db=source)
+
+    _write_connection(target).close()
+    restore_backup(snapshot["id"], "merge", db=target)
+
+    expected_fingerprint = _fingerprint(
+        instrument_kind="index",
+        series_id=None,
+        code="SP500",
+        provider="fred",
+        session_date="2026-10-20",
+        finding_type="missing_session",
+        rule="calendar_missing_session",
+        adjustment="price_index",
+        frequency="1d",
+    )
+    with sqlite3.connect(target) as conn:
+        row = conn.execute(
+            "SELECT fingerprint,review_state FROM data_quality_findings "
+            "WHERE instrument_kind='index' AND code='SP500'"
+        ).fetchone()
+        assert row == (expected_fingerprint, "confirmed")
+
+    run_quality_scan(target, as_of=date(2026, 10, 21))
+    with sqlite3.connect(target) as conn:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM data_quality_findings "
+                "WHERE instrument_kind='index' AND code='SP500'"
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            conn.execute(
+                "SELECT review_state FROM data_quality_findings "
+                "WHERE instrument_kind='index' AND code='SP500'"
+            ).fetchone()[0]
+            == "confirmed"
+        )
 
 
 def test_replace_and_undo_using_recovery_backup(tmp_path):

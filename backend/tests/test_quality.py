@@ -310,6 +310,30 @@ def test_quality_report_marks_scan_stale_after_daily_import(tmp_path):
     )
 
 
+def test_quality_report_marks_completed_scan_stale_after_exchange_catalog_change(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    scan = run_quality_scan(db)
+    assert scan["complete"] is True
+    assert quality_report(db, limit=100)["complete"] is True
+
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "UPDATE symbol_catalog SET exchange='XNAS',updated_at='2026-11-01T00:00:00+00:00' "
+            "WHERE symbol='AAPL'"
+        )
+        conn.commit()
+
+    report = quality_report(db, limit=100)
+    assert report["status"] == "stale"
+    assert report["stale"] is True
+    assert report["complete"] is False
+    assert report["source_revision_changed"] is False
+    assert report["source_catalog_identity_changed"] is True
+    assert report["scan_completeness"]["source_catalog_identity_changed"] is True
+    assert report["scan_completeness"]["complete"] is False
+
+
 def test_cross_provider_query_plan_uses_scan_indexes(tmp_path):
     db = tmp_path / "quality.sqlite3"
     seed_quality_database(db)
