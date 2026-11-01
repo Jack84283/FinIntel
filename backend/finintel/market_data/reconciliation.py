@@ -110,17 +110,21 @@ def _decimal(value: object) -> Decimal | None:
     return result if result.is_finite() and result > 0 else None
 
 
-def coverage_bounds(path: Path) -> dict[int, dict]:
-    """Bounded metadata: one min/max/count entry per series, never full price history."""
+def coverage_bounds(path: Path, series_ids: list[int]) -> dict[int, dict]:
+    """Scan only the current comparable provider group, not the entire database."""
 
+    if not series_ids:
+        return {}
     conn = _read_connection(path, snapshot=False)
     if conn is None:
         raise FileNotFoundError(path)
     try:
+        placeholders = ", ".join("?" for _ in series_ids)
         rows = conn.execute(
             "SELECT series_id, MIN(session_date) AS first_session, "
             "MAX(session_date) AS last_session, COUNT(*) AS sessions "
-            "FROM daily_prices GROUP BY series_id"
+            f"FROM daily_prices WHERE series_id IN ({placeholders}) GROUP BY series_id",
+            series_ids,
         ).fetchall()
         return {
             row["series_id"]: {
