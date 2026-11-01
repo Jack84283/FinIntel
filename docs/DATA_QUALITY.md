@@ -3,8 +3,11 @@
 FinIntel's local Data Validation page includes a durable quality scan. The scan
 stores candidate findings in SQLite schema v14 and never changes an observation.
 Each finding includes the symbol, provider, session, rule, severity,
-confidence, normalized evidence, and a stable fingerprint. Re-running a scan
-updates the evidence for the same candidate without resetting its review state.
+confidence, normalized evidence, and a stable fingerprint. The fingerprint
+also includes the stable series identity (series ID, frequency, adjustment,
+and any related comparison series), so separate historical series cannot
+overwrite one another. Re-running a scan updates the evidence for the same
+candidate without resetting its review state.
 
 The current deterministic rules cover:
 
@@ -20,6 +23,17 @@ levels; index findings are labeled separately from equity series.
 Weekends, exchange holidays, DST, listings, suspensions, vendor delays, and
 corporate actions require review evidence before a candidate is confirmed.
 There are no automatic repairs or provider-preference decisions in this scan.
+
+Quality scans report `findings_examined`, `findings_stored`, and
+`total_known_findings`. When the configured `max_findings` cap is reached,
+`status` is `partial`, `complete` is false, and `truncated` is true. The
+report endpoint applies the same metadata to its paginated output while its
+review-state counts cover all persisted findings, not just the returned page.
+
+The read-only scan does not hold FinIntel's process-wide write lock. Only the
+short schema migration and candidate persistence transaction use that lock, so
+daily acquisition, imports, backups, and reviews can proceed before and after
+the scan's read phase.
 
 Review transitions are recorded in `data_quality_reviews` and the current
 state is kept on `data_quality_findings` (`candidate`, `confirmed`, `rejected`,

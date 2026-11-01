@@ -34,13 +34,34 @@ def _iso_now() -> str:
 
 def _fingerprint(
     *,
+    instrument_kind: str,
+    series_id: int | None,
     code: str,
     provider: str,
     session_date: str | None,
     finding_type: str,
     rule: str,
+    adjustment: str | None = None,
+    frequency: str | None = None,
+    related_series_ids: tuple[int, ...] = (),
 ) -> str:
-    value = "|".join((code, provider, session_date or "", finding_type, rule))
+    series_ids = sorted(
+        series_value
+        for series_value in (series_id, *related_series_ids)
+        if series_value is not None
+    )
+    identity = {
+        "instrument_kind": instrument_kind,
+        "series_ids": series_ids,
+        "code": code,
+        "provider": provider,
+        "session_date": session_date,
+        "finding_type": finding_type,
+        "rule": rule,
+        "adjustment": adjustment,
+        "frequency": frequency,
+    }
+    value = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     return sha256(value.encode("utf-8")).hexdigest()
 
 
@@ -56,6 +77,9 @@ def _candidate(
     confidence: str,
     rule: str,
     evidence: dict,
+    adjustment: str | None = None,
+    frequency: str | None = None,
+    related_series_ids: tuple[int, ...] = (),
 ) -> dict:
     return {
         "instrument_kind": instrument_kind,
@@ -69,11 +93,16 @@ def _candidate(
         "rule": rule,
         "evidence": evidence,
         "fingerprint": _fingerprint(
+            instrument_kind=instrument_kind,
+            series_id=series_id,
             code=code,
             provider=provider,
             session_date=session_date,
             finding_type=finding_type,
             rule=rule,
+            adjustment=adjustment,
+            frequency=frequency,
+            related_series_ids=related_series_ids,
         ),
     }
 
@@ -88,12 +117,12 @@ def _decimal(value: object) -> object:
     return parsed if parsed.is_finite() else None
 
 
-def _read_candidates(path: Path, max_findings: int) -> list[dict]:
+def _read_candidates(path: Path, max_findings: int) -> tuple[list[dict], int]:
     conn = _read_connection(path)
     if conn is None:
         raise FileNotFoundError(path)
     rows = conn.execute(
-        "SELECT s.id AS series_id, s.symbol, s.provider, s.adjustment, "
+        "SELECT s.id AS series_id, s.symbol, s.provider, s.frequency, s.adjustment, "
         "dp.session_date, dp.open, dp.high, dp.low, dp.close, dp.volume "
         "FROM series AS s JOIN daily_prices AS dp ON dp.series_id = s.id "
         "ORDER BY s.id, dp.session_date"
@@ -107,8 +136,11 @@ def _read_candidates(path: Path, max_findings: int) -> list[dict]:
     # one overlapping provider/session group) is retained at a time; the full
     # price database is never materialized in memory.
     findings: list[dict] = []
+    findings_examined = 0
 
     def add(item: dict) -> bool:
+        nonlocal findings_examined
+        findings_examined += 1
         if len(findings) >= max_findings:
             return False
         findings.append(item)
@@ -126,6 +158,8 @@ def _read_candidates(path: Path, max_findings: int) -> list[dict]:
                         series_id=series_id,
                         code=row["symbol"],
                         provider=row["provider"],
+                        adjustment=row["adjustment"],
+                        frequency=row["frequency"],
                         session_date=session_date,
                         finding_type="ohlcv_anomaly",
                         severity="error",
@@ -156,6 +190,8 @@ def _read_candidates(path: Path, max_findings: int) -> list[dict]:
                         series_id=series_id,
                         code=row["symbol"],
                         provider=row["provider"],
+                        adjustment=row["adjustment"],
+                        frequency=row["frequency"],
                         session_date=session_date,
                         finding_type="ohlcv_anomaly",
                         severity="error",
@@ -180,6 +216,8 @@ def _read_candidates(path: Path, max_findings: int) -> list[dict]:
                             series_id=series_id,
                             code=row["symbol"],
                             provider=row["provider"],
+                            adjustment=row["adjustment"],
+                            frequency=row["frequency"],
                             session_date=session_date,
                             finding_type="price_anomaly",
                             severity="warning",
@@ -207,6 +245,8 @@ def _read_candidates(path: Path, max_findings: int) -> list[dict]:
                             series_id=series_id,
                             code=row["symbol"],
                             provider=row["provider"],
+                            adjustment=row["adjustment"],
+                            frequency=row["frequency"],
                             session_date=current_date.isoformat(),
                             finding_type="missing_session",
                             severity="warning",
@@ -316,13 +356,19 @@ def _read_candidates(path: Path, max_findings: int) -> list[dict]:
                 previous = (current_date, close)
 
     provider_rows = conn.execute(
-        "SELECT s.id AS series_id, s.symbol, s.provider, s.adjustment, "
+        "SELECT s.id AS series_id, s.symbol, s.provider, s.frequency, s.adjustment, "
         "dp.session_date, dp.close FROM series AS s "
         "JOIN daily_prices AS dp ON dp.series_id = s.id "
-        "ORDER BY s.symbol, s.adjustment, dp.session_date, s.provider, s.id"
+        "ORDER BY s.symbol, s.frequency, s.adjustment, dp.session_date, s.provider, s.id"
     )
-    for (symbol, adjustment, session), observation_group in groupby(
-        provider_rows, key=lambda row: (row["symbol"], row["adjustment"], row["session_date"])
+    for (symbol, frequency, adjustment, session), observation_group in groupby(
+        provider_rows,
+        key=lambda row: (
+            row["symbol"],
+            row["frequency"],
+            row["adjustment"],
+            row["session_date"],
+        ),
     ):
         observations = list(observation_group)
         if len(observations) < 2:
@@ -340,6 +386,9 @@ def _read_candidates(path: Path, max_findings: int) -> list[dict]:
                         series_id=left["series_id"],
                         code=symbol,
                         provider=provider,
+                        adjustment=adjustment,
+                        frequency=frequency,
+                        related_series_ids=(right["series_id"],),
                         session_date=session,
                         finding_type="provider_divergence",
                         severity="warning",
@@ -356,9 +405,18 @@ def _read_candidates(path: Path, max_findings: int) -> list[dict]:
                     )
                 )
     conn.close()
-    return findings
+    return findings, findings_examined
 
 
+@serialized_storage_write
+def _ensure_quality_schema(path: Path) -> None:
+    """Run any required migrations while holding the short write lock."""
+
+    connection = _write_connection(path)
+    connection.close()
+
+
+@serialized_storage_write
 def _persist(path: Path, candidates: list[dict]) -> None:
     conn = _write_connection(path)
     try:
@@ -396,7 +454,28 @@ def _persist(path: Path, candidates: list[dict]) -> None:
         conn.close()
 
 
-@serialized_storage_write
+def _stored_finding_summary(path: Path) -> tuple[int, dict[str, int]]:
+    conn = _read_connection(path)
+    if conn is None:
+        raise FileNotFoundError(path)
+    try:
+        if (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='data_quality_findings'"
+            ).fetchone()
+            is None
+        ):
+            return 0, {}
+        total = conn.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0]
+        rows = conn.execute(
+            "SELECT review_state, COUNT(*) AS count FROM data_quality_findings "
+            "GROUP BY review_state"
+        ).fetchall()
+        return int(total), {row["review_state"]: int(row["count"]) for row in rows}
+    finally:
+        conn.close()
+
+
 def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
     """Scan local observations and persist candidate findings without repairing data."""
 
@@ -406,15 +485,26 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
         raise FileNotFoundError(path)
     # Quality scans may be the first write after an older database is opened.
     # Migrate before reading so legacy v1-v13 databases have all required tables.
-    connection = _write_connection(path)
-    connection.close()
-    candidates = _read_candidates(path, max_findings)
+    # Only this short migration and the later persistence transaction are locked;
+    # the potentially long read-only scan does not hold the process write lock.
+    _ensure_quality_schema(path)
+    candidates, findings_examined = _read_candidates(path, max_findings)
     _persist(path, candidates)
+    findings_stored = len(candidates)
+    total_known_findings, _ = _stored_finding_summary(path)
+    truncated = findings_examined > findings_stored
     counts = Counter(item["finding_type"] for item in candidates)
     severity = Counter(item["severity"] for item in candidates)
     return {
-        "status": "completed",
-        "finding_count": len(candidates),
+        "status": "partial" if truncated else "completed",
+        "complete": not truncated,
+        "truncated": truncated,
+        "max_findings": max_findings,
+        "findings_examined": findings_examined,
+        "findings_stored": findings_stored,
+        "total_known_findings": findings_examined,
+        "persisted_findings_total": total_known_findings,
+        "finding_count": findings_examined,
         "by_type": dict(sorted(counts.items())),
         "by_severity": dict(sorted(severity.items())),
         "examples": candidates[:50],
@@ -452,7 +542,14 @@ def list_findings(
             ).fetchone()
             is None
         ):
-            return {"total": 0, "limit": limit, "offset": offset, "items": []}
+            return {
+                "total": 0,
+                "limit": limit,
+                "offset": offset,
+                "returned_count": 0,
+                "truncated": False,
+                "items": [],
+            }
         clauses = []
         params: list[object] = []
         for column, value in (
@@ -481,7 +578,15 @@ def list_findings(
             item = dict(row)
             item["evidence"] = json.loads(item.pop("evidence_json"))
             items.append(item)
-        return {"total": total, "limit": limit, "offset": offset, "items": items}
+        returned_count = len(items)
+        return {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "returned_count": returned_count,
+            "truncated": offset + returned_count < total,
+            "items": items,
+        }
     finally:
         conn.close()
 
@@ -542,11 +647,20 @@ def _get_finding(path: Path, finding_id: int) -> dict:
 
 def quality_report(path: Path, *, limit: int = 500) -> dict:
     findings = list_findings(path, limit=limit)
-    counts = Counter(item["review_state"] for item in findings["items"])
+    total_known_findings, counts = _stored_finding_summary(path)
+    truncated = bool(findings["truncated"])
     return {
         "generated_at": _iso_now(),
-        "status": "candidate_findings",
+        "status": "partial" if truncated else "completed",
+        "complete": not truncated,
+        "truncated": truncated,
+        "findings_examined": total_known_findings,
+        "findings_stored": total_known_findings,
+        "total_known_findings": total_known_findings,
+        "finding_count": total_known_findings,
         "total_returned": len(findings["items"]),
+        "returned_count": len(findings["items"]),
+        "limit": limit,
         "review_states": dict(sorted(counts.items())),
         "findings": findings["items"],
         "notes": [

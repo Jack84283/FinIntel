@@ -1,19 +1,25 @@
 """Durable data-quality candidate and review behavior."""
 
 import sqlite3
+import threading
+import time
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
 from finintel.main import app
+from finintel.market_data import quality as quality_module
 from finintel.market_data.quality import (
+    _candidate,
+    _persist,
     list_findings,
     quality_report,
     review_finding,
     run_quality_scan,
 )
 from finintel.storage import db as db_module
-from finintel.storage.db import _write_connection
+from finintel.storage.db import STORAGE_WRITE_LOCK, _write_connection
 
 
 def seed_quality_database(path):
@@ -99,6 +105,200 @@ def test_quality_scan_persists_redacted_candidates_without_changing_prices(tmp_p
     assert all(item["review_state"] == "candidate" for item in stored["items"])
 
 
+def test_quality_fingerprint_includes_full_series_identity(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    with sqlite3.connect(db) as conn:
+        conn.executemany(
+            "INSERT INTO series(id, symbol, provider, frequency, adjustment, data_kind) "
+            "VALUES (?, 'AAPL', 'alpaca_sip', ?, ?, 'historical_eod')",
+            [(4, "1wk", "raw_unadjusted"), (5, "1d", "adjusted")],
+        )
+
+    common = {
+        "code": "AAPL",
+        "provider": "alpaca_sip",
+        "session_date": "2026-10-21",
+        "finding_type": "ohlcv_anomaly",
+        "severity": "error",
+        "confidence": "high",
+        "rule": "validated_ohlcv_constraints",
+        "evidence": {"invalid_fields": ["ohlc_order"]},
+    }
+    candidates = [
+        _candidate(series_id=1, adjustment="raw_unadjusted", frequency="1d", **common),
+        _candidate(series_id=4, adjustment="raw_unadjusted", frequency="1wk", **common),
+        _candidate(series_id=5, adjustment="adjusted", frequency="1d", **common),
+    ]
+    assert len({item["fingerprint"] for item in candidates}) == 3
+
+    _persist(db, candidates)
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0] == 3
+    _persist(db, candidates)
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0] == 3
+
+
+def test_repeated_quality_scans_reuse_finding_rows(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+
+    first = run_quality_scan(db)
+    with sqlite3.connect(db) as conn:
+        before = conn.execute(
+            "SELECT id, fingerprint FROM data_quality_findings ORDER BY id"
+        ).fetchall()
+
+    second = run_quality_scan(db)
+    with sqlite3.connect(db) as conn:
+        after = conn.execute(
+            "SELECT id, fingerprint FROM data_quality_findings ORDER BY id"
+        ).fetchall()
+
+    assert second["complete"] is True
+    assert second["truncated"] is False
+    assert second["finding_count"] == first["finding_count"]
+    assert after == before
+
+
+def test_quality_scan_reports_truncation_and_report_counts_all_known_findings(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+
+    result = run_quality_scan(db, max_findings=2)
+    assert result["status"] == "partial"
+    assert result["complete"] is False
+    assert result["truncated"] is True
+    assert result["findings_examined"] > result["findings_stored"] == 2
+    assert result["total_known_findings"] == result["findings_examined"]
+    assert result["persisted_findings_total"] == 2
+
+    report = quality_report(db, limit=1)
+    assert report["status"] == "partial"
+    assert report["truncated"] is True
+    assert report["total_known_findings"] == 2
+    assert report["findings_stored"] == 2
+    assert report["returned_count"] == 1
+    assert sum(report["review_states"].values()) == 2
+
+
+def test_quality_scan_does_not_hold_write_lock_during_read_only_scan(tmp_path, monkeypatch):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    entered = threading.Event()
+    release = threading.Event()
+    results = []
+    errors = []
+    original = quality_module._read_candidates
+
+    def blocked_read(path, max_findings):
+        entered.set()
+        if not release.wait(5):
+            raise AssertionError("test did not release the read phase")
+        return original(path, max_findings)
+
+    monkeypatch.setattr(quality_module, "_read_candidates", blocked_read)
+
+    def scan():
+        try:
+            results.append(run_quality_scan(db))
+        except (
+            AssertionError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            sqlite3.Error,
+            db_module.StorageError,
+        ) as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    thread = threading.Thread(target=scan)
+    thread.start()
+    assert entered.wait(5)
+    acquired = STORAGE_WRITE_LOCK.acquire(timeout=1)
+    release.set()
+    if acquired:
+        STORAGE_WRITE_LOCK.release()
+    thread.join(10)
+
+    assert acquired is True
+    assert not thread.is_alive()
+    assert errors == []
+    assert results and results[0]["status"] == "completed"
+
+
+def test_cross_provider_scan_handles_realistic_history_without_materializing_rows(tmp_path):
+    db = tmp_path / "performance.sqlite3"
+    symbols = [f"T{index:04d}" for index in range(12)]
+    sessions = [date(2025, 1, 2) + timedelta(days=index) for index in range(252)]
+    conn = _write_connection(db)
+    conn.executemany(
+        "INSERT INTO instruments(symbol, created_at) VALUES (?, '2026-10-31')",
+        [(symbol,) for symbol in symbols],
+    )
+    series_rows = []
+    ingestion_rows = []
+    price_rows = []
+    next_series = 100
+    for symbol in symbols:
+        for provider, offset in (("alpaca_sip", "0"), ("tiingo", "2")):
+            series_id = next_series
+            next_series += 1
+            series_rows.append(
+                (series_id, symbol, provider, "1d", "raw_unadjusted", "historical_eod")
+            )
+            ingestion_rows.append(
+                (
+                    series_id,
+                    series_id,
+                    f"performance-{series_id}",
+                    f"https://example.test/{provider}",
+                )
+            )
+            price_rows.extend(
+                (
+                    series_id,
+                    session.isoformat(),
+                    str(98 + index),
+                    str(103 + index),
+                    str(97 + index),
+                    str(100 + index + int(offset)),
+                    1000,
+                    series_id,
+                )
+                for index, session in enumerate(sessions)
+            )
+    conn.executemany(
+        "INSERT INTO series(id, symbol, provider, frequency, adjustment, data_kind) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        series_rows,
+    )
+    conn.executemany(
+        "INSERT INTO ingestion_runs "
+        "(id, series_id, retrieved_at, imported_at, payload_sha256, source_url, "
+        "provider_terms_url, first_session, last_session, observations, inserted, updated, unchanged, stale) "
+        "VALUES (?, ?, '2026-10-31T00:00:00+00:00', '2026-10-31T00:00:00+00:00', ?, ?, "
+        "'https://example.test/terms', '2025-01-02', '2025-09-10', 252, 252, 0, 0, 0)",
+        ingestion_rows,
+    )
+    conn.executemany(
+        "INSERT INTO daily_prices "
+        "(series_id, session_date, open, high, low, close, volume, retrieved_at, ingestion_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, '2026-10-31T00:00:00+00:00', ?)",
+        price_rows,
+    )
+    conn.commit()
+    conn.close()
+
+    started = time.monotonic()
+    result = run_quality_scan(db, max_findings=20)
+    elapsed = time.monotonic() - started
+    assert result["status"] == "partial"
+    assert result["findings_examined"] > result["findings_stored"] == 20
+    assert elapsed < 10
+
+
 def test_review_is_explicit_and_preserves_history(tmp_path):
     db = tmp_path / "quality.sqlite3"
     seed_quality_database(db)
@@ -178,7 +378,12 @@ def test_quality_api_scans_filters_and_reviews_with_managed_token(tmp_path, monk
     monkeypatch.setenv("FININTEL_DB_PATH", str(db))
     monkeypatch.setenv("FININTEL_PROCESS_TOKEN", token)
     with TestClient(app, headers={"x-finintel-process-token": token}) as client:
-        assert client.post("/api/v1/quality/scan", json={"max_findings": 10}).status_code == 200
+        scan = client.post("/api/v1/quality/scan", json={"max_findings": 10})
+        assert scan.status_code == 200
+        scan_payload = scan.json()
+        assert scan_payload["findings_examined"] == scan_payload["total_known_findings"]
+        assert scan_payload["findings_stored"] == scan_payload["finding_count"]
+        assert scan_payload["truncated"] is False
         response = client.get(
             "/api/v1/quality/findings",
             params={"finding_type": "provider_divergence", "limit": 10},
@@ -193,3 +398,7 @@ def test_quality_api_scans_filters_and_reviews_with_managed_token(tmp_path, monk
         )
         assert reviewed.status_code == 200
         assert reviewed.json()["review_state"] == "rejected"
+        report = client.get("/api/v1/quality/report", params={"limit": 1})
+        assert report.status_code == 200
+        assert report.json()["truncated"] is True
+        assert report.json()["total_known_findings"] == scan_payload["findings_stored"]

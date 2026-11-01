@@ -175,6 +175,7 @@ export function DataValidationPage() {
             </div>}
             {results.quality && <div className="space-y-2"><h3 className="font-semibold">{t("P0 · Durable quality findings")}</h3>
               <p className="text-sm text-muted-foreground">{t("Candidates are persisted with evidence and review state; no prices are changed.")} {t("Total candidates:")} {metric("quality", "finding_count")}.</p>
+              <p className="text-xs text-muted-foreground">{t("Scan status:")} {display(results.quality.status)} · {t("Findings examined:")} {metric("quality", "findings_examined")} · {t("Stored this scan:")} {metric("quality", "findings_stored")}{results.quality.truncated === true ? ` · ${t("Results truncated at the configured cap.")}` : ""}</p>
               {detailTable("quality", "examples", ["code", "provider", "session_date", "finding_type", "severity", "confidence", "rule"], "Quality candidates")}
             </div>}
             {results.performance && <div className="space-y-2"><h3 className="font-semibold">{t("P2 · Performance")}</h3>
