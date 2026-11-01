@@ -128,8 +128,8 @@ Only FRED index-level series are currently persisted for most indexes, so no
 cross-provider index-level equivalence is claimed. A later migration should
 store fully explicit currency/unit/return semantics for broader eligibility.
 
-Each significant overlap disagreement retains the two observed prices, their
-series IDs and import/retrieval revisions, comparison rule version, absolute and
+Each significant overlap disagreement retains the two observed prices and stable provider/symbol/session/retrieval metadata,
+comparison rule version, absolute and
 relative discrepancy, provider names, source policy, severity and confidence.
 The existing `overlapping_close_differs_over_1pct` fingerprint remains for
 backwards-compatible review continuity; its actual threshold is recorded in
