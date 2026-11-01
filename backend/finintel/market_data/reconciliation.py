@@ -85,6 +85,7 @@ def source_contract(row: Mapping[str, object]) -> dict | None:
     ):
         return None
     return {
+        "instrument_kind": "equity",
         "instrument": row["symbol"],
         "provider": row["provider"],
         "session_date": row["session_date"],
@@ -93,9 +94,10 @@ def source_contract(row: Mapping[str, object]) -> dict | None:
         "currency": "USD",
         "unit": "USD/share",
         "return_type": "price",
+        "index_return_type": None,
         "source_revision": {
+            # Database-local ingestion IDs may change on backup merges.
             "retrieved_at": row.get("retrieved_at"),
-            "ingestion_id": row.get("ingestion_id"),
         },
     }
 
@@ -137,7 +139,6 @@ def _observation(row: Mapping[str, object], contract: dict) -> dict:
 
     return {
         **contract,
-        "series_id": row["series_id"],
         "close": str(row["close"]),
     }
 
