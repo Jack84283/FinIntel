@@ -1,5 +1,6 @@
 """HTTP API for durable, reviewable local data-quality findings."""
 
+from datetime import date
 from decimal import Decimal
 from typing import Literal
 
@@ -34,6 +35,7 @@ class AnomalyThresholdRequest(BaseModel):
 class ScanRequest(BaseModel):
     max_findings: int = Field(default=1000, ge=1, le=10_000)
     thresholds: AnomalyThresholdRequest | None = None
+    as_of: date | None = None
 
 
 class ReviewRequest(BaseModel):
@@ -51,7 +53,10 @@ def scan(request: ScanRequest, http_request: Request) -> dict:
             else None
         )
         return run_quality_scan(
-            database_path(), max_findings=request.max_findings, thresholds=thresholds
+            database_path(),
+            max_findings=request.max_findings,
+            thresholds=thresholds,
+            as_of=request.as_of,
         )
     except FileNotFoundError as exc:
         raise HTTPException(
@@ -106,9 +111,12 @@ def review(finding_id: int, request: ReviewRequest, http_request: Request) -> di
 
 
 @router.get("/report")
-def report(limit: int = Query(default=500, ge=1, le=10_000)) -> dict:
+def report(
+    limit: int = Query(default=500, ge=1, le=10_000),
+    as_of: date | None = None,
+) -> dict:
     try:
-        return quality_report(database_path(), limit=limit)
+        return quality_report(database_path(), limit=limit, as_of=as_of)
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=503, detail="Local market database is unavailable."

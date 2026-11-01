@@ -221,10 +221,28 @@ def _merge(staging: Path, source: Path) -> None:
                 if "data_quality_scan_progress" in incoming_tables
                 else set()
             )
+            incoming_finding_columns = (
+                {
+                    row[1]
+                    for row in dest.execute("PRAGMA incoming.table_info(data_quality_findings)")
+                }
+                if "data_quality_findings" in incoming_tables
+                else set()
+            )
             incoming_cursor_fields = (
                 "cursor_phase,cursor_source_key"
                 if {"cursor_phase", "cursor_source_key"}.issubset(incoming_progress_columns)
                 else "'equity',NULL"
+            )
+            incoming_catalog_identity_field = (
+                "source_catalog_identity"
+                if "source_catalog_identity" in incoming_progress_columns
+                else "NULL"
+            )
+            incoming_validation_reference_field = (
+                "validation_reference_date"
+                if "validation_reference_date" in incoming_progress_columns
+                else "NULL"
             )
             with dest:
                 dest.execute("INSERT OR IGNORE INTO instruments SELECT * FROM incoming.instruments")
@@ -282,6 +300,18 @@ def _merge(staging: Path, source: Path) -> None:
                         "SELECT f.id,f.instrument_kind,f.code,f.provider,f.session_date,"
                         "f.finding_type,f.severity,f.confidence,f.rule,f.evidence_json,"
                         "f.review_state,f.resolution_note,f.created_at,f.updated_at,"
+                        + (
+                            "f.superseded_at"
+                            if "superseded_at" in incoming_finding_columns
+                            else "NULL"
+                        )
+                        + ","
+                        + (
+                            "f.supersession_reason"
+                            if "supersession_reason" in incoming_finding_columns
+                            else "NULL"
+                        )
+                        + ","
                         "map.new_id,dst_series.adjustment,dst_series.frequency "
                         "FROM incoming.data_quality_findings f "
                         "LEFT JOIN _series_map map ON map.old_id=f.series_id "
@@ -294,14 +324,14 @@ def _merge(staging: Path, source: Path) -> None:
                     for row in source_rows:
                         fingerprint = _fingerprint(
                             instrument_kind=row[1],
-                            series_id=row[14],
+                            series_id=row[16],
                             code=row[2],
                             provider=row[3],
                             session_date=row[4],
                             finding_type=row[5],
                             rule=row[8],
-                            adjustment=row[15],
-                            frequency=row[16],
+                            adjustment=("price_index" if row[1] == "index" else row[17]),
+                            frequency="1d" if row[1] == "index" else row[18],
                         )
                         source_fingerprints.append((row[0], fingerprint))
                         transformed.append(
@@ -310,7 +340,7 @@ def _merge(staging: Path, source: Path) -> None:
                                 row[0],
                                 row[1],
                                 row[2],
-                                row[14],
+                                row[16],
                                 row[3],
                                 row[4],
                                 row[5],
@@ -322,6 +352,8 @@ def _merge(staging: Path, source: Path) -> None:
                                 row[11],
                                 row[12],
                                 row[13],
+                                row[14],
+                                row[15],
                             )
                         )
                     # Multiple source rows can collapse to one destination
@@ -339,8 +371,9 @@ def _merge(staging: Path, source: Path) -> None:
                             "INSERT INTO data_quality_findings("
                             "instrument_kind,code,series_id,provider,session_date,finding_type,"
                             "severity,confidence,rule,evidence_json,fingerprint,review_state,"
-                            "resolution_note,created_at,updated_at) "
-                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                            "resolution_note,created_at,updated_at,superseded_at,"
+                            "supersession_reason) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                             "ON CONFLICT(fingerprint) DO UPDATE SET "
                             "instrument_kind=excluded.instrument_kind,code=excluded.code,"
                             "series_id=excluded.series_id,provider=excluded.provider,"
@@ -348,7 +381,10 @@ def _merge(staging: Path, source: Path) -> None:
                             "severity=excluded.severity,confidence=excluded.confidence,"
                             "rule=excluded.rule,evidence_json=excluded.evidence_json,"
                             "review_state=excluded.review_state,"
-                            "resolution_note=excluded.resolution_note,updated_at=excluded.updated_at "
+                            "resolution_note=excluded.resolution_note,"
+                            "superseded_at=excluded.superseded_at,"
+                            "supersession_reason=excluded.supersession_reason,"
+                            "updated_at=excluded.updated_at "
                             "WHERE excluded.updated_at > data_quality_findings.updated_at",
                             item[2:12] + (item[0],) + item[12:],
                         )
@@ -398,12 +434,17 @@ def _merge(staging: Path, source: Path) -> None:
                             "source_data_version_end,cursor_start,cursor_next,max_findings,"
                             "findings_examined,findings_stored,total_known_findings,"
                             "persisted_findings_total,status,stale,updated_at,last_run_key,"
-                            "cursor_phase,cursor_source_key) "
+                            "cursor_phase,cursor_source_key,source_catalog_identity,"
+                            "validation_reference_date) "
                             "SELECT scan_key,source_identity,source_data_version_start,"
                             "source_data_version_end,cursor_start,cursor_next,max_findings,"
                             "findings_examined,findings_stored,total_known_findings,"
                             "persisted_findings_total,status,stale,updated_at,last_run_key,"
                             + incoming_cursor_fields
+                            + ","
+                            + incoming_catalog_identity_field
+                            + ","
+                            + incoming_validation_reference_field
                             + " FROM incoming.data_quality_scan_progress WHERE 1 "
                             "ON CONFLICT(scan_key) DO UPDATE SET "
                             "source_identity=excluded.source_identity,"
@@ -417,7 +458,9 @@ def _merge(staging: Path, source: Path) -> None:
                             "persisted_findings_total=excluded.persisted_findings_total,"
                             "status=excluded.status,stale=excluded.stale,"
                             "updated_at=excluded.updated_at,last_run_key=excluded.last_run_key,"
-                            "cursor_phase=excluded.cursor_phase,cursor_source_key=excluded.cursor_source_key "
+                            "cursor_phase=excluded.cursor_phase,cursor_source_key=excluded.cursor_source_key,"
+                            "source_catalog_identity=excluded.source_catalog_identity,"
+                            "validation_reference_date=excluded.validation_reference_date "
                             "WHERE excluded.updated_at > data_quality_scan_progress.updated_at"
                         )
                 dest.execute(

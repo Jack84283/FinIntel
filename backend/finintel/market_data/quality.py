@@ -26,6 +26,14 @@ from finintel.market_data.anomaly_quality import (
     volume_spike_candidate,
     zero_volume_candidate,
 )
+from finintel.market_data.calendar_quality import (
+    CALENDAR_RULE_VERSION,
+    CalendarEvidence,
+    classify_missing_session_gap,
+    default_calendar_name,
+    evidence_identity,
+    normalize_evidence,
+)
 from finintel.storage.db import _read_connection, _write_connection, serialized_storage_write
 
 FINDING_TYPES = (
@@ -77,6 +85,29 @@ def _fingerprint(
         identity["identity_extra"] = identity_extra
     value = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     return sha256(value.encode("utf-8")).hexdigest()
+
+
+def _legacy_fingerprint(
+    *,
+    code: str,
+    provider: str,
+    session_date: str | None,
+    finding_type: str,
+    rule: str,
+) -> str:
+    """Return the PR #38 fingerprint with null index dimensions."""
+
+    return _fingerprint(
+        instrument_kind="index",
+        series_id=None,
+        code=code,
+        provider=provider,
+        session_date=session_date,
+        finding_type=finding_type,
+        rule=rule,
+        adjustment=None,
+        frequency=None,
+    )
 
 
 def _candidate(
@@ -131,6 +162,32 @@ def _decimal(value: object) -> object:
     except (InvalidOperation, ValueError):
         return None
     return parsed if parsed.is_finite() else None
+
+
+def _calendar_evidence_for(
+    calendar_evidence: Mapping[object, object] | None,
+    *,
+    series_id: int | None,
+    symbol: str,
+    provider: str,
+) -> CalendarEvidence:
+    """Resolve explicit evidence by series, symbol/provider pair, or symbol."""
+
+    if not calendar_evidence:
+        return CalendarEvidence()
+    for key in (series_id, (symbol, provider), symbol):
+        if key in calendar_evidence:
+            return normalize_evidence(calendar_evidence[key])
+    return CalendarEvidence()
+
+
+def _calendar_policy_identity(calendar_evidence: object) -> dict:
+    if isinstance(calendar_evidence, Mapping):
+        return {
+            str(key): evidence_identity(value)
+            for key, value in sorted(calendar_evidence.items(), key=lambda item: str(item[0]))
+        }
+    return evidence_identity(calendar_evidence)
 
 
 def _ingestion_anomaly_candidates(
@@ -302,6 +359,7 @@ def _ingestion_anomaly_candidates(
                     "stale_imports": stale_imports,
                     "revision_events": revision_events,
                     "revision_status": "provider_revision_requires_review",
+                    "validation_reference_date": as_of.isoformat(),
                     "thresholds": policy,
                 },
             )
@@ -369,6 +427,7 @@ def _ingestion_anomaly_candidates(
                         else None
                     ),
                     "as_of": as_of.isoformat(),
+                    "validation_reference_date": as_of.isoformat(),
                     "thresholds": policy,
                 },
             )
@@ -584,6 +643,7 @@ def _read_candidates(
     max_findings: int,
     *,
     checkpoint: dict[str, object] | None = None,
+    calendar_evidence: Mapping[object, object] | None = None,
     thresholds: AnomalyThresholds | Mapping[str, object] | None = None,
     as_of: date | None = None,
 ) -> tuple[list[dict], int, dict[str, object], bool]:
@@ -620,8 +680,9 @@ def _read_candidates(
         select_sql=(
             "SELECT s.id AS series_id, s.symbol, s.provider, s.frequency, s.adjustment, "
             "dp.session_date, dp.open, dp.high, dp.low, dp.close, dp.volume, "
-            "dp.ingestion_id, dp.retrieved_at "
-            "FROM series AS s JOIN daily_prices AS dp ON dp.series_id = s.id"
+            "dp.ingestion_id, dp.retrieved_at, c.exchange AS exchange "
+            "FROM series AS s JOIN daily_prices AS dp ON dp.series_id = s.id "
+            "LEFT JOIN symbol_catalog AS c ON c.symbol = s.symbol"
         ),
         order_expression="s.id, dp.session_date",
         key_columns=("series_id", "session_date"),
@@ -845,13 +906,25 @@ def _read_candidates(
                     )
 
                 if previous and current_date > previous[0] + timedelta(days=1):
-                    missing_weekdays = []
-                    cursor = previous[0] + timedelta(days=1)
-                    while cursor < current_date:
-                        if cursor.weekday() < 5:
-                            missing_weekdays.append(cursor.isoformat())
-                        cursor += timedelta(days=1)
-                    if missing_weekdays:
+                    evidence = _calendar_evidence_for(
+                        calendar_evidence,
+                        series_id=series_id,
+                        symbol=row["symbol"],
+                        provider=row["provider"],
+                    )
+                    calendar_name = evidence.calendar_name or default_calendar_name(
+                        instrument_kind="equity",
+                        code=row["symbol"],
+                        exchange=row["exchange"],
+                    )
+                    for missing in classify_missing_session_gap(
+                        previous[0],
+                        current_date,
+                        calendar_name=calendar_name,
+                        provider=row["provider"],
+                        evidence=evidence,
+                        as_of=as_of,
+                    ):
                         add(
                             _candidate(
                                 series_id=series_id,
@@ -859,17 +932,12 @@ def _read_candidates(
                                 provider=row["provider"],
                                 adjustment=row["adjustment"],
                                 frequency=row["frequency"],
-                                session_date=current_date.isoformat(),
+                                session_date=missing["session_date"].isoformat(),
                                 finding_type="missing_session",
-                                severity="warning",
-                                confidence="low",
-                                rule="weekday_gap_candidate",
-                                evidence={
-                                    "previous_session": previous[0].isoformat(),
-                                    "next_session": current_date.isoformat(),
-                                    "weekday_candidates": missing_weekdays[:31],
-                                    "calendar_applied": False,
-                                },
+                                severity=missing["severity"],
+                                confidence=missing["confidence"],
+                                rule=missing["rule"],
+                                evidence=missing["evidence"],
                             )
                         )
                 if volume_value is not None and volume_value >= 0:
@@ -944,6 +1012,8 @@ def _read_candidates(
                             confidence="high",
                             rule="invalid_index_session_date",
                             evidence={"session_date": str(session_date)},
+                            adjustment="price_index",
+                            frequency="1d",
                         )
                     )
                     finish_source()
@@ -964,6 +1034,8 @@ def _read_candidates(
                             confidence="high",
                             rule="positive_finite_index_close",
                             evidence={"close": str(row["close"])},
+                            adjustment="price_index",
+                            frequency="1d",
                         )
                     )
                 if previous:
@@ -994,30 +1066,37 @@ def _read_candidates(
                             )
                         )
                 if previous and current_date > previous[0] + timedelta(days=1):
-                    missing_weekdays = []
-                    cursor = previous[0] + timedelta(days=1)
-                    while cursor < current_date:
-                        if cursor.weekday() < 5:
-                            missing_weekdays.append(cursor.isoformat())
-                        cursor += timedelta(days=1)
-                    if missing_weekdays:
+                    evidence = _calendar_evidence_for(
+                        calendar_evidence,
+                        series_id=None,
+                        symbol=index_code,
+                        provider=provider,
+                    )
+                    calendar_name = evidence.calendar_name or default_calendar_name(
+                        instrument_kind="index", code=index_code
+                    )
+                    for missing in classify_missing_session_gap(
+                        previous[0],
+                        current_date,
+                        calendar_name=calendar_name,
+                        provider=provider,
+                        evidence=evidence,
+                        as_of=as_of,
+                    ):
                         add(
                             _candidate(
                                 instrument_kind="index",
                                 series_id=None,
                                 code=index_code,
                                 provider=provider,
-                                session_date=current_date.isoformat(),
+                                session_date=missing["session_date"].isoformat(),
                                 finding_type="missing_session",
-                                severity="warning",
-                                confidence="low",
-                                rule="weekday_gap_candidate",
-                                evidence={
-                                    "previous_session": previous[0].isoformat(),
-                                    "next_session": current_date.isoformat(),
-                                    "weekday_candidates": missing_weekdays[:31],
-                                    "calendar_applied": False,
-                                },
+                                severity=missing["severity"],
+                                confidence=missing["confidence"],
+                                rule=missing["rule"],
+                                evidence=missing["evidence"],
+                                adjustment="price_index",
+                                frequency="1d",
                             )
                         )
                 if close is not None and close > 0:
@@ -1087,53 +1166,222 @@ def _read_candidates(
     return findings, findings_examined, resume_cursor, not page_full
 
 
+def _index_finding_fingerprint(
+    row: sqlite3.Row,
+    *,
+    rule: str,
+    adjustment: str | None,
+    frequency: str | None,
+) -> str:
+    return _fingerprint(
+        instrument_kind="index",
+        series_id=None,
+        code=row["code"],
+        provider=row["provider"],
+        session_date=row["session_date"],
+        finding_type=row["finding_type"],
+        rule=rule,
+        adjustment=adjustment,
+        frequency=frequency,
+    )
+
+
+def _canonical_index_rule(rule: str) -> str:
+    if rule in {"close_jump_over_2x_or_under_half", "price_jump_candidate"}:
+        return "price_jump_candidate"
+    return rule
+
+
+def _superseded_fingerprint(conn: sqlite3.Connection, target: str, finding_id: int) -> str:
+    value = sha256(f"{target}:superseded:{finding_id}".encode()).hexdigest()
+    while conn.execute(
+        "SELECT 1 FROM data_quality_findings WHERE fingerprint=?", (value,)
+    ).fetchone():
+        value = sha256(f"{value}:retry".encode()).hexdigest()
+    return value
+
+
+def _reconcile_legacy_index_fingerprints(conn: sqlite3.Connection, now: str) -> None:
+    """Upgrade PR #38/39 index price fingerprints without losing audit state.
+
+    PR #38 omitted index dimensions, while PR #39 added ``price_index``/``1d``
+    but still used the old price-jump rule name.  The anomaly engine uses the
+    canonical ``price_jump_candidate`` rule.  All three identities therefore
+    converge on one active row, with the oldest PR #38 row preferred as the
+    canonical ID when it exists.  Colliding rows remain queryable as
+    superseded records and their review events are moved to the canonical row.
+    """
+
+    rows = conn.execute(
+        "SELECT id,code,provider,session_date,finding_type,rule,fingerprint,"
+        "review_state,resolution_note,updated_at "
+        "FROM data_quality_findings "
+        "WHERE instrument_kind='index' AND finding_type='price_anomaly' "
+        "AND superseded_at IS NULL ORDER BY id"
+    ).fetchall()
+    groups: dict[str, list[tuple[int, sqlite3.Row]]] = {}
+    for row in rows:
+        canonical_rule = _canonical_index_rule(row["rule"])
+        target = _index_finding_fingerprint(
+            row, rule=canonical_rule, adjustment="price_index", frequency="1d"
+        )
+        legacy_null = _index_finding_fingerprint(
+            row, rule=row["rule"], adjustment=None, frequency=None
+        )
+        dimensioned_current_rule = _index_finding_fingerprint(
+            row, rule=row["rule"], adjustment="price_index", frequency="1d"
+        )
+        if row["fingerprint"] == target:
+            continue
+        if row["fingerprint"] == legacy_null:
+            priority = 0
+        elif row["fingerprint"] == dimensioned_current_rule:
+            priority = 1 if row["rule"] in {"close_jump_over_2x_or_under_half"} else 2
+        else:
+            continue
+        groups.setdefault(target, []).append((priority, row))
+
+    for target, entries in groups.items():
+        canonical_priority, canonical = min(entries, key=lambda item: (item[0], int(item[1]["id"])))
+        del canonical_priority
+        collisions = conn.execute(
+            "SELECT id,review_state,resolution_note,updated_at "
+            "FROM data_quality_findings WHERE fingerprint=? AND id<>?",
+            (target, canonical["id"]),
+        ).fetchall()
+        duplicates = [row for _, row in entries if row["id"] != canonical["id"]]
+        duplicates.extend(collisions)
+        for duplicate in duplicates:
+            conn.execute(
+                "UPDATE data_quality_reviews SET finding_id=? WHERE finding_id=?",
+                (canonical["id"], duplicate["id"]),
+            )
+            if (
+                canonical["review_state"] == "candidate"
+                and duplicate["review_state"] != "candidate"
+            ):
+                conn.execute(
+                    "UPDATE data_quality_findings SET review_state=?, resolution_note=?, "
+                    "updated_at=? WHERE id=?",
+                    (
+                        duplicate["review_state"],
+                        duplicate["resolution_note"],
+                        now,
+                        canonical["id"],
+                    ),
+                )
+            conn.execute(
+                "UPDATE data_quality_findings SET fingerprint=?, superseded_at=?, "
+                "supersession_reason=?, updated_at=? WHERE id=?",
+                (
+                    _superseded_fingerprint(conn, target, duplicate["id"]),
+                    now,
+                    "Reconciled duplicate of a legacy index price anomaly",
+                    now,
+                    duplicate["id"],
+                ),
+            )
+        conn.execute(
+            "UPDATE data_quality_findings SET fingerprint=?, updated_at=? WHERE id=?",
+            (target, now, canonical["id"]),
+        )
+
+
+def _reconcile_legacy_equity_price_fingerprints(conn: sqlite3.Connection, now: str) -> None:
+    """Keep PR #40's pre-engine equity price-jump rows on their original IDs."""
+
+    rows = conn.execute(
+        "SELECT f.id,f.code,f.series_id,f.provider,f.session_date,f.finding_type,f.rule,"
+        "f.fingerprint,f.review_state,f.resolution_note,s.adjustment,s.frequency "
+        "FROM data_quality_findings f LEFT JOIN series s ON s.id=f.series_id "
+        "WHERE f.instrument_kind='equity' AND f.finding_type='price_anomaly' "
+        "AND f.rule='close_jump_over_2x_or_under_half' AND f.superseded_at IS NULL "
+        "ORDER BY f.id"
+    ).fetchall()
+    for row in rows:
+        legacy = _fingerprint(
+            instrument_kind="equity",
+            series_id=row["series_id"],
+            code=row["code"],
+            provider=row["provider"],
+            session_date=row["session_date"],
+            finding_type=row["finding_type"],
+            rule=row["rule"],
+            adjustment=row["adjustment"],
+            frequency=row["frequency"],
+        )
+        if row["fingerprint"] != legacy:
+            continue
+        target = _fingerprint(
+            instrument_kind="equity",
+            series_id=row["series_id"],
+            code=row["code"],
+            provider=row["provider"],
+            session_date=row["session_date"],
+            finding_type=row["finding_type"],
+            rule="price_jump_candidate",
+            adjustment=row["adjustment"],
+            frequency=row["frequency"],
+        )
+        collision = conn.execute(
+            "SELECT id,review_state,resolution_note FROM data_quality_findings "
+            "WHERE fingerprint=? AND id<>?",
+            (target, row["id"]),
+        ).fetchone()
+        if collision is not None:
+            conn.execute(
+                "UPDATE data_quality_reviews SET finding_id=? WHERE finding_id=?",
+                (row["id"], collision["id"]),
+            )
+            if row["review_state"] == "candidate" and collision["review_state"] != "candidate":
+                conn.execute(
+                    "UPDATE data_quality_findings SET review_state=?, resolution_note=?, "
+                    "updated_at=? WHERE id=?",
+                    (collision["review_state"], collision["resolution_note"], now, row["id"]),
+                )
+            conn.execute(
+                "UPDATE data_quality_findings SET fingerprint=?, superseded_at=?, "
+                "supersession_reason=?, updated_at=? WHERE id=?",
+                (
+                    _superseded_fingerprint(conn, target, collision["id"]),
+                    now,
+                    "Reconciled duplicate of a legacy equity price anomaly",
+                    now,
+                    collision["id"],
+                ),
+            )
+        conn.execute(
+            "UPDATE data_quality_findings SET fingerprint=?, rule=?, updated_at=? WHERE id=?",
+            (target, "price_jump_candidate", now, row["id"]),
+        )
+
+
 @serialized_storage_write
 def _ensure_quality_schema(path: Path) -> None:
     """Run any required migrations while holding the short write lock."""
 
     connection = _write_connection(path)
-    connection.close()
+    try:
+        connection.execute("BEGIN")
+        _reconcile_legacy_equity_price_fingerprints(connection, _iso_now())
+        _reconcile_legacy_index_fingerprints(connection, _iso_now())
+        connection.commit()
+    except sqlite3.Error:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 @serialized_storage_write
-def _persist(path: Path, candidates: list[dict]) -> None:
+def _persist(path: Path, candidates: list[dict], *, supersede_legacy: bool = False) -> None:
     conn = _write_connection(path)
     try:
         conn.execute("BEGIN")
         now = _iso_now()
+        _reconcile_legacy_equity_price_fingerprints(conn, now)
+        _reconcile_legacy_index_fingerprints(conn, now)
         for item in candidates:
-            # PR #38 used the fixed threshold rule name. Upgrade that row to
-            # the configurable rule identity before the normal upsert so a
-            # scan after this feature does not strand its review history on a
-            # duplicate finding.
-            if item["rule"] == "price_jump_candidate":
-                legacy_fingerprint = _fingerprint(
-                    instrument_kind=item["instrument_kind"],
-                    series_id=item["series_id"],
-                    code=item["code"],
-                    provider=item["provider"],
-                    session_date=item["session_date"],
-                    finding_type=item["finding_type"],
-                    rule="close_jump_over_2x_or_under_half",
-                    adjustment=(
-                        item["adjustment"] if item["instrument_kind"] == "equity" else None
-                    ),
-                    frequency=(item["frequency"] if item["instrument_kind"] == "equity" else None),
-                )
-                if legacy_fingerprint != item["fingerprint"]:
-                    legacy_row = conn.execute(
-                        "SELECT id FROM data_quality_findings WHERE fingerprint=?",
-                        (legacy_fingerprint,),
-                    ).fetchone()
-                    current_row = conn.execute(
-                        "SELECT id FROM data_quality_findings WHERE fingerprint=?",
-                        (item["fingerprint"],),
-                    ).fetchone()
-                    if legacy_row is not None and current_row is None:
-                        conn.execute(
-                            "UPDATE data_quality_findings SET fingerprint=? WHERE id=?",
-                            (item["fingerprint"], legacy_row["id"]),
-                        )
             conn.execute(
                 "INSERT INTO data_quality_findings "
                 "(instrument_kind, code, series_id, provider, session_date, finding_type, "
@@ -1156,6 +1404,18 @@ def _persist(path: Path, candidates: list[dict]) -> None:
                     json.dumps(item["evidence"], sort_keys=True, separators=(",", ":")),
                     item["fingerprint"],
                     now,
+                    now,
+                ),
+            )
+        if supersede_legacy:
+            conn.execute(
+                "UPDATE data_quality_findings SET superseded_at=?, "
+                "supersession_reason=?, updated_at=? "
+                "WHERE finding_type='missing_session' "
+                "AND rule='weekday_gap_candidate' AND superseded_at IS NULL",
+                (
+                    now,
+                    "Reclassified by calendar-aware missing-session validation",
                     now,
                 ),
             )
@@ -1240,10 +1500,12 @@ def _stored_finding_summary(path: Path) -> tuple[int, dict[str, int]]:
             is None
         ):
             return 0, {}
-        total = conn.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0]
+        total = conn.execute(
+            "SELECT COUNT(*) FROM data_quality_findings WHERE superseded_at IS NULL"
+        ).fetchone()[0]
         rows = conn.execute(
             "SELECT review_state, COUNT(*) AS count FROM data_quality_findings "
-            "GROUP BY review_state"
+            "WHERE superseded_at IS NULL GROUP BY review_state"
         ).fetchall()
         return int(total), {row["review_state"]: int(row["count"]) for row in rows}
     finally:
@@ -1268,6 +1530,33 @@ def _latest_scan_run(path: Path) -> dict | None:
             ",run_key FROM data_quality_scan_runs ORDER BY completed_at DESC, id DESC LIMIT 1"
         ).fetchone()
         return dict(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def _source_catalog_identity(path: Path) -> str | None:
+    """Return the exact venue mapping consumed by calendar selection."""
+
+    conn = _read_connection(path, snapshot=False)
+    if conn is None:
+        raise FileNotFoundError(path)
+    try:
+        if (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='symbol_catalog'"
+            ).fetchone()
+            is None
+        ):
+            return None
+        digest = sha256()
+        for row in conn.execute("SELECT symbol, exchange FROM symbol_catalog ORDER BY symbol"):
+            digest.update(
+                json.dumps([row[0], row[1]], separators=(",", ":"), ensure_ascii=False).encode(
+                    "utf-8"
+                )
+            )
+            digest.update(b"\n")
+        return digest.hexdigest()
     finally:
         conn.close()
 
@@ -1299,6 +1588,7 @@ def _source_identity(path: Path) -> str:
                 "SELECT COUNT(*), COALESCE(MAX(id), 0), "
                 "COALESCE(MAX(retrieved_at), '') FROM index_ingestion_runs"
             ).fetchone(),
+            "symbol_catalog_calendar": _source_catalog_identity(path),
         }
         normalized = {
             key: list(value) if isinstance(value, sqlite3.Row) else value
@@ -1311,8 +1601,22 @@ def _source_identity(path: Path) -> str:
         conn.close()
 
 
-def _scan_source_identity(source_identity: str, thresholds: AnomalyThresholds) -> str:
-    policy = {"source_identity": source_identity, "thresholds": thresholds_identity(thresholds)}
+def _scan_source_identity(
+    source_identity: str,
+    thresholds: AnomalyThresholds,
+    *,
+    calendar_evidence: object = None,
+    validation_reference_date: date | None = None,
+) -> str:
+    policy = {
+        "source_identity": source_identity,
+        "thresholds": thresholds_identity(thresholds),
+        "calendar_rule_version": CALENDAR_RULE_VERSION,
+        "calendar_evidence": _calendar_policy_identity(calendar_evidence),
+        "validation_reference_date": (
+            validation_reference_date.isoformat() if validation_reference_date else None
+        ),
+    }
     return sha256(json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -1379,12 +1683,22 @@ def _scan_progress(path: Path) -> dict | None:
             if {"cursor_phase", "cursor_source_key"}.issubset(columns)
             else "'equity' AS cursor_phase,NULL AS cursor_source_key"
         )
+        catalog_identity_field = (
+            "source_catalog_identity" if "source_catalog_identity" in columns else "NULL"
+        )
+        validation_reference_field = (
+            "validation_reference_date" if "validation_reference_date" in columns else "NULL"
+        )
         row = conn.execute(
             "SELECT scan_key,source_identity,source_data_version_start,"
             "source_data_version_end,cursor_start,cursor_next,max_findings,"
             "findings_examined,findings_stored,total_known_findings,"
             "persisted_findings_total,status,stale,updated_at,last_run_key,"
             + cursor_fields
+            + ","
+            + catalog_identity_field
+            + ","
+            + validation_reference_field
             + " FROM data_quality_scan_progress WHERE scan_key = ?",
             (_SCAN_KEY,),
         ).fetchone()
@@ -1413,6 +1727,8 @@ def _persist_scan_progress(
     last_run_key: str,
     cursor_phase: str,
     cursor_source_key: str | None,
+    source_catalog_identity: str | None,
+    validation_reference_date: str,
 ) -> None:
     conn = _write_connection(path)
     try:
@@ -1422,8 +1738,9 @@ def _persist_scan_progress(
             "scan_key,source_identity,source_data_version_start,source_data_version_end,"
             "cursor_start,cursor_next,max_findings,findings_examined,findings_stored,"
             "total_known_findings,persisted_findings_total,status,stale,updated_at,last_run_key,"
-            "cursor_phase,cursor_source_key) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "cursor_phase,cursor_source_key,source_catalog_identity,"
+            "validation_reference_date) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(scan_key) DO UPDATE SET "
             "source_identity=excluded.source_identity,"
             "source_data_version_start=excluded.source_data_version_start,"
@@ -1436,7 +1753,9 @@ def _persist_scan_progress(
             "persisted_findings_total=excluded.persisted_findings_total,"
             "status=excluded.status,stale=excluded.stale,updated_at=excluded.updated_at,"
             "last_run_key=excluded.last_run_key,cursor_phase=excluded.cursor_phase,"
-            "cursor_source_key=excluded.cursor_source_key",
+            "cursor_source_key=excluded.cursor_source_key,"
+            "source_catalog_identity=excluded.source_catalog_identity,"
+            "validation_reference_date=excluded.validation_reference_date",
             (
                 _SCAN_KEY,
                 source_identity,
@@ -1455,6 +1774,8 @@ def _persist_scan_progress(
                 last_run_key,
                 cursor_phase,
                 cursor_source_key,
+                source_catalog_identity,
+                validation_reference_date,
             ),
         )
         conn.commit()
@@ -1469,6 +1790,7 @@ def run_quality_scan(
     path: Path,
     *,
     max_findings: int = 1000,
+    calendar_evidence: Mapping[object, object] | None = None,
     thresholds: AnomalyThresholds | Mapping[str, object] | None = None,
     as_of: date | None = None,
 ) -> dict:
@@ -1487,7 +1809,13 @@ def run_quality_scan(
     started_at = _iso_now()
     _ensure_quality_schema(path)
     database_identity = _source_identity(path)
-    source_identity = _scan_source_identity(database_identity, thresholds)
+    source_catalog_identity = _source_catalog_identity(path)
+    source_identity = _scan_source_identity(
+        database_identity,
+        thresholds,
+        calendar_evidence=calendar_evidence,
+        validation_reference_date=as_of,
+    )
     source_data_version_start = _source_data_version(path)
     progress = _scan_progress(path)
     checkpoint = {"phase": "equity", "source_key": None}
@@ -1507,6 +1835,7 @@ def run_quality_scan(
         path,
         max_findings,
         checkpoint=checkpoint,
+        calendar_evidence=calendar_evidence,
         thresholds=thresholds,
         as_of=as_of,
     )
@@ -1515,7 +1844,8 @@ def run_quality_scan(
         source_data_version_end != source_data_version_start
         or _source_identity(path) != database_identity
     )
-    _persist(path, candidates)
+    scan_complete = exhausted and not source_changed
+    _persist(path, candidates, supersede_legacy=scan_complete)
     findings_stored = len(candidates)
     persisted_findings_total, _ = _stored_finding_summary(path)
     previous_examined = (
@@ -1534,7 +1864,7 @@ def run_quality_scan(
     cursor_next = cursor_start + findings_stored
     stale = source_changed
     truncated = not exhausted and not stale
-    complete = not truncated and not stale
+    complete = scan_complete
     status = "completed" if complete else "partial"
     completed_at = _iso_now()
     scan_id, run_key = _persist_scan_run(
@@ -1571,6 +1901,8 @@ def run_quality_scan(
         if not complete
         else "complete",
         cursor_source_key=None if stale or complete else _encode_source_key(next_checkpoint),
+        source_catalog_identity=source_catalog_identity,
+        validation_reference_date=as_of.isoformat(),
     )
     counts = Counter(item["finding_type"] for item in candidates)
     severity = Counter(item["severity"] for item in candidates)
@@ -1582,6 +1914,8 @@ def run_quality_scan(
         "stale": stale,
         "anomaly_rule_version": ANOMALY_RULE_VERSION,
         "thresholds": thresholds_identity(thresholds),
+        "calendar_rule_version": CALENDAR_RULE_VERSION,
+        "validation_reference_date": as_of.isoformat(),
         "source_data_version_start": source_data_version_start,
         "source_data_version_end": source_data_version_end,
         "cursor_start": cursor_start,
@@ -1641,7 +1975,9 @@ def list_findings(
                 "truncated": False,
                 "items": [],
             }
-        clauses = []
+        # Superseded legacy classifications remain queryable through their ID
+        # and retain review history, but are not active findings in reports.
+        clauses = ["superseded_at IS NULL"]
         params: list[object] = []
         for column, value in (
             ("finding_type", finding_type),
@@ -1659,7 +1995,8 @@ def list_findings(
         rows = conn.execute(
             "SELECT id, instrument_kind, code, series_id, provider, session_date, finding_type, "
             "severity, confidence, rule, evidence_json, fingerprint, review_state, "
-            "resolution_note, created_at, updated_at FROM data_quality_findings"
+            "resolution_note, superseded_at, supersession_reason, created_at, updated_at "
+            "FROM data_quality_findings"
             + where
             + " ORDER BY session_date IS NULL, session_date, id LIMIT ? OFFSET ?",
             [*params, limit, offset],
@@ -1668,6 +2005,7 @@ def list_findings(
         for row in rows:
             item = dict(row)
             item["evidence"] = json.loads(item.pop("evidence_json"))
+            item["superseded"] = item["superseded_at"] is not None
             items.append(item)
         returned_count = len(items)
         return {
@@ -1724,24 +2062,28 @@ def _get_finding(path: Path, finding_id: int) -> dict:
         row = conn.execute(
             "SELECT id, instrument_kind, code, series_id, provider, session_date, finding_type, "
             "severity, confidence, rule, evidence_json, fingerprint, review_state, "
-            "resolution_note, created_at, updated_at FROM data_quality_findings WHERE id = ?",
+            "resolution_note, superseded_at, supersession_reason, created_at, updated_at "
+            "FROM data_quality_findings WHERE id = ?",
             (finding_id,),
         ).fetchone()
         if row is None:
             raise KeyError("Finding not found")
         item = dict(row)
         item["evidence"] = json.loads(item.pop("evidence_json"))
+        item["superseded"] = item["superseded_at"] is not None
         return item
     finally:
         conn.close()
 
 
-def quality_report(path: Path, *, limit: int = 500) -> dict:
+def quality_report(path: Path, *, limit: int = 500, as_of: date | None = None) -> dict:
+    validation_reference_date = as_of or datetime.now(UTC).date()
     findings = list_findings(path, limit=limit)
     persisted_findings_total, counts = _stored_finding_summary(path)
     scan_run = _latest_scan_run(path)
     progress = _scan_progress(path)
     current_source_data_version = _source_data_version(path)
+    current_source_catalog_identity = _source_catalog_identity(path)
     scan_metadata_available = (
         scan_run is not None
         and progress is not None
@@ -1758,8 +2100,24 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
         and progress["source_data_version_end"] is not None
         and current_source_data_version != progress["source_data_version_end"]
     )
+    source_catalog_identity_changed = scan_metadata_available and (
+        progress.get("source_catalog_identity") is None
+        or current_source_catalog_identity != progress["source_catalog_identity"]
+    )
+    saved_validation_reference_date = (
+        progress.get("validation_reference_date") if scan_metadata_available else None
+    )
+    validation_reference_date_changed = scan_metadata_available and (
+        saved_validation_reference_date is not None
+        and saved_validation_reference_date != validation_reference_date.isoformat()
+    )
     scan_stale = (
-        bool(progress["stale"]) or source_revision_changed if scan_metadata_available else False
+        bool(progress["stale"])
+        or source_revision_changed
+        or source_catalog_identity_changed
+        or validation_reference_date_changed
+        if scan_metadata_available
+        else False
     )
     scan_complete = (
         scan_metadata_available
@@ -1792,6 +2150,11 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
         "total_known_findings": total_known_findings,
         "persisted_findings_total": persisted_findings_total,
         "source_data_version_current": current_source_data_version,
+        "source_revision_changed": source_revision_changed,
+        "source_catalog_identity_changed": source_catalog_identity_changed,
+        "validation_reference_date": validation_reference_date.isoformat(),
+        "validation_reference_date_saved": saved_validation_reference_date,
+        "validation_reference_date_changed": validation_reference_date_changed,
         "finding_count": total_known_findings,
         "total_returned": len(findings["items"]),
         "returned_count": len(findings["items"]),
@@ -1804,6 +2167,10 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
                 "truncated": scan_truncated,
                 "stale": scan_stale,
                 "source_revision_changed": source_revision_changed,
+                "source_catalog_identity_changed": source_catalog_identity_changed,
+                "validation_reference_date": validation_reference_date.isoformat(),
+                "validation_reference_date_saved": saved_validation_reference_date,
+                "validation_reference_date_changed": validation_reference_date_changed,
                 "max_findings": scan_run["max_findings"],
                 "findings_examined": scan_run["findings_examined"],
                 "findings_stored": scan_run["findings_stored"],
@@ -1812,6 +2179,8 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
                 "source_data_version_start": progress["source_data_version_start"],
                 "source_data_version_end": progress["source_data_version_end"],
                 "source_data_version_current": current_source_data_version,
+                "source_catalog_identity": progress.get("source_catalog_identity"),
+                "source_catalog_identity_current": current_source_catalog_identity,
                 "cursor_start": progress["cursor_start"],
                 "cursor_next": progress["cursor_next"],
                 "cursor_phase": progress["cursor_phase"],

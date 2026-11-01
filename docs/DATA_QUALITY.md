@@ -20,7 +20,8 @@ The current deterministic rules cover:
   revision metadata that is stale or arrives out of order;
 - a stale latest observation candidate when the most recent retrieval or
   provider revision exceeds the configured age;
-- weekday gaps, explicitly marked as not exchange-calendar confirmed; and
+- calendar-aware missing-session candidates classified as expected closures,
+  pending publication, suspected missing, or unresolved; and
 - overlapping provider closes that differ by more than one percent.
 
 Advanced anomaly rules use the documented `anomaly-detection-v1` defaults:
@@ -30,13 +31,18 @@ baseline of 100, and a 30-day stale age. The scan API accepts a `thresholds`
 object for explicit local overrides; the selected thresholds are included in
 the scan result, evidence, and checkpoint identity. Low-volume baselines do
 not produce volume-spike findings, and all anomaly results remain candidates
-for review.
+for review. Time-dependent results record the validation reference date; a
+report becomes stale when that date changes, even when source observations are
+unchanged.
 
 The same session-gap and level-jump checks apply to persisted FRED index
 levels; index findings are labeled separately from equity series.
 
 Weekends, exchange holidays, DST, listings, suspensions, vendor delays, and
 corporate actions require review evidence before a candidate is confirmed.
+Exchange calendars are selected from the symbol catalog for equities and from
+the explicit FRED index mapping for index series. Calendar metadata changes
+invalidate a completed scan so finding classifications are recomputed.
 There are no automatic repairs or provider-preference decisions in this scan.
 
 Quality scans report `findings_examined`, `findings_stored`, and
