@@ -37,9 +37,7 @@ class AnomalyThresholds:
     volume_lookback: int = 20
     reconciliation_relative_tolerance: Decimal = Decimal("0.01")
     reconciliation_absolute_tolerance: Decimal = Decimal(0)
-    reconciliation_provider_priority: tuple[str, ...] = (
-        "alpaca_sip", "tiingo", "alpha_vantage"
-    )
+    reconciliation_provider_priority: tuple[str, ...] = ("alpaca_sip", "tiingo", "alpha_vantage")
 
     def __post_init__(self) -> None:
         if self.price_jump_ratio <= 1:
@@ -68,9 +66,10 @@ class AnomalyThresholds:
             or self.reconciliation_absolute_tolerance < 0
         ):
             raise ValueError("reconciliation_absolute_tolerance must be nonnegative")
-        if set(self.reconciliation_provider_priority) != {
-            "alpaca_sip", "tiingo", "alpha_vantage"
-        } or len(self.reconciliation_provider_priority) != 3:
+        if (
+            set(self.reconciliation_provider_priority) != {"alpaca_sip", "tiingo", "alpha_vantage"}
+            or len(self.reconciliation_provider_priority) != 3
+        ):
             raise ValueError("reconciliation_provider_priority must list the three providers once")
 
 
