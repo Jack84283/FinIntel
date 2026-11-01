@@ -73,6 +73,20 @@ def _fingerprint(
     return sha256(value.encode("utf-8")).hexdigest()
 
 
+def _legacy_fingerprint(
+    *,
+    code: str,
+    provider: str,
+    session_date: str | None,
+    finding_type: str,
+    rule: str,
+) -> str:
+    """Return the PR #38 fingerprint used before series dimensions existed."""
+
+    value = "|".join((code, provider, session_date or "", finding_type, rule))
+    return sha256(value.encode("utf-8")).hexdigest()
+
+
 def _candidate(
     *,
     instrument_kind: str = "equity",
@@ -775,12 +789,110 @@ def _read_candidates(
     return findings, findings_examined, resume_cursor, not page_full
 
 
+def _reconcile_legacy_index_fingerprints(conn: sqlite3.Connection, now: str) -> None:
+    """Upgrade PR #38 index anomaly hashes without losing review history.
+
+    PR #38 hashed only the visible finding fields.  Current index candidates
+    include their explicit price-index dimensions, so an unchanged anomaly
+    would otherwise be inserted as a second row after a database upgrade.
+    Keep the original row as the canonical record, including its ID and audit
+    history, and make any already-created replacement row a superseded alias.
+    """
+
+    rows = conn.execute(
+        "SELECT id,code,provider,session_date,finding_type,rule,fingerprint,"
+        "review_state,resolution_note "
+        "FROM data_quality_findings "
+        "WHERE instrument_kind='index' AND finding_type='price_anomaly' "
+        "AND superseded_at IS NULL ORDER BY id"
+    ).fetchall()
+    for row in rows:
+        legacy_fingerprint = _legacy_fingerprint(
+            code=row["code"],
+            provider=row["provider"],
+            session_date=row["session_date"],
+            finding_type=row["finding_type"],
+            rule=row["rule"],
+        )
+        if row["fingerprint"] != legacy_fingerprint:
+            continue
+
+        fingerprint = _fingerprint(
+            instrument_kind="index",
+            series_id=None,
+            code=row["code"],
+            provider=row["provider"],
+            session_date=row["session_date"],
+            finding_type=row["finding_type"],
+            rule=row["rule"],
+            adjustment="price_index",
+            frequency="1d",
+        )
+        collision = conn.execute(
+            "SELECT id,review_state,resolution_note FROM data_quality_findings "
+            "WHERE fingerprint=? AND id<>?",
+            (fingerprint, row["id"]),
+        ).fetchone()
+        if collision is not None:
+            # Preserve every review event while retaining the pre-upgrade row
+            # as the canonical finding.  The collision remains queryable by ID
+            # but is no longer an active duplicate.
+            conn.execute(
+                "UPDATE data_quality_reviews SET finding_id=? WHERE finding_id=?",
+                (row["id"], collision["id"]),
+            )
+            replacement_fingerprint = sha256(
+                f"{fingerprint}:superseded:{collision['id']}".encode()
+            ).hexdigest()
+            while conn.execute(
+                "SELECT 1 FROM data_quality_findings WHERE fingerprint=?",
+                (replacement_fingerprint,),
+            ).fetchone():
+                replacement_fingerprint = sha256(
+                    f"{replacement_fingerprint}:retry".encode()
+                ).hexdigest()
+            conn.execute(
+                "UPDATE data_quality_findings SET fingerprint=?, superseded_at=?, "
+                "supersession_reason=?, updated_at=? WHERE id=?",
+                (
+                    replacement_fingerprint,
+                    now,
+                    "Reconciled duplicate of a PR #38 index anomaly",
+                    now,
+                    collision["id"],
+                ),
+            )
+            if row["review_state"] == "candidate" and collision["review_state"] != "candidate":
+                conn.execute(
+                    "UPDATE data_quality_findings SET review_state=?, resolution_note=?, "
+                    "updated_at=? WHERE id=?",
+                    (
+                        collision["review_state"],
+                        collision["resolution_note"],
+                        now,
+                        row["id"],
+                    ),
+                )
+        conn.execute(
+            "UPDATE data_quality_findings SET fingerprint=?, updated_at=? WHERE id=?",
+            (fingerprint, now, row["id"]),
+        )
+
+
 @serialized_storage_write
 def _ensure_quality_schema(path: Path) -> None:
     """Run any required migrations while holding the short write lock."""
 
     connection = _write_connection(path)
-    connection.close()
+    try:
+        connection.execute("BEGIN")
+        _reconcile_legacy_index_fingerprints(connection, _iso_now())
+        connection.commit()
+    except sqlite3.Error:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 @serialized_storage_write
@@ -789,6 +901,10 @@ def _persist(path: Path, candidates: list[dict], *, supersede_legacy: bool = Fal
     try:
         conn.execute("BEGIN")
         now = _iso_now()
+        # A restore/merge can place a legacy row beside a current row after
+        # schema initialization. Re-run the idempotent reconciliation in the
+        # same transaction as candidate persistence.
+        _reconcile_legacy_index_fingerprints(conn, now)
         for item in candidates:
             conn.execute(
                 "INSERT INTO data_quality_findings "

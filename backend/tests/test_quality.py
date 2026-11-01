@@ -12,6 +12,8 @@ from finintel.main import app
 from finintel.market_data import quality as quality_module
 from finintel.market_data.quality import (
     _candidate,
+    _fingerprint,
+    _legacy_fingerprint,
     _persist,
     list_findings,
     quality_report,
@@ -160,6 +162,145 @@ def test_repeated_quality_scans_reuse_finding_rows(tmp_path):
     assert second["truncated"] is False
     assert second["finding_count"] == first["finding_count"]
     assert after == before
+
+
+def test_pr38_index_anomaly_upgrade_reuses_reviewed_finding(tmp_path):
+    db = tmp_path / "pr38.sqlite3"
+    conn = _write_connection(db)
+    conn.execute(
+        "INSERT INTO index_daily_closes"
+        "(index_code,provider,session_date,close,retrieved_at,source_url) "
+        "VALUES ('SP500','fred',?,?,?,?)",
+        (
+            "2026-10-20",
+            "0",
+            "2026-10-31T00:00:00+00:00",
+            "https://fred.stlouisfed.org/series/SP500",
+        ),
+    )
+
+    # Recreate the PR #38 quality tables around a real populated database. In
+    # particular, the old table has no lifecycle columns and the stored hash
+    # is the pre-v14 pipe-delimited index anomaly fingerprint.
+    conn.execute("DROP TABLE data_quality_reviews")
+    conn.execute("DROP TABLE data_quality_findings")
+    conn.execute(
+        """
+        CREATE TABLE data_quality_findings (
+            id INTEGER PRIMARY KEY,
+            instrument_kind TEXT NOT NULL CHECK(instrument_kind IN ('equity', 'index')),
+            code TEXT NOT NULL,
+            series_id INTEGER REFERENCES series(id) ON DELETE SET NULL,
+            provider TEXT NOT NULL,
+            session_date TEXT,
+            finding_type TEXT NOT NULL CHECK(finding_type IN (
+                'missing_session', 'price_anomaly', 'ohlcv_anomaly',
+                'provider_divergence', 'duplicate', 'stale_observation'
+            )),
+            severity TEXT NOT NULL CHECK(severity IN ('info', 'warning', 'error')),
+            confidence TEXT NOT NULL CHECK(confidence IN ('low', 'medium', 'high')),
+            rule TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            fingerprint TEXT NOT NULL UNIQUE,
+            review_state TEXT NOT NULL DEFAULT 'candidate' CHECK(
+                review_state IN ('candidate', 'confirmed', 'rejected', 'accepted_correction')
+            ),
+            resolution_note TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE data_quality_reviews (
+            id INTEGER PRIMARY KEY,
+            finding_id INTEGER NOT NULL REFERENCES data_quality_findings(id) ON DELETE CASCADE,
+            from_state TEXT NOT NULL,
+            to_state TEXT NOT NULL,
+            note TEXT,
+            reviewed_at TEXT NOT NULL
+        )
+        """
+    )
+    legacy_fingerprint = _legacy_fingerprint(
+        code="SP500",
+        provider="fred",
+        session_date="2026-10-20",
+        finding_type="price_anomaly",
+        rule="positive_finite_index_close",
+    )
+    conn.execute(
+        "INSERT INTO data_quality_findings("
+        "id,instrument_kind,code,series_id,provider,session_date,finding_type,"
+        "severity,confidence,rule,evidence_json,fingerprint,review_state,"
+        "resolution_note,created_at,updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            41,
+            "index",
+            "SP500",
+            None,
+            "fred",
+            "2026-10-20",
+            "price_anomaly",
+            "error",
+            "high",
+            "positive_finite_index_close",
+            '{"close":"0"}',
+            legacy_fingerprint,
+            "confirmed",
+            "Confirmed during PR #38 review",
+            "2026-10-31T01:00:00+00:00",
+            "2026-10-31T02:00:00+00:00",
+        ),
+    )
+    conn.execute(
+        "INSERT INTO data_quality_reviews"
+        "(id,finding_id,from_state,to_state,note,reviewed_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (
+            73,
+            41,
+            "candidate",
+            "confirmed",
+            "Confirmed during PR #38 review",
+            "2026-10-31T02:00:00+00:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    with sqlite3.connect(db) as check:
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert "superseded_at" not in {
+            row[1] for row in check.execute("PRAGMA table_info(data_quality_findings)")
+        }
+
+    result = run_quality_scan(db, as_of=date(2026, 10, 20))
+    assert result["complete"] is True
+    expected_fingerprint = _fingerprint(
+        instrument_kind="index",
+        series_id=None,
+        code="SP500",
+        provider="fred",
+        session_date="2026-10-20",
+        finding_type="price_anomaly",
+        rule="positive_finite_index_close",
+        adjustment="price_index",
+        frequency="1d",
+    )
+    with sqlite3.connect(db) as check:
+        rows = check.execute(
+            "SELECT id,fingerprint,review_state,resolution_note,superseded_at "
+            "FROM data_quality_findings WHERE instrument_kind='index'"
+        ).fetchall()
+        assert rows == [
+            (41, expected_fingerprint, "confirmed", "Confirmed during PR #38 review", None)
+        ]
+        assert check.execute(
+            "SELECT id,finding_id,from_state,to_state,note FROM data_quality_reviews"
+        ).fetchall() == [(73, 41, "candidate", "confirmed", "Confirmed during PR #38 review")]
 
 
 def test_truncated_quality_scan_resumes_from_durable_cursor(tmp_path):
