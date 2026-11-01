@@ -244,6 +244,11 @@ def _merge(staging: Path, source: Path) -> None:
                 if "validation_reference_date" in incoming_progress_columns
                 else "NULL"
             )
+            incoming_candidate_fingerprints_field = (
+                "candidate_fingerprints"
+                if "candidate_fingerprints" in incoming_progress_columns
+                else "NULL"
+            )
             with dest:
                 dest.execute("INSERT OR IGNORE INTO instruments SELECT * FROM incoming.instruments")
                 dest.execute(
@@ -435,7 +440,7 @@ def _merge(staging: Path, source: Path) -> None:
                             "findings_examined,findings_stored,total_known_findings,"
                             "persisted_findings_total,status,stale,updated_at,last_run_key,"
                             "cursor_phase,cursor_source_key,source_catalog_identity,"
-                            "validation_reference_date) "
+                            "validation_reference_date,candidate_fingerprints) "
                             "SELECT scan_key,source_identity,source_data_version_start,"
                             "source_data_version_end,cursor_start,cursor_next,max_findings,"
                             "findings_examined,findings_stored,total_known_findings,"
@@ -445,6 +450,8 @@ def _merge(staging: Path, source: Path) -> None:
                             + incoming_catalog_identity_field
                             + ","
                             + incoming_validation_reference_field
+                            + ","
+                            + incoming_candidate_fingerprints_field
                             + " FROM incoming.data_quality_scan_progress WHERE 1 "
                             "ON CONFLICT(scan_key) DO UPDATE SET "
                             "source_identity=excluded.source_identity,"
@@ -460,7 +467,8 @@ def _merge(staging: Path, source: Path) -> None:
                             "updated_at=excluded.updated_at,last_run_key=excluded.last_run_key,"
                             "cursor_phase=excluded.cursor_phase,cursor_source_key=excluded.cursor_source_key,"
                             "source_catalog_identity=excluded.source_catalog_identity,"
-                            "validation_reference_date=excluded.validation_reference_date "
+                            "validation_reference_date=excluded.validation_reference_date,"
+                            "candidate_fingerprints=excluded.candidate_fingerprints "
                             "WHERE excluded.updated_at > data_quality_scan_progress.updated_at"
                         )
                 dest.execute(

@@ -8,6 +8,10 @@ also includes the destination series identity (series ID, frequency, and
 adjustment), so separate historical series cannot overwrite one another.
 Re-running a scan updates the evidence for the same candidate without
 resetting its review state, including after a backup merge remaps series IDs.
+After a successful, non-stale full scan, active findings that are absent from
+the complete candidate set are superseded in place. Their IDs, evidence,
+review state, and review history remain queryable; incomplete or stale scans
+never perform this reconciliation.
 
 The current deterministic rules cover:
 
@@ -61,7 +65,8 @@ between scan pages.
 
 When a scan reaches its finding cap, `data_quality_scan_progress` stores the
 current traversal phase (`equity`, `index`, or `cross_provider`) and a source
-key for that phase. The next run seeks directly to that key instead of
+key for that phase plus the cumulative candidate fingerprints seen so far. The
+next run seeks directly to that key instead of
 re-scanning earlier observations. The read stops at the cap after completing
 the current source item, so a batch can include all sibling candidates from
 that item without losing evidence. Partial `findings_examined` and
@@ -77,6 +82,11 @@ Reports also compare the saved scan-end source revision with the current
 source revision. A daily import after a successful scan therefore returns
 `stale: true`, `complete: false`, and the same stale state in
 `scan_completeness` until a new scan finishes.
+
+Legacy fingerprint collisions retain each duplicate finding and its original
+review events. The canonical finding receives an explicit reconciliation event
+that records the superseded finding ID and state, so conflicting review
+provenance is not silently moved or flattened.
 
 Backup merges retain imported scan runs for audit history but invalidate all
 scan progress in the merged database. The destination must be scanned again

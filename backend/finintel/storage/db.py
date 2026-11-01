@@ -436,7 +436,8 @@ CREATE TABLE IF NOT EXISTS data_quality_scan_progress (
     cursor_phase TEXT NOT NULL DEFAULT 'equity',
     cursor_source_key TEXT,
     source_catalog_identity TEXT,
-    validation_reference_date TEXT
+    validation_reference_date TEXT,
+    candidate_fingerprints TEXT
 );
 """
 
@@ -667,6 +668,10 @@ def _ensure_quality_progress_columns(conn: sqlite3.Connection) -> None:
     if "validation_reference_date" not in columns:
         conn.execute(
             "ALTER TABLE data_quality_scan_progress ADD COLUMN validation_reference_date TEXT"
+        )
+    if "candidate_fingerprints" not in columns:
+        conn.execute(
+            "ALTER TABLE data_quality_scan_progress ADD COLUMN candidate_fingerprints TEXT"
         )
 
 

@@ -1201,6 +1201,41 @@ def _superseded_fingerprint(conn: sqlite3.Connection, target: str, finding_id: i
     return value
 
 
+def _has_review_history(conn: sqlite3.Connection, finding_id: int) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM data_quality_reviews WHERE finding_id=? LIMIT 1", (finding_id,)
+        ).fetchone()
+        is not None
+    )
+
+
+def _record_reconciliation_event(
+    conn: sqlite3.Connection,
+    *,
+    canonical_id: int,
+    from_state: str,
+    to_state: str,
+    duplicate_id: int,
+    duplicate_state: str,
+    now: str,
+    context: str,
+) -> None:
+    """Record why a duplicate's review history was not moved to the canonical row."""
+
+    note = (
+        f"Fingerprint reconciliation ({context}): superseded duplicate finding "
+        f"#{duplicate_id}; its original review history remains attached to that finding "
+        f"(state={duplicate_state}). Canonical finding #{canonical_id} is now "
+        f"{to_state}."
+    )
+    conn.execute(
+        "INSERT INTO data_quality_reviews(finding_id,from_state,to_state,note,reviewed_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (canonical_id, from_state, to_state, note, now),
+    )
+
+
 def _reconcile_legacy_index_fingerprints(conn: sqlite3.Connection, now: str) -> None:
     """Upgrade PR #38/39 index price fingerprints without losing audit state.
 
@@ -1209,7 +1244,8 @@ def _reconcile_legacy_index_fingerprints(conn: sqlite3.Connection, now: str) -> 
     canonical ``price_jump_candidate`` rule.  All three identities therefore
     converge on one active row, with the oldest PR #38 row preferred as the
     canonical ID when it exists.  Colliding rows remain queryable as
-    superseded records and their review events are moved to the canonical row.
+    superseded records retain their review events, and the canonical row gets
+    an explicit reconciliation event when a duplicate carried review state.
     """
 
     rows = conn.execute(
@@ -1251,15 +1287,12 @@ def _reconcile_legacy_index_fingerprints(conn: sqlite3.Connection, now: str) -> 
         ).fetchall()
         duplicates = [row for _, row in entries if row["id"] != canonical["id"]]
         duplicates.extend(collisions)
+        canonical_state = canonical["review_state"]
         for duplicate in duplicates:
-            conn.execute(
-                "UPDATE data_quality_reviews SET finding_id=? WHERE finding_id=?",
-                (canonical["id"], duplicate["id"]),
-            )
-            if (
-                canonical["review_state"] == "candidate"
-                and duplicate["review_state"] != "candidate"
-            ):
+            duplicate_has_history = _has_review_history(conn, duplicate["id"])
+            state_before_reconciliation = canonical_state
+            if canonical_state == "candidate" and duplicate["review_state"] != "candidate":
+                canonical_state = duplicate["review_state"]
                 conn.execute(
                     "UPDATE data_quality_findings SET review_state=?, resolution_note=?, "
                     "updated_at=? WHERE id=?",
@@ -1269,6 +1302,17 @@ def _reconcile_legacy_index_fingerprints(conn: sqlite3.Connection, now: str) -> 
                         now,
                         canonical["id"],
                     ),
+                )
+            if duplicate_has_history or duplicate["review_state"] != "candidate":
+                _record_reconciliation_event(
+                    conn,
+                    canonical_id=canonical["id"],
+                    from_state=state_before_reconciliation,
+                    to_state=canonical_state,
+                    duplicate_id=duplicate["id"],
+                    duplicate_state=duplicate["review_state"],
+                    now=now,
+                    context="legacy index price anomaly",
                 )
             conn.execute(
                 "UPDATE data_quality_findings SET fingerprint=?, superseded_at=?, "
@@ -1329,15 +1373,25 @@ def _reconcile_legacy_equity_price_fingerprints(conn: sqlite3.Connection, now: s
             (target, row["id"]),
         ).fetchone()
         if collision is not None:
-            conn.execute(
-                "UPDATE data_quality_reviews SET finding_id=? WHERE finding_id=?",
-                (row["id"], collision["id"]),
-            )
-            if row["review_state"] == "candidate" and collision["review_state"] != "candidate":
+            collision_has_history = _has_review_history(conn, collision["id"])
+            canonical_state = row["review_state"]
+            if canonical_state == "candidate" and collision["review_state"] != "candidate":
+                canonical_state = collision["review_state"]
                 conn.execute(
                     "UPDATE data_quality_findings SET review_state=?, resolution_note=?, "
                     "updated_at=? WHERE id=?",
                     (collision["review_state"], collision["resolution_note"], now, row["id"]),
+                )
+            if collision_has_history or collision["review_state"] != "candidate":
+                _record_reconciliation_event(
+                    conn,
+                    canonical_id=row["id"],
+                    from_state=row["review_state"],
+                    to_state=canonical_state,
+                    duplicate_id=collision["id"],
+                    duplicate_state=collision["review_state"],
+                    now=now,
+                    context="legacy equity price anomaly",
                 )
             conn.execute(
                 "UPDATE data_quality_findings SET fingerprint=?, superseded_at=?, "
@@ -1374,7 +1428,13 @@ def _ensure_quality_schema(path: Path) -> None:
 
 
 @serialized_storage_write
-def _persist(path: Path, candidates: list[dict], *, supersede_legacy: bool = False) -> None:
+def _persist(
+    path: Path,
+    candidates: list[dict],
+    *,
+    reconcile_active: bool = False,
+    scan_fingerprints: set[str] | None = None,
+) -> int:
     conn = _write_connection(path)
     try:
         conn.execute("BEGIN")
@@ -1407,19 +1467,39 @@ def _persist(path: Path, candidates: list[dict], *, supersede_legacy: bool = Fal
                     now,
                 ),
             )
-        if supersede_legacy:
-            conn.execute(
-                "UPDATE data_quality_findings SET superseded_at=?, "
-                "supersession_reason=?, updated_at=? "
-                "WHERE finding_type='missing_session' "
-                "AND rule='weekday_gap_candidate' AND superseded_at IS NULL",
-                (
-                    now,
-                    "Reclassified by calendar-aware missing-session validation",
-                    now,
-                ),
+        superseded_count = 0
+        if reconcile_active:
+            fingerprints = (
+                scan_fingerprints
+                if scan_fingerprints is not None
+                else {item["fingerprint"] for item in candidates}
             )
+            active_rows = conn.execute(
+                "SELECT id,fingerprint,finding_type,rule FROM data_quality_findings "
+                "WHERE superseded_at IS NULL"
+            ).fetchall()
+            obsolete_rows = [row for row in active_rows if row["fingerprint"] not in fingerprints]
+            for row in obsolete_rows:
+                reason = (
+                    "Reclassified by calendar-aware missing-session validation"
+                    if row["finding_type"] == "missing_session"
+                    and row["rule"] == "weekday_gap_candidate"
+                    else "No longer detected by completed full quality scan"
+                )
+                cursor = conn.execute(
+                    "UPDATE data_quality_findings SET superseded_at=?, "
+                    "supersession_reason=?, updated_at=? "
+                    "WHERE id=?",
+                    (
+                        now,
+                        reason,
+                        now,
+                        row["id"],
+                    ),
+                )
+                superseded_count += cursor.rowcount
         conn.commit()
+        return superseded_count
     except sqlite3.Error:
         conn.rollback()
         raise
@@ -1664,6 +1744,18 @@ def _encode_source_key(checkpoint: dict[str, object]) -> str | None:
     return json.dumps(source_key, sort_keys=True, separators=(",", ":"))
 
 
+def _decode_candidate_fingerprints(value: object) -> set[str] | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(decoded, list) or not all(isinstance(item, str) for item in decoded):
+        return None
+    return set(decoded)
+
+
 def _scan_progress(path: Path) -> dict | None:
     conn = _read_connection(path)
     if conn is None:
@@ -1689,6 +1781,11 @@ def _scan_progress(path: Path) -> dict | None:
         validation_reference_field = (
             "validation_reference_date" if "validation_reference_date" in columns else "NULL"
         )
+        candidate_fingerprints_field = (
+            "candidate_fingerprints"
+            if "candidate_fingerprints" in columns
+            else "NULL AS candidate_fingerprints"
+        )
         row = conn.execute(
             "SELECT scan_key,source_identity,source_data_version_start,"
             "source_data_version_end,cursor_start,cursor_next,max_findings,"
@@ -1699,6 +1796,8 @@ def _scan_progress(path: Path) -> dict | None:
             + catalog_identity_field
             + ","
             + validation_reference_field
+            + ","
+            + candidate_fingerprints_field
             + " FROM data_quality_scan_progress WHERE scan_key = ?",
             (_SCAN_KEY,),
         ).fetchone()
@@ -1729,6 +1828,7 @@ def _persist_scan_progress(
     cursor_source_key: str | None,
     source_catalog_identity: str | None,
     validation_reference_date: str,
+    candidate_fingerprints: str | None,
 ) -> None:
     conn = _write_connection(path)
     try:
@@ -1739,8 +1839,8 @@ def _persist_scan_progress(
             "cursor_start,cursor_next,max_findings,findings_examined,findings_stored,"
             "total_known_findings,persisted_findings_total,status,stale,updated_at,last_run_key,"
             "cursor_phase,cursor_source_key,source_catalog_identity,"
-            "validation_reference_date) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "validation_reference_date,candidate_fingerprints) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(scan_key) DO UPDATE SET "
             "source_identity=excluded.source_identity,"
             "source_data_version_start=excluded.source_data_version_start,"
@@ -1755,7 +1855,8 @@ def _persist_scan_progress(
             "last_run_key=excluded.last_run_key,cursor_phase=excluded.cursor_phase,"
             "cursor_source_key=excluded.cursor_source_key,"
             "source_catalog_identity=excluded.source_catalog_identity,"
-            "validation_reference_date=excluded.validation_reference_date",
+            "validation_reference_date=excluded.validation_reference_date,"
+            "candidate_fingerprints=excluded.candidate_fingerprints",
             (
                 _SCAN_KEY,
                 source_identity,
@@ -1776,6 +1877,7 @@ def _persist_scan_progress(
                 cursor_source_key,
                 source_catalog_identity,
                 validation_reference_date,
+                candidate_fingerprints,
             ),
         )
         conn.commit()
@@ -1819,18 +1921,24 @@ def run_quality_scan(
     source_data_version_start = _source_data_version(path)
     progress = _scan_progress(path)
     checkpoint = {"phase": "equity", "source_key": None}
+    scan_fingerprints: set[str] = set()
     cursor_start = 0
     resuming = False
+    stored_scan_fingerprints = _decode_candidate_fingerprints(
+        progress.get("candidate_fingerprints") if progress is not None else None
+    )
     if (
         progress is not None
         and progress["status"] == "partial"
         and not progress["stale"]
         and progress["source_identity"] == source_identity
         and progress.get("cursor_source_key")
+        and stored_scan_fingerprints is not None
     ):
         resuming = True
         cursor_start = int(progress["cursor_next"])
         checkpoint = _progress_checkpoint(progress)
+        scan_fingerprints = stored_scan_fingerprints
     candidates, findings_seen, next_checkpoint, exhausted = _read_candidates(
         path,
         max_findings,
@@ -1839,13 +1947,19 @@ def run_quality_scan(
         thresholds=thresholds,
         as_of=as_of,
     )
+    scan_fingerprints.update(item["fingerprint"] for item in candidates)
     source_data_version_end = _source_data_version(path)
     source_changed = (
         source_data_version_end != source_data_version_start
         or _source_identity(path) != database_identity
     )
     scan_complete = exhausted and not source_changed
-    _persist(path, candidates, supersede_legacy=scan_complete)
+    findings_superseded = _persist(
+        path,
+        candidates,
+        reconcile_active=scan_complete,
+        scan_fingerprints=scan_fingerprints,
+    )
     findings_stored = len(candidates)
     persisted_findings_total, _ = _stored_finding_summary(path)
     previous_examined = (
@@ -1903,6 +2017,11 @@ def run_quality_scan(
         cursor_source_key=None if stale or complete else _encode_source_key(next_checkpoint),
         source_catalog_identity=source_catalog_identity,
         validation_reference_date=as_of.isoformat(),
+        candidate_fingerprints=(
+            json.dumps(sorted(scan_fingerprints), separators=(",", ":"))
+            if not stale and not complete
+            else None
+        ),
     )
     counts = Counter(item["finding_type"] for item in candidates)
     severity = Counter(item["severity"] for item in candidates)
@@ -1916,6 +2035,7 @@ def run_quality_scan(
         "thresholds": thresholds_identity(thresholds),
         "calendar_rule_version": CALENDAR_RULE_VERSION,
         "validation_reference_date": as_of.isoformat(),
+        "findings_superseded": findings_superseded,
         "source_data_version_start": source_data_version_start,
         "source_data_version_end": source_data_version_end,
         "cursor_start": cursor_start,
