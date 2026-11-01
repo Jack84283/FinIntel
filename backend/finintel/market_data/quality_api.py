@@ -33,9 +33,9 @@ class AnomalyThresholdRequest(BaseModel):
     volume_lookback: int | None = Field(default=None, ge=2)
     reconciliation_relative_tolerance: Decimal | None = Field(default=None, ge=0, le=1)
     reconciliation_absolute_tolerance: Decimal | None = Field(default=None, ge=0)
-    reconciliation_provider_priority: list[
-        Literal["alpaca_sip", "tiingo", "alpha_vantage"]
-    ] | None = None
+    reconciliation_provider_priority: (
+        list[Literal["alpaca_sip", "tiingo", "alpha_vantage"]] | None
+    ) = None
 
 
 class ScanRequest(BaseModel):
