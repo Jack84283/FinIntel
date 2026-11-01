@@ -14,11 +14,40 @@ The current deterministic rules cover:
 - invalid OHLCV values and candle ordering;
 - unusually large close changes, reported as candidates rather than confirmed
   corporate actions;
-- weekday gaps, explicitly marked as not exchange-calendar confirmed; and
+- calendar-aware missing-session candidates; and
 - overlapping provider closes that differ by more than one percent.
 
 The same session-gap and level-jump checks apply to persisted FRED index
 levels; index findings are labeled separately from equity series.
+
+## Calendar-aware missing sessions
+
+Missing-session rules use `exchange_calendars` rule version
+`calendar-missing-session-v1` and the `XNYS` (NYSE) or `XNAS` (Nasdaq) session
+schedule. Calendar sessions are date labels, so weekends, Thanksgiving,
+Christmas, New Year's Day, Good Friday, DST transitions, and exceptional full
+closures are excluded from the expected-session set. FRED's SP500, DJIA,
+NASDAQCOM, NDX, and VIX series use their explicit underlying market-index
+calendar mapping rather than a generic weekday rule.
+
+Every calendar missing-session finding records the calendar source, rule
+version, calendar name/timezone, provider publication delay, as-of date, and
+the surrounding stored observations. Findings are classified as:
+
+- `expected_closure` for a documented instrument suspension;
+- `pending_publication` for a recent session within the configured provider
+  publication grace period;
+- `suspected_missing` for an eligible exchange session absent between stored
+  observations; or
+- `unresolved` when the calendar or eligibility evidence is unavailable.
+
+Listing/delisting dates and suspension intervals are explicit evidence inputs,
+keyed by series ID, `(symbol, provider)`, or symbol when calling
+`run_quality_scan`. They include a source and, where available, verification
+date. Leading and trailing history is not inferred from the first/last local
+row without expected bounds. A missing calendar never becomes a confirmed
+defect: unresolved findings have informational severity and low confidence.
+No original observation is modified, fetched, or deleted by this validation.
 
 Weekends, exchange holidays, DST, listings, suspensions, vendor delays, and
 corporate actions require review evidence before a candidate is confirmed.

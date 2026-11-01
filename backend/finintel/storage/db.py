@@ -369,6 +369,8 @@ CREATE TABLE IF NOT EXISTS data_quality_findings (
         review_state IN ('candidate', 'confirmed', 'rejected', 'accepted_correction')
     ),
     resolution_note TEXT,
+    superseded_at TEXT,
+    supersession_reason TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -432,7 +434,8 @@ CREATE TABLE IF NOT EXISTS data_quality_scan_progress (
     updated_at TEXT NOT NULL,
     last_run_key TEXT,
     cursor_phase TEXT NOT NULL DEFAULT 'equity',
-    cursor_source_key TEXT
+    cursor_source_key TEXT,
+    source_catalog_identity TEXT
 );
 """
 
@@ -614,6 +617,20 @@ def _ensure_quality_progress_columns(conn: sqlite3.Connection) -> None:
         )
     if "cursor_source_key" not in columns:
         conn.execute("ALTER TABLE data_quality_scan_progress ADD COLUMN cursor_source_key TEXT")
+    if "source_catalog_identity" not in columns:
+        conn.execute(
+            "ALTER TABLE data_quality_scan_progress ADD COLUMN source_catalog_identity TEXT"
+        )
+
+
+def _ensure_quality_finding_columns(conn: sqlite3.Connection) -> None:
+    """Add non-destructive lifecycle metadata to v14 findings."""
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(data_quality_findings)")}
+    if "superseded_at" not in columns:
+        conn.execute("ALTER TABLE data_quality_findings ADD COLUMN superseded_at TEXT")
+    if "supersession_reason" not in columns:
+        conn.execute("ALTER TABLE data_quality_findings ADD COLUMN supersession_reason TEXT")
 
 
 def _ensure_quality_source_tracking(conn: sqlite3.Connection) -> None:
@@ -962,6 +979,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(SCHEMA_V14_QUALITY_PROGRESS_TABLE)
             conn.execute(SCHEMA_V14_QUALITY_PROGRESS_INDEX)
             _ensure_quality_progress_columns(conn)
+            _ensure_quality_finding_columns(conn)
             _ensure_quality_source_tracking(conn)
             conn.execute("PRAGMA user_version = 14")
             conn.commit()
@@ -1001,6 +1019,7 @@ def _write_connection(path: Path) -> sqlite3.Connection:
             conn.execute(SCHEMA_V14_QUALITY_PROGRESS_TABLE)
             conn.execute(SCHEMA_V14_QUALITY_PROGRESS_INDEX)
             _ensure_quality_progress_columns(conn)
+            _ensure_quality_finding_columns(conn)
             _ensure_quality_source_tracking(conn)
             conn.commit()
         return conn
