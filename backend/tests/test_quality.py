@@ -170,6 +170,7 @@ def test_truncated_quality_scan_resumes_from_durable_cursor(tmp_path):
     assert first["truncated"] is True
     assert first["cursor_start"] == 0
     assert first["cursor_next"] == 2
+    assert first["findings_examined"] == first["findings_stored"] == 2
 
     second = run_quality_scan(db, max_findings=2)
     assert second["resumed"] is True
@@ -189,6 +190,42 @@ def test_truncated_quality_scan_resumes_from_durable_cursor(tmp_path):
             "SELECT status,cursor_next,stale FROM data_quality_scan_progress WHERE scan_key='all'"
         ).fetchone()
         assert progress == ("completed", 0, 0)
+
+
+def test_bounded_batches_preserve_all_candidates_without_scanning_remaining_history(
+    tmp_path, monkeypatch
+):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    observed_rows = []
+    original = quality_module._iter_query_rows
+
+    def tracked_rows(*args, **kwargs):
+        for row in original(*args, **kwargs):
+            observed_rows.append(row)
+            yield row
+
+    monkeypatch.setattr(quality_module, "_iter_query_rows", tracked_rows)
+    result = run_quality_scan(db, max_findings=2)
+
+    assert result["status"] == "partial"
+    assert result["findings_stored"] == 2
+    assert len(observed_rows) == 2
+    assert result["cursor_source_key"] == {
+        "series_id": 1,
+        "session_date": "2026-10-21",
+    }
+
+    bounded = [item["fingerprint"] for item in result["examples"]]
+    while not result["complete"]:
+        result = run_quality_scan(db, max_findings=2)
+        bounded.extend(item["fingerprint"] for item in result["examples"])
+    assert result["persisted_findings_total"] == result["total_known_findings"]
+
+    reference = tmp_path / "reference.sqlite3"
+    seed_quality_database(reference)
+    full = run_quality_scan(reference)
+    assert set(bounded) <= {item["fingerprint"] for item in full["examples"]}
 
 
 def test_resumed_quality_scan_seeks_from_phase_source_key(tmp_path, monkeypatch):
@@ -229,7 +266,7 @@ def test_quality_scan_reports_truncation_and_report_counts_all_known_findings(tm
     assert result["status"] == "partial"
     assert result["complete"] is False
     assert result["truncated"] is True
-    assert result["findings_examined"] > result["findings_stored"] == 2
+    assert result["findings_examined"] == result["findings_stored"] == 2
     assert result["total_known_findings"] == result["findings_examined"]
     assert result["persisted_findings_total"] == 2
 
@@ -243,6 +280,34 @@ def test_quality_scan_reports_truncation_and_report_counts_all_known_findings(tm
     assert report["pagination"]["truncated"] is False
     assert report["scan_completeness"]["truncated"] is True
     assert sum(report["review_states"].values()) == 2
+
+
+def test_quality_report_marks_scan_stale_after_daily_import(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    scan = run_quality_scan(db)
+    assert scan["complete"] is True
+    before = quality_report(db, limit=100)
+    assert before["complete"] is True
+
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO daily_prices "
+            "(series_id,session_date,open,high,low,close,volume,retrieved_at,ingestion_id) "
+            "VALUES (1,'2026-10-22','101','102','100','101',10,'2026-11-01T00:00:00+00:00',1)"
+        )
+        conn.commit()
+
+    after = quality_report(db, limit=100)
+    assert after["status"] == "stale"
+    assert after["stale"] is True
+    assert after["complete"] is False
+    assert after["scan_completeness"]["stale"] is True
+    assert after["scan_completeness"]["source_revision_changed"] is True
+    assert (
+        after["scan_completeness"]["source_data_version_current"]
+        != after["scan_completeness"]["source_data_version_end"]
+    )
 
 
 def test_cross_provider_query_plan_uses_scan_indexes(tmp_path):
@@ -504,7 +569,7 @@ def test_cross_provider_scan_handles_realistic_history_without_materializing_row
     result = run_quality_scan(db, max_findings=20)
     elapsed = time.monotonic() - started
     assert result["status"] == "partial"
-    assert result["findings_examined"] > result["findings_stored"] == 20
+    assert result["findings_examined"] == result["findings_stored"] == 20
     assert elapsed < 10
 
 

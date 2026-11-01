@@ -41,11 +41,21 @@ between scan pages.
 When a scan reaches its finding cap, `data_quality_scan_progress` stores the
 current traversal phase (`equity`, `index`, or `cross_provider`) and a source
 key for that phase. The next run seeks directly to that key instead of
-re-scanning earlier observations. A source-only revision maintained by SQLite
+re-scanning earlier observations. The read stops at the cap after completing
+the current source item, so a batch can include all sibling candidates from
+that item without losing evidence. Partial `findings_examined` and
+`total_known_findings` counts are cumulative lower bounds; they become exact
+when the traversal completes, or remain exact when inherited from a completed
+scan of the unchanged source revision. A source-only revision maintained by SQLite
 triggers is compared at scan start and end; review, finding, and scan-metadata
 writes do not invalidate a scan, while source observation changes mark it
 `stale`. Cross-provider comparison reads use the series scan index and merge
 per-series primary-key streams, avoiding repeated temporary database sorts.
+
+Reports also compare the saved scan-end source revision with the current
+source revision. A daily import after a successful scan therefore returns
+`stale: true`, `complete: false`, and the same stale state in
+`scan_completeness` until a new scan finishes.
 
 Backup merges retain imported scan runs for audit history but invalidate all
 scan progress in the merged database. The destination must be scanned again

@@ -431,6 +431,8 @@ def _read_candidates(
                         )
                     )
                     finish_source()
+                    if page_full:
+                        break
                     continue
 
                 values = {name: _decimal(row[name]) for name in ("open", "high", "low", "close")}
@@ -526,8 +528,12 @@ def _read_candidates(
                 if close is not None:
                     previous = (current_date, close, row["session_date"])
                 finish_source()
+                if page_full:
+                    break
+            if page_full:
+                break
 
-    if checkpoint_phase in {"equity", "index"}:
+    if not page_full and checkpoint_phase in {"equity", "index"}:
         for (index_code, provider), index_series in groupby(
             index_rows, key=lambda row: (row["symbol"], row["provider"])
         ):
@@ -567,6 +573,8 @@ def _read_candidates(
                         )
                     )
                     finish_source()
+                    if page_full:
+                        break
                     continue
                 close = _decimal(row["close"])
                 if close is None or close <= 0:
@@ -636,8 +644,12 @@ def _read_candidates(
                 if close is not None and close > 0:
                     previous = (current_date, close)
                 finish_source()
+                if page_full:
+                    break
+            if page_full:
+                break
 
-    if checkpoint_phase in {"equity", "index", "cross_provider"}:
+    if not page_full and checkpoint_phase in {"equity", "index", "cross_provider"}:
         provider_rows = _iter_cross_provider_rows(path, start_key=cross_start)
         for (symbol, frequency, adjustment, session), observation_group in groupby(
             provider_rows,
@@ -690,11 +702,9 @@ def _read_candidates(
                             )
                         )
             finish_source()
+            if page_full:
+                break
 
-    if page_full and resume_cursor == checkpoint:
-        # A single source row can yield more candidates than the configured
-        # page size. Repeating that one row is safer than skipping evidence.
-        resume_cursor = checkpoint
     return findings, findings_examined, resume_cursor, not page_full
 
 
@@ -880,17 +890,23 @@ def _source_identity(path: Path) -> str:
         conn.close()
 
 
-def _source_data_version(path: Path) -> int:
+def _source_data_version(path: Path) -> int | None:
     conn = _read_connection(path, snapshot=False)
     if conn is None:
         raise FileNotFoundError(path)
     try:
+        if (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='data_quality_source_state'"
+            ).fetchone()
+            is None
+        ):
+            return None
         row = conn.execute(
             "SELECT source_version FROM data_quality_source_state WHERE id = 1"
         ).fetchone()
-        if row is None:
-            raise sqlite3.OperationalError("Missing data-quality source state")
-        return int(row[0])
+        return int(row[0]) if row is not None else None
     finally:
         conn.close()
 
@@ -1041,6 +1057,7 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
     progress = _scan_progress(path)
     checkpoint = {"phase": "equity", "source_key": None}
     cursor_start = 0
+    resuming = False
     if (
         progress is not None
         and progress["status"] == "partial"
@@ -1048,6 +1065,7 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
         and progress["source_identity"] == source_identity
         and progress.get("cursor_source_key")
     ):
+        resuming = True
         cursor_start = int(progress["cursor_next"])
         checkpoint = _progress_checkpoint(progress)
     candidates, findings_seen, next_checkpoint, exhausted = _read_candidates(
@@ -1060,15 +1078,20 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
     )
     _persist(path, candidates)
     findings_stored = len(candidates)
-    total_known_findings, _ = _stored_finding_summary(path)
-    previous_known_findings = (
+    persisted_findings_total, _ = _stored_finding_summary(path)
+    previous_examined = (
+        int(progress["findings_examined"]) if resuming and progress is not None else 0
+    )
+    findings_examined = previous_examined + findings_seen
+    established_total = (
         int(progress["total_known_findings"])
         if progress is not None
+        and progress["status"] == "completed"
         and progress["source_identity"] == source_identity
         and not progress["stale"]
         else 0
     )
-    findings_examined = max(previous_known_findings, findings_seen)
+    total_known_findings = established_total or findings_examined
     cursor_next = cursor_start + findings_stored
     stale = source_changed
     truncated = not exhausted and not stale
@@ -1082,8 +1105,8 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
         max_findings=max_findings,
         findings_examined=findings_examined,
         findings_stored=findings_stored,
-        total_known_findings=findings_examined,
-        persisted_findings_total=total_known_findings,
+        total_known_findings=total_known_findings,
+        persisted_findings_total=persisted_findings_total,
         status=status,
         truncated=truncated,
     )
@@ -1097,8 +1120,8 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
         max_findings=max_findings,
         findings_examined=findings_examined,
         findings_stored=findings_stored,
-        total_known_findings=findings_examined,
-        persisted_findings_total=total_known_findings,
+        total_known_findings=total_known_findings,
+        persisted_findings_total=persisted_findings_total,
         status="stale" if stale else status,
         stale=stale,
         updated_at=completed_at,
@@ -1128,9 +1151,9 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
         "max_findings": max_findings,
         "findings_examined": findings_examined,
         "findings_stored": findings_stored,
-        "total_known_findings": findings_examined,
-        "persisted_findings_total": total_known_findings,
-        "finding_count": findings_examined,
+        "total_known_findings": total_known_findings,
+        "persisted_findings_total": persisted_findings_total,
+        "finding_count": total_known_findings,
         "by_type": dict(sorted(counts.items())),
         "by_severity": dict(sorted(severity.items())),
         "examples": candidates[:50],
@@ -1138,7 +1161,7 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
             "Findings are candidates and do not modify stored observations.",
             "Weekday gaps are not exchange-calendar confirmation; holidays, suspensions, and listings require review.",
             "Evidence contains normalized local values only; credentials and raw provider payloads are excluded.",
-            "Partial scans resume from a phase and source key; total_known_findings is exact after the first bounded pass.",
+            "Partial scans resume from a phase and source key; total_known_findings is exact for completed scans or a previously completed source revision.",
         ],
     }
 
@@ -1277,6 +1300,7 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
     persisted_findings_total, counts = _stored_finding_summary(path)
     scan_run = _latest_scan_run(path)
     progress = _scan_progress(path)
+    current_source_data_version = _source_data_version(path)
     scan_metadata_available = (
         scan_run is not None
         and progress is not None
@@ -1287,7 +1311,15 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
     )
     pagination_truncated = bool(findings["truncated"])
     scan_truncated = bool(scan_run["truncated"]) if scan_metadata_available else False
-    scan_stale = bool(progress["stale"]) if scan_metadata_available else False
+    source_revision_changed = (
+        scan_metadata_available
+        and current_source_data_version is not None
+        and progress["source_data_version_end"] is not None
+        and current_source_data_version != progress["source_data_version_end"]
+    )
+    scan_stale = (
+        bool(progress["stale"]) or source_revision_changed if scan_metadata_available else False
+    )
     scan_complete = (
         scan_metadata_available
         and not scan_truncated
@@ -1312,11 +1344,13 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
         "generated_at": _iso_now(),
         "status": status,
         "complete": complete,
+        "stale": scan_stale,
         "truncated": pagination_truncated,
         "findings_examined": findings_examined,
         "findings_stored": findings_stored,
         "total_known_findings": total_known_findings,
         "persisted_findings_total": persisted_findings_total,
+        "source_data_version_current": current_source_data_version,
         "finding_count": total_known_findings,
         "total_returned": len(findings["items"]),
         "returned_count": len(findings["items"]),
@@ -1328,6 +1362,7 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
                 "complete": scan_complete,
                 "truncated": scan_truncated,
                 "stale": scan_stale,
+                "source_revision_changed": source_revision_changed,
                 "max_findings": scan_run["max_findings"],
                 "findings_examined": scan_run["findings_examined"],
                 "findings_stored": scan_run["findings_stored"],
@@ -1335,6 +1370,7 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
                 "persisted_findings_total": scan_run["persisted_findings_total"],
                 "source_data_version_start": progress["source_data_version_start"],
                 "source_data_version_end": progress["source_data_version_end"],
+                "source_data_version_current": current_source_data_version,
                 "cursor_start": progress["cursor_start"],
                 "cursor_next": progress["cursor_next"],
                 "cursor_phase": progress["cursor_phase"],
