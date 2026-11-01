@@ -1736,11 +1736,7 @@ def test_reconciliation_keeps_existing_review_and_source_rows(tmp_path):
     run_quality_scan(
         db,
         as_of=date(2026, 11, 1),
-        thresholds={
-            "reconciliation_provider_priority": [
-                "tiingo", "alpaca_sip", "alpha_vantage"
-            ]
-        },
+        thresholds={"reconciliation_provider_priority": ["tiingo", "alpaca_sip", "alpha_vantage"]},
     )
     second = next(
         item
@@ -1751,14 +1747,20 @@ def test_reconciliation_keeps_existing_review_and_source_rows(tmp_path):
     assert second["review_state"] == "confirmed"
     assert second["evidence"]["preferred_provider_for_future_analysis"] == "tiingo"
     with sqlite3.connect(db) as conn:
-        assert conn.execute(
-            "SELECT series_id, session_date, close, retrieved_at, ingestion_id "
-            "FROM daily_prices ORDER BY series_id, session_date"
-        ).fetchall() == before
-        assert conn.execute(
-            "SELECT COUNT(*) FROM data_quality_reviews WHERE finding_id = ?",
-            (first["id"],),
-        ).fetchone()[0] == 1
+        assert (
+            conn.execute(
+                "SELECT series_id, session_date, close, retrieved_at, ingestion_id "
+                "FROM daily_prices ORDER BY series_id, session_date"
+            ).fetchall()
+            == before
+        )
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM data_quality_reviews WHERE finding_id = ?",
+                (first["id"],),
+            ).fetchone()[0]
+            == 1
+        )
 
 
 def test_reconciliation_endpoint_is_read_only(tmp_path, monkeypatch):
@@ -1767,9 +1769,7 @@ def test_reconciliation_endpoint_is_read_only(tmp_path, monkeypatch):
     run_quality_scan(db, as_of=date(2026, 11, 1))
     monkeypatch.setattr("finintel.market_data.quality_api.database_path", lambda: db)
     with sqlite3.connect(db) as conn:
-        count_before = conn.execute(
-            "SELECT COUNT(*) FROM data_quality_findings"
-        ).fetchone()[0]
+        count_before = conn.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0]
     client = TestClient(app)
     policy = client.get("/api/v1/quality/reconciliation/policy")
     assert policy.status_code == 200
@@ -1779,6 +1779,6 @@ def test_reconciliation_endpoint_is_read_only(tmp_path, monkeypatch):
     assert response.json()["scope"] == "AAPL"
     assert response.json()["findings"]["active"] >= 1
     with sqlite3.connect(db) as conn:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM data_quality_findings"
-        ).fetchone()[0] == count_before
+        assert (
+            conn.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0] == count_before
+        )
