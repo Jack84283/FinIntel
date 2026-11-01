@@ -435,7 +435,9 @@ CREATE TABLE IF NOT EXISTS data_quality_scan_progress (
     last_run_key TEXT,
     cursor_phase TEXT NOT NULL DEFAULT 'equity',
     cursor_source_key TEXT,
-    source_catalog_identity TEXT
+    source_catalog_identity TEXT,
+    validation_reference_date TEXT,
+    candidate_fingerprints TEXT
 );
 """
 
@@ -516,6 +518,48 @@ SCHEMA_V14_QUALITY_SOURCE_TRIGGERS = (
     """
     CREATE TRIGGER IF NOT EXISTS data_quality_source_index_closes_delete
     AFTER DELETE ON index_daily_closes
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_ingestion_insert
+    AFTER INSERT ON ingestion_runs
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_ingestion_update
+    AFTER UPDATE ON ingestion_runs
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_ingestion_delete
+    AFTER DELETE ON ingestion_runs
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_index_ingestion_insert
+    AFTER INSERT ON index_ingestion_runs
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_index_ingestion_update
+    AFTER UPDATE ON index_ingestion_runs
+    BEGIN
+        UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS data_quality_source_index_ingestion_delete
+    AFTER DELETE ON index_ingestion_runs
     BEGIN
         UPDATE data_quality_source_state SET source_version = source_version + 1 WHERE id = 1;
     END;
@@ -620,6 +664,14 @@ def _ensure_quality_progress_columns(conn: sqlite3.Connection) -> None:
     if "source_catalog_identity" not in columns:
         conn.execute(
             "ALTER TABLE data_quality_scan_progress ADD COLUMN source_catalog_identity TEXT"
+        )
+    if "validation_reference_date" not in columns:
+        conn.execute(
+            "ALTER TABLE data_quality_scan_progress ADD COLUMN validation_reference_date TEXT"
+        )
+    if "candidate_fingerprints" not in columns:
+        conn.execute(
+            "ALTER TABLE data_quality_scan_progress ADD COLUMN candidate_fingerprints TEXT"
         )
 
 

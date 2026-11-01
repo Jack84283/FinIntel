@@ -8,49 +8,45 @@ also includes the destination series identity (series ID, frequency, and
 adjustment), so separate historical series cannot overwrite one another.
 Re-running a scan updates the evidence for the same candidate without
 resetting its review state, including after a backup merge remaps series IDs.
+After a successful, non-stale full scan, active findings that are absent from
+the complete candidate set are superseded in place. Their IDs, evidence,
+review state, and review history remain queryable; incomplete or stale scans
+never perform this reconciliation.
 
 The current deterministic rules cover:
 
 - invalid OHLCV values and candle ordering;
-- unusually large close changes, reported as candidates rather than confirmed
-  corporate actions;
-- calendar-aware missing-session candidates; and
+- unusual close changes, reported as candidates rather than confirmed
+  corporate actions, with raw/unadjusted series explicitly marked for
+  corporate-action review;
+- liquid-baseline volume spikes and suspicious zero-volume price moves;
+- repeated source payloads, duplicate source observations, and provider
+  revision metadata that is stale or arrives out of order;
+- a stale latest observation candidate when the most recent retrieval or
+  provider revision exceeds the configured age;
+- calendar-aware missing-session candidates classified as expected closures,
+  pending publication, suspected missing, or unresolved; and
 - overlapping provider closes that differ by more than one percent.
+
+Advanced anomaly rules use the documented `anomaly-detection-v1` defaults:
+two-times close changes, ten-times volume spikes with a minimum current volume
+of 10,000 and a baseline of 100, a ten-percent zero-volume price move with a
+baseline of 100, and a 30-day stale age. The scan API accepts a `thresholds`
+object for explicit local overrides; the selected thresholds are included in
+the scan result, evidence, and checkpoint identity. Low-volume baselines do
+not produce volume-spike findings, and all anomaly results remain candidates
+for review. Time-dependent results record the validation reference date; a
+report becomes stale when that date changes, even when source observations are
+unchanged.
 
 The same session-gap and level-jump checks apply to persisted FRED index
 levels; index findings are labeled separately from equity series.
 
-## Calendar-aware missing sessions
-
-Missing-session rules use `exchange_calendars` rule version
-`calendar-missing-session-v1` and the `XNYS` (NYSE) or `XNAS` (Nasdaq) session
-schedule. Calendar sessions are date labels, so weekends, Thanksgiving,
-Christmas, New Year's Day, Good Friday, DST transitions, and exceptional full
-closures are excluded from the expected-session set. FRED's SP500, DJIA,
-NASDAQCOM, NDX, and VIX series use their explicit underlying market-index
-calendar mapping rather than a generic weekday rule.
-
-Every calendar missing-session finding records the calendar source, rule
-version, calendar name/timezone, provider publication delay, as-of date, and
-the surrounding stored observations. Findings are classified as:
-
-- `expected_closure` for a documented instrument suspension;
-- `pending_publication` for a recent session within the configured provider
-  publication grace period;
-- `suspected_missing` for an eligible exchange session absent between stored
-  observations; or
-- `unresolved` when the calendar or eligibility evidence is unavailable.
-
-Listing/delisting dates and suspension intervals are explicit evidence inputs,
-keyed by series ID, `(symbol, provider)`, or symbol when calling
-`run_quality_scan`. They include a source and, where available, verification
-date. Leading and trailing history is not inferred from the first/last local
-row without expected bounds. A missing calendar never becomes a confirmed
-defect: unresolved findings have informational severity and low confidence.
-No original observation is modified, fetched, or deleted by this validation.
-
 Weekends, exchange holidays, DST, listings, suspensions, vendor delays, and
 corporate actions require review evidence before a candidate is confirmed.
+Exchange calendars are selected from the symbol catalog for equities and from
+the explicit FRED index mapping for index series. Calendar metadata changes
+invalidate a completed scan so finding classifications are recomputed.
 There are no automatic repairs or provider-preference decisions in this scan.
 
 Quality scans report `findings_examined`, `findings_stored`, and
@@ -69,7 +65,8 @@ between scan pages.
 
 When a scan reaches its finding cap, `data_quality_scan_progress` stores the
 current traversal phase (`equity`, `index`, or `cross_provider`) and a source
-key for that phase. The next run seeks directly to that key instead of
+key for that phase plus the cumulative candidate fingerprints seen so far. The
+next run seeks directly to that key instead of
 re-scanning earlier observations. The read stops at the cap after completing
 the current source item, so a batch can include all sibling candidates from
 that item without losing evidence. Partial `findings_examined` and
@@ -85,6 +82,11 @@ Reports also compare the saved scan-end source revision with the current
 source revision. A daily import after a successful scan therefore returns
 `stale: true`, `complete: false`, and the same stale state in
 `scan_completeness` until a new scan finishes.
+
+Legacy fingerprint collisions retain each duplicate finding and its original
+review events. The canonical finding receives an explicit reconciliation event
+that records the superseded finding ID and state, so conflicting review
+provenance is not silently moved or flattened.
 
 Backup merges retain imported scan runs for audit history but invalidate all
 scan progress in the merged database. The destination must be scanned again

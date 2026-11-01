@@ -165,9 +165,10 @@ def test_merge_imports_quality_findings_reviews_and_scan_metadata(tmp_path):
         )
         assert db.execute("SELECT COUNT(*) FROM data_quality_scan_runs").fetchone()[0] == 1
         progress = db.execute(
-            "SELECT status,stale,cursor_phase,cursor_source_key FROM data_quality_scan_progress"
+            "SELECT status,stale,cursor_phase,cursor_source_key,validation_reference_date "
+            "FROM data_quality_scan_progress"
         ).fetchone()
-        assert progress == ("stale", 1, "equity", None)
+        assert progress == ("stale", 1, "equity", None, scan["validation_reference_date"])
 
     merged_report = quality_report(target, limit=100)
     assert merged_report["status"] == "stale"
