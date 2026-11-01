@@ -164,6 +164,34 @@ def test_quality_scan_detects_repeated_ingestion_payloads(tmp_path):
     assert evidence["anomaly_rule_version"] == "anomaly-detection-v1"
 
 
+def test_quality_scan_keeps_distinct_repeated_payload_groups(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    with sqlite3.connect(db) as conn:
+        conn.executemany(
+            "INSERT INTO ingestion_runs "
+            "(id,series_id,retrieved_at,imported_at,payload_sha256,source_url,"
+            "provider_terms_url,first_session,last_session,observations,inserted,"
+            "updated,unchanged,stale) VALUES "
+            "(?,1,?,?,?,'https://example.test/alpaca','https://example.test/terms',"
+            "'2026-10-19','2026-10-21',2,0,0,2,0)",
+            [
+                (4, "2026-10-31T01:00:00+00:00", "2026-10-31T01:00:00+00:00", "hash-1"),
+                (5, "2026-10-31T02:00:00+00:00", "2026-10-31T02:00:00+00:00", "hash-2"),
+                (6, "2026-10-31T03:00:00+00:00", "2026-10-31T03:00:00+00:00", "hash-2"),
+            ],
+        )
+
+    run_quality_scan(db, as_of=date(2026, 11, 1))
+    findings = list_findings(db, finding_type="duplicate", code="AAPL", limit=10)
+
+    assert findings["total"] == 2
+    assert {item["evidence"]["payload_sha256"] for item in findings["items"]} == {
+        "hash-1",
+        "hash-2",
+    }
+
+
 def test_quality_scan_preserves_legacy_price_jump_review_history(tmp_path):
     db = tmp_path / "quality.sqlite3"
     seed_quality_database(db)
@@ -414,6 +442,46 @@ def test_bounded_batches_preserve_all_candidates_without_scanning_remaining_hist
     seed_quality_database(reference)
     full = run_quality_scan(reference)
     assert set(bounded) <= {item["fingerprint"] for item in full["examples"]}
+
+
+def test_resumed_scan_restores_checkpoint_volume_window(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute("DELETE FROM index_daily_closes")
+        conn.execute("DELETE FROM daily_prices")
+        conn.execute("DELETE FROM ingestion_runs")
+        conn.execute("DELETE FROM series")
+        conn.execute("DELETE FROM instruments WHERE symbol='AAPL'")
+        conn.execute(
+            "INSERT INTO series(id,symbol,provider,frequency,adjustment,data_kind) "
+            "VALUES (1,'TSLA','alpaca_sip','1d','raw_unadjusted','historical_eod')"
+        )
+        conn.execute(
+            "INSERT INTO ingestion_runs "
+            "(id,series_id,retrieved_at,imported_at,payload_sha256,source_url,"
+            "provider_terms_url,first_session,last_session,observations,inserted,"
+            "updated,unchanged,stale) VALUES "
+            "(1,1,'2026-10-31T00:00:00+00:00','2026-10-31T00:00:00+00:00',"
+            "'hash-tsla','https://example.test/alpaca','https://example.test/terms',"
+            "'2026-10-20','2026-10-21',2,2,0,0,0)"
+        )
+        conn.executemany(
+            "INSERT INTO daily_prices "
+            "(series_id,session_date,open,high,low,close,volume,retrieved_at,ingestion_id) "
+            "VALUES (1,?,'10','9','8','10',?,'2026-10-31T00:00:00+00:00',1)",
+            [("2026-10-20", 1_000), ("2026-10-21", 20_000)],
+        )
+
+    first = run_quality_scan(db, max_findings=1, as_of=date(2026, 11, 1))
+    assert first["cursor_source_key"] == {
+        "series_id": 1,
+        "session_date": "2026-10-20",
+    }
+
+    second = run_quality_scan(db, max_findings=1, as_of=date(2026, 11, 1))
+
+    assert any(item["rule"] == "volume_spike_candidate" for item in second["examples"])
 
 
 def test_resumed_quality_scan_seeks_from_phase_source_key(tmp_path, monkeypatch):

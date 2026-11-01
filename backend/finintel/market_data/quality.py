@@ -60,6 +60,7 @@ def _fingerprint(
     rule: str,
     adjustment: str | None = None,
     frequency: str | None = None,
+    identity_extra: str | None = None,
 ) -> str:
     identity = {
         "instrument_kind": instrument_kind,
@@ -72,6 +73,8 @@ def _fingerprint(
         "adjustment": adjustment,
         "frequency": frequency,
     }
+    if identity_extra is not None:
+        identity["identity_extra"] = identity_extra
     value = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     return sha256(value.encode("utf-8")).hexdigest()
 
@@ -90,6 +93,7 @@ def _candidate(
     evidence: dict,
     adjustment: str | None = None,
     frequency: str | None = None,
+    fingerprint_extra: str | None = None,
 ) -> dict:
     return {
         "instrument_kind": instrument_kind,
@@ -114,6 +118,7 @@ def _candidate(
             rule=rule,
             adjustment=adjustment,
             frequency=frequency,
+            identity_extra=fingerprint_extra,
         ),
     }
 
@@ -206,6 +211,7 @@ def _ingestion_anomaly_candidates(
                 rule="repeated_ingestion_payload",
                 adjustment=adjustment,
                 frequency=frequency,
+                fingerprint_extra=payload,
                 evidence={
                     "anomaly_rule_version": ANOMALY_RULE_VERSION,
                     "candidate_only": True,
@@ -503,7 +509,11 @@ def _iter_cross_provider_rows(
         )
 
 
-def _equity_cursor_previous(path: Path, source_key: dict[str, object] | None):
+def _equity_cursor_previous(
+    path: Path,
+    source_key: dict[str, object] | None,
+    volume_lookback: int,
+):
     if source_key is None:
         return None
     conn = _read_connection(path)
@@ -516,9 +526,10 @@ def _equity_cursor_previous(path: Path, source_key: dict[str, object] | None):
             (source_key["series_id"], source_key["session_date"]),
         ).fetchone()
         history_rows = conn.execute(
-            "SELECT volume FROM daily_prices WHERE series_id = ? AND session_date < ? "
-            "ORDER BY session_date DESC LIMIT 20",
-            (source_key["series_id"], source_key["session_date"]),
+            "SELECT volume FROM daily_prices WHERE series_id = ? AND session_date <= ? "
+            "AND volume >= 0 "
+            "ORDER BY session_date DESC LIMIT ?",
+            (source_key["series_id"], source_key["session_date"], volume_lookback),
         ).fetchall()
     finally:
         conn.close()
@@ -531,7 +542,14 @@ def _equity_cursor_previous(path: Path, source_key: dict[str, object] | None):
     previous_close = _decimal(row["close"])
     if previous_close is None:
         return None
-    history = [item[0] for item in history_rows]
+    history = []
+    for item in reversed(history_rows):
+        try:
+            volume = int(item[0])
+        except (TypeError, ValueError):
+            continue
+        if volume >= 0:
+            history.append(volume)
     return previous_date, previous_close, row["session_date"], row["volume"], history
 
 
@@ -674,7 +692,7 @@ def _read_candidates(
             previous: tuple[date, object, str, int | None] | None = None
             volume_history: list[object] = []
             if checkpoint_key is not None and series_id == checkpoint_key.get("series_id"):
-                context = _equity_cursor_previous(path, checkpoint_key)
+                context = _equity_cursor_previous(path, checkpoint_key, thresholds.volume_lookback)
                 if context is not None:
                     previous = context[:4]
                     volume_history = list(context[4])
