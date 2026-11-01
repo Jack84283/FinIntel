@@ -4,10 +4,10 @@ FinIntel's local Data Validation page includes a durable quality scan. The scan
 stores candidate findings in SQLite schema v14 and never changes an observation.
 Each finding includes the symbol, provider, session, rule, severity,
 confidence, normalized evidence, and a stable fingerprint. The fingerprint
-also includes the stable series identity (series ID, frequency, adjustment,
-and any related comparison series), so separate historical series cannot
-overwrite one another. Re-running a scan updates the evidence for the same
-candidate without resetting its review state.
+also includes the destination series identity (series ID, frequency, and
+adjustment), so separate historical series cannot overwrite one another.
+Re-running a scan updates the evidence for the same candidate without
+resetting its review state, including after a backup merge remaps series IDs.
 
 The current deterministic rules cover:
 
@@ -37,6 +37,14 @@ before processing the page; it does not hold FinIntel's process-wide write
 lock. Only the short schema migration and candidate persistence transactions
 use that lock, so daily acquisition, imports, backups, and reviews can commit
 between scan pages.
+
+When a scan reaches its finding cap, `data_quality_scan_progress` stores the
+candidate cursor and the next run resumes from that cursor. A scan keeps the
+SQLite `data_version` observed at its start and end; if source data changes
+during the read, the result is marked `stale` and the next run restarts from
+the beginning. Cross-provider comparison reads use the series scan index and
+merge per-series primary-key streams, avoiding repeated temporary database
+sorts.
 
 Review transitions are recorded in `data_quality_reviews` and the current
 state is kept on `data_quality_findings` (`candidate`, `confirmed`, `rejected`,

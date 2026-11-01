@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from finintel.market_data.quality import _fingerprint
 from finintel.storage.db import (
     SCHEMA_VERSION,
     StorageError,
@@ -68,6 +69,7 @@ def _validated(path: Path, *, version: bool = True) -> dict[str, object]:
                     "data_quality_findings",
                     "data_quality_reviews",
                     "data_quality_scan_runs",
+                    "data_quality_scan_progress",
                 )
                 if table in tables
             }
@@ -188,6 +190,7 @@ def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, obje
                     "data_quality_findings",
                     "data_quality_reviews",
                     "data_quality_scan_runs",
+                    "data_quality_scan_progress",
                 )
                 if table in tables
             }
@@ -256,35 +259,98 @@ def _merge(staging: Path, source: Path) -> None:
                     "WHERE excluded.retrieved_at > daily_prices.retrieved_at"
                 )
                 if "data_quality_findings" in incoming_tables:
-                    # Findings refer to source-database series IDs. Insert by
-                    # fingerprint and then map every incoming finding ID to the
-                    # destination row so review history remains attached.
-                    dest.execute(
-                        "INSERT INTO data_quality_findings("
-                        "instrument_kind,code,series_id,provider,session_date,finding_type,"
-                        "severity,confidence,rule,evidence_json,fingerprint,review_state,"
-                        "resolution_note,created_at,updated_at) "
-                        "SELECT f.instrument_kind,f.code,map.new_id,f.provider,f.session_date,"
+                    # Findings refer to source-database series IDs. Recompute
+                    # each fingerprint after applying the destination series
+                    # map; retaining the source hash would create a duplicate
+                    # on the next scan of the restored database.
+                    source_rows = dest.execute(
+                        "SELECT f.id,f.instrument_kind,f.code,f.provider,f.session_date,"
                         "f.finding_type,f.severity,f.confidence,f.rule,f.evidence_json,"
-                        "f.fingerprint,f.review_state,f.resolution_note,f.created_at,f.updated_at "
+                        "f.review_state,f.resolution_note,f.created_at,f.updated_at,"
+                        "map.new_id,dst_series.adjustment,dst_series.frequency "
                         "FROM incoming.data_quality_findings f "
                         "LEFT JOIN _series_map map ON map.old_id=f.series_id "
+                        "LEFT JOIN series dst_series ON dst_series.id=map.new_id "
                         "WHERE f.series_id IS NULL OR map.old_id IS NOT NULL "
-                        "ON CONFLICT(fingerprint) DO UPDATE SET "
-                        "instrument_kind=excluded.instrument_kind,code=excluded.code,"
-                        "series_id=excluded.series_id,provider=excluded.provider,"
-                        "session_date=excluded.session_date,finding_type=excluded.finding_type,"
-                        "severity=excluded.severity,confidence=excluded.confidence,"
-                        "rule=excluded.rule,evidence_json=excluded.evidence_json,"
-                        "review_state=excluded.review_state,"
-                        "resolution_note=excluded.resolution_note,updated_at=excluded.updated_at "
-                        "WHERE excluded.updated_at > data_quality_findings.updated_at"
+                        "ORDER BY f.id"
+                    ).fetchall()
+                    transformed = []
+                    source_fingerprints = []
+                    for row in source_rows:
+                        fingerprint = _fingerprint(
+                            instrument_kind=row[1],
+                            series_id=row[14],
+                            code=row[2],
+                            provider=row[3],
+                            session_date=row[4],
+                            finding_type=row[5],
+                            rule=row[8],
+                            adjustment=row[15],
+                            frequency=row[16],
+                        )
+                        source_fingerprints.append((row[0], fingerprint))
+                        transformed.append(
+                            (
+                                fingerprint,
+                                row[0],
+                                row[1],
+                                row[2],
+                                row[14],
+                                row[3],
+                                row[4],
+                                row[5],
+                                row[6],
+                                row[7],
+                                row[8],
+                                row[9],
+                                row[10],
+                                row[11],
+                                row[12],
+                                row[13],
+                            )
+                        )
+                    # Multiple source rows can collapse to one destination
+                    # fingerprint. Keep the newest source evidence
+                    # deterministically, while mapping every source ID to the
+                    # one surviving destination finding for review import.
+                    winners = {}
+                    for item in transformed:
+                        fingerprint = item[0]
+                        previous = winners.get(fingerprint)
+                        if previous is None or (item[15], item[1]) > (previous[15], previous[1]):
+                            winners[fingerprint] = item
+                    for item in winners.values():
+                        dest.execute(
+                            "INSERT INTO data_quality_findings("
+                            "instrument_kind,code,series_id,provider,session_date,finding_type,"
+                            "severity,confidence,rule,evidence_json,fingerprint,review_state,"
+                            "resolution_note,created_at,updated_at) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                            "ON CONFLICT(fingerprint) DO UPDATE SET "
+                            "instrument_kind=excluded.instrument_kind,code=excluded.code,"
+                            "series_id=excluded.series_id,provider=excluded.provider,"
+                            "session_date=excluded.session_date,finding_type=excluded.finding_type,"
+                            "severity=excluded.severity,confidence=excluded.confidence,"
+                            "rule=excluded.rule,evidence_json=excluded.evidence_json,"
+                            "review_state=excluded.review_state,"
+                            "resolution_note=excluded.resolution_note,updated_at=excluded.updated_at "
+                            "WHERE excluded.updated_at > data_quality_findings.updated_at",
+                            item[2:12] + (item[0],) + item[12:],
+                        )
+                    dest.execute(
+                        "CREATE TEMP TABLE _quality_finding_source_map("
+                        "old_id INTEGER PRIMARY KEY,fingerprint TEXT NOT NULL)"
+                    )
+                    dest.executemany(
+                        "INSERT INTO _quality_finding_source_map(old_id,fingerprint) VALUES (?,?)",
+                        source_fingerprints,
                     )
                     dest.execute(
                         "CREATE TEMP TABLE _quality_finding_map AS "
-                        "SELECT src.id AS old_id,dst.id AS new_id "
-                        "FROM incoming.data_quality_findings src "
-                        "JOIN data_quality_findings dst ON dst.fingerprint=src.fingerprint"
+                        "SELECT source.old_id,destination.id AS new_id "
+                        "FROM _quality_finding_source_map source "
+                        "JOIN data_quality_findings destination "
+                        "ON destination.fingerprint=source.fingerprint"
                     )
                     if "data_quality_reviews" in incoming_tables:
                         dest.execute(
@@ -309,6 +375,32 @@ def _merge(staging: Path, source: Path) -> None:
                             "SELECT started_at,completed_at,max_findings,findings_examined,"
                             "findings_stored,total_known_findings,persisted_findings_total,"
                             "status,truncated,run_key FROM incoming.data_quality_scan_runs"
+                        )
+                    if "data_quality_scan_progress" in incoming_tables:
+                        dest.execute(
+                            "INSERT INTO data_quality_scan_progress("
+                            "scan_key,source_identity,source_data_version_start,"
+                            "source_data_version_end,cursor_start,cursor_next,max_findings,"
+                            "findings_examined,findings_stored,total_known_findings,"
+                            "persisted_findings_total,status,stale,updated_at,last_run_key) "
+                            "SELECT scan_key,source_identity,source_data_version_start,"
+                            "source_data_version_end,cursor_start,cursor_next,max_findings,"
+                            "findings_examined,findings_stored,total_known_findings,"
+                            "persisted_findings_total,status,stale,updated_at,last_run_key "
+                            "FROM incoming.data_quality_scan_progress WHERE 1 "
+                            "ON CONFLICT(scan_key) DO UPDATE SET "
+                            "source_identity=excluded.source_identity,"
+                            "source_data_version_start=excluded.source_data_version_start,"
+                            "source_data_version_end=excluded.source_data_version_end,"
+                            "cursor_start=excluded.cursor_start,cursor_next=excluded.cursor_next,"
+                            "max_findings=excluded.max_findings,"
+                            "findings_examined=excluded.findings_examined,"
+                            "findings_stored=excluded.findings_stored,"
+                            "total_known_findings=excluded.total_known_findings,"
+                            "persisted_findings_total=excluded.persisted_findings_total,"
+                            "status=excluded.status,stale=excluded.stale,"
+                            "updated_at=excluded.updated_at,last_run_key=excluded.last_run_key "
+                            "WHERE excluded.updated_at > data_quality_scan_progress.updated_at"
                         )
                 dest.execute(
                     "INSERT OR IGNORE INTO symbol_catalog SELECT * FROM incoming.symbol_catalog"
@@ -457,6 +549,7 @@ def _merge(staging: Path, source: Path) -> None:
                 )
                 if "data_quality_findings" in incoming_tables:
                     dest.execute("DROP TABLE _quality_finding_map")
+                    dest.execute("DROP TABLE _quality_finding_source_map")
                 dest.execute("DROP TABLE _ingestion_map")
                 dest.execute("DROP TABLE _series_map")
         finally:

@@ -162,6 +162,35 @@ def test_repeated_quality_scans_reuse_finding_rows(tmp_path):
     assert after == before
 
 
+def test_truncated_quality_scan_resumes_from_durable_cursor(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+
+    first = run_quality_scan(db, max_findings=2)
+    assert first["truncated"] is True
+    assert first["cursor_start"] == 0
+    assert first["cursor_next"] == 2
+
+    second = run_quality_scan(db, max_findings=2)
+    assert second["resumed"] is True
+    assert second["cursor_start"] == first["cursor_next"]
+    assert second["persisted_findings_total"] > first["persisted_findings_total"]
+
+    result = second
+    for _ in range(10):
+        if result["complete"]:
+            break
+        result = run_quality_scan(db, max_findings=2)
+    assert result["complete"] is True
+    assert result["truncated"] is False
+    assert result["persisted_findings_total"] == result["total_known_findings"]
+    with sqlite3.connect(db) as conn:
+        progress = conn.execute(
+            "SELECT status,cursor_next,stale FROM data_quality_scan_progress WHERE scan_key='all'"
+        ).fetchone()
+        assert progress == ("completed", 0, 0)
+
+
 def test_quality_scan_reports_truncation_and_report_counts_all_known_findings(tmp_path):
     db = tmp_path / "quality.sqlite3"
     seed_quality_database(db)
@@ -186,6 +215,28 @@ def test_quality_scan_reports_truncation_and_report_counts_all_known_findings(tm
     assert sum(report["review_states"].values()) == 2
 
 
+def test_cross_provider_query_plan_uses_scan_indexes(tmp_path):
+    db = tmp_path / "quality.sqlite3"
+    seed_quality_database(db)
+    with sqlite3.connect(db) as conn:
+        series_plan = [
+            row[-1]
+            for row in conn.execute(
+                "EXPLAIN QUERY PLAN SELECT id,symbol,provider,frequency,adjustment "
+                "FROM series ORDER BY symbol,frequency,adjustment,provider,id"
+            )
+        ]
+        price_plan = [
+            row[-1]
+            for row in conn.execute(
+                "EXPLAIN QUERY PLAN SELECT session_date,close FROM daily_prices "
+                "WHERE series_id=1 ORDER BY session_date LIMIT 512"
+            )
+        ]
+    assert any("data_quality_series_scan_order" in detail for detail in series_plan)
+    assert not any("USE TEMP B-TREE" in detail for detail in series_plan + price_plan)
+
+
 def test_quality_scan_does_not_hold_write_lock_during_read_only_scan(tmp_path, monkeypatch):
     db = tmp_path / "quality.sqlite3"
     seed_quality_database(db)
@@ -195,11 +246,11 @@ def test_quality_scan_does_not_hold_write_lock_during_read_only_scan(tmp_path, m
     errors = []
     original = quality_module._read_candidates
 
-    def blocked_read(path, max_findings):
+    def blocked_read(path, max_findings, **kwargs):
         entered.set()
         if not release.wait(5):
             raise AssertionError("test did not release the read phase")
-        return original(path, max_findings)
+        return original(path, max_findings, **kwargs)
 
     monkeypatch.setattr(quality_module, "_read_candidates", blocked_read)
 
@@ -290,7 +341,13 @@ def test_quality_scan_allows_a_real_sqlite_writer_between_read_chunks(tmp_path, 
     assert writer_errors == []
     assert errors == []
     assert not scan_thread.is_alive()
-    assert results and results[0]["status"] == "completed"
+    assert results and results[0]["status"] == "stale"
+    assert results[0]["stale"] is True
+    assert results[0]["source_data_version_end"] != results[0]["source_data_version_start"]
+    report = quality_report(db, limit=100)
+    assert report["status"] == "stale"
+    assert report["complete"] is False
+    assert report["scan_completeness"]["stale"] is True
 
 
 def test_cross_provider_scan_handles_realistic_history_without_materializing_rows(tmp_path):

@@ -379,6 +379,8 @@ CREATE INDEX IF NOT EXISTS data_quality_findings_filter
 ON data_quality_findings(review_state, finding_type, provider, session_date);
 CREATE INDEX IF NOT EXISTS data_quality_findings_series
 ON data_quality_findings(series_id, code, session_date);
+CREATE INDEX IF NOT EXISTS data_quality_series_scan_order
+ON series(symbol, frequency, adjustment, provider, id);
 CREATE TABLE IF NOT EXISTS data_quality_reviews (
     id INTEGER PRIMARY KEY,
     finding_id INTEGER NOT NULL REFERENCES data_quality_findings(id) ON DELETE CASCADE,
@@ -410,6 +412,31 @@ CREATE TABLE IF NOT EXISTS data_quality_scan_runs (
 SCHEMA_V14_QUALITY_SCAN_INDEX = """
 CREATE INDEX IF NOT EXISTS data_quality_scan_runs_completed
 ON data_quality_scan_runs(completed_at DESC, id DESC);
+"""
+
+SCHEMA_V14_QUALITY_PROGRESS_TABLE = """
+CREATE TABLE IF NOT EXISTS data_quality_scan_progress (
+    scan_key TEXT PRIMARY KEY,
+    source_identity TEXT NOT NULL,
+    source_data_version_start INTEGER NOT NULL,
+    source_data_version_end INTEGER NOT NULL,
+    cursor_start INTEGER NOT NULL CHECK(cursor_start >= 0),
+    cursor_next INTEGER NOT NULL CHECK(cursor_next >= 0),
+    max_findings INTEGER NOT NULL CHECK(max_findings > 0),
+    findings_examined INTEGER NOT NULL CHECK(findings_examined >= 0),
+    findings_stored INTEGER NOT NULL CHECK(findings_stored >= 0),
+    total_known_findings INTEGER NOT NULL CHECK(total_known_findings >= 0),
+    persisted_findings_total INTEGER NOT NULL CHECK(persisted_findings_total >= 0),
+    status TEXT NOT NULL CHECK(status IN ('partial', 'completed', 'stale')),
+    stale INTEGER NOT NULL CHECK(stale IN (0, 1)),
+    updated_at TEXT NOT NULL,
+    last_run_key TEXT
+);
+"""
+
+SCHEMA_V14_QUALITY_PROGRESS_INDEX = """
+CREATE INDEX IF NOT EXISTS data_quality_scan_progress_updated
+ON data_quality_scan_progress(updated_at DESC);
 """
 
 # Keep this seed data in the storage migration so a read-only API can expose a
@@ -828,6 +855,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
                     conn.execute(statement)
             conn.execute(SCHEMA_V14_QUALITY_SCAN_TABLE)
             conn.execute(SCHEMA_V14_QUALITY_SCAN_INDEX)
+            conn.execute(SCHEMA_V14_QUALITY_PROGRESS_TABLE)
+            conn.execute(SCHEMA_V14_QUALITY_PROGRESS_INDEX)
             conn.execute("PRAGMA user_version = 14")
             conn.commit()
         except sqlite3.Error as exc:
@@ -857,8 +886,14 @@ def _write_connection(path: Path) -> sqlite3.Connection:
             _snapshot(path, "pre-restore")
         _migrate(conn)
         if conn.execute("PRAGMA user_version").fetchone()[0] >= 14:
+            for statement in SCHEMA_V14_QUALITY_INDEX.split(";"):
+                statement = statement.strip()
+                if statement:
+                    conn.execute(statement)
             conn.execute(SCHEMA_V14_QUALITY_SCAN_TABLE)
             conn.execute(SCHEMA_V14_QUALITY_SCAN_INDEX)
+            conn.execute(SCHEMA_V14_QUALITY_PROGRESS_TABLE)
+            conn.execute(SCHEMA_V14_QUALITY_PROGRESS_INDEX)
             conn.commit()
         return conn
     except (sqlite3.Error, StorageError):

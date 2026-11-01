@@ -236,6 +236,8 @@ const additionalChinese: Readonly<Record<string, string>> = {
   "running": "运行中",
   "queued": "排队中",
   "completed": "已完成",
+  "partial": "部分完成",
+  "stale": "数据已变化，需重新扫描",
   "failed": "失败",
   "Backend": "后端服务",
 

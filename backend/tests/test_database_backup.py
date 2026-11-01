@@ -158,6 +158,18 @@ def test_merge_imports_quality_findings_reviews_and_scan_metadata(tmp_path):
         )
         assert db.execute("SELECT COUNT(*) FROM data_quality_scan_runs").fetchone()[0] == 1
 
+    run_quality_scan(target)
+    with sqlite3.connect(target) as db:
+        assert db.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0] == len(
+            finding_rows
+        )
+        assert (
+            db.execute(
+                "SELECT COUNT(*) FROM data_quality_findings WHERE review_state='confirmed'"
+            ).fetchone()[0]
+            == 1
+        )
+
     # Re-merging the same backup is idempotent by fingerprint, review event,
     # and scan-run key.
     restore_backup(snapshot["id"], "merge", db=target)
@@ -166,7 +178,7 @@ def test_merge_imports_quality_findings_reviews_and_scan_metadata(tmp_path):
             finding_rows
         )
         assert db.execute("SELECT COUNT(*) FROM data_quality_reviews").fetchone()[0] == 1
-        assert db.execute("SELECT COUNT(*) FROM data_quality_scan_runs").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM data_quality_scan_runs").fetchone()[0] == 2
 
 
 def test_replace_and_undo_using_recovery_backup(tmp_path):

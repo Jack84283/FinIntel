@@ -5,6 +5,7 @@ candidate findings with redacted evidence, and review actions are append-only
 history plus a current review state.
 """
 
+import heapq
 import json
 import sqlite3
 from collections import Counter
@@ -27,7 +28,10 @@ FINDING_TYPES = (
 REVIEW_STATES = ("candidate", "confirmed", "rejected", "accepted_correction")
 SEVERITIES = ("info", "warning", "error")
 CONFIDENCES = ("low", "medium", "high")
-_SCAN_BATCH_SIZE = 512
+# Large enough to amortize SQLite connection setup on long histories while
+# still keeping each read transaction bounded and disposable.
+_SCAN_BATCH_SIZE = 8192
+_SCAN_KEY = "all"
 
 
 def _iso_now() -> str:
@@ -45,16 +49,10 @@ def _fingerprint(
     rule: str,
     adjustment: str | None = None,
     frequency: str | None = None,
-    related_series_ids: tuple[int, ...] = (),
 ) -> str:
-    series_ids = sorted(
-        series_value
-        for series_value in (series_id, *related_series_ids)
-        if series_value is not None
-    )
     identity = {
         "instrument_kind": instrument_kind,
-        "series_ids": series_ids,
+        "series_id": series_id,
         "code": code,
         "provider": provider,
         "session_date": session_date,
@@ -81,7 +79,6 @@ def _candidate(
     evidence: dict,
     adjustment: str | None = None,
     frequency: str | None = None,
-    related_series_ids: tuple[int, ...] = (),
 ) -> dict:
     return {
         "instrument_kind": instrument_kind,
@@ -104,7 +101,6 @@ def _candidate(
             rule=rule,
             adjustment=adjustment,
             frequency=frequency,
-            related_series_ids=related_series_ids,
         ),
     }
 
@@ -157,7 +153,66 @@ def _iter_query_rows(
             return
 
 
-def _read_candidates(path: Path, max_findings: int) -> tuple[list[dict], int]:
+def _iter_series_prices(path: Path, series: sqlite3.Row) -> Iterator[dict]:
+    """Read one series through its primary-key order without a join sort."""
+
+    last_session: str | None = None
+    while True:
+        conn = _read_connection(path, snapshot=False)
+        if conn is None:
+            raise FileNotFoundError(path)
+        try:
+            parameters: list[object] = [series["id"]]
+            query = "SELECT session_date, close FROM daily_prices WHERE series_id = ?"
+            if last_session is not None:
+                query += " AND session_date > ?"
+                parameters.append(last_session)
+            query += " ORDER BY session_date LIMIT ?"
+            parameters.append(_SCAN_BATCH_SIZE)
+            rows = conn.execute(query, parameters).fetchall()
+        finally:
+            conn.close()
+        if not rows:
+            return
+        for row in rows:
+            yield {
+                "series_id": series["id"],
+                "symbol": series["symbol"],
+                "provider": series["provider"],
+                "frequency": series["frequency"],
+                "adjustment": series["adjustment"],
+                "session_date": row["session_date"],
+                "close": row["close"],
+            }
+        last_session = rows[-1]["session_date"]
+        if len(rows) < _SCAN_BATCH_SIZE:
+            return
+
+
+def _iter_cross_provider_rows(path: Path) -> Iterator[dict]:
+    """Merge per-series primary-key streams in Python instead of SQL-sorting bars."""
+
+    series_rows = _iter_query_rows(
+        path,
+        select_sql=("SELECT id, symbol, provider, frequency, adjustment FROM series"),
+        order_expression="symbol, frequency, adjustment, provider, id",
+        key_columns=("symbol", "frequency", "adjustment", "provider", "id"),
+    )
+    for (symbol, frequency, adjustment), grouped in groupby(
+        series_rows,
+        key=lambda row: (row["symbol"], row["frequency"], row["adjustment"]),
+    ):
+        series_group = list(grouped)
+        streams = [_iter_series_prices(path, series) for series in series_group]
+        yield from heapq.merge(
+            *streams,
+            key=lambda row: (row["session_date"], row["provider"], row["series_id"]),
+        )
+
+
+def _read_candidates(
+    path: Path, max_findings: int, *, start_after: int = 0
+) -> tuple[list[dict], int]:
     rows = _iter_query_rows(
         path,
         select_sql=(
@@ -186,6 +241,8 @@ def _read_candidates(path: Path, max_findings: int) -> tuple[list[dict], int]:
     def add(item: dict) -> bool:
         nonlocal findings_examined
         findings_examined += 1
+        if findings_examined <= start_after:
+            return True
         if len(findings) >= max_findings:
             return False
         findings.append(item)
@@ -400,23 +457,7 @@ def _read_candidates(path: Path, max_findings: int) -> tuple[list[dict], int]:
             if close is not None and close > 0:
                 previous = (current_date, close)
 
-    provider_rows = _iter_query_rows(
-        path,
-        select_sql=(
-            "SELECT s.id AS series_id, s.symbol, s.provider, s.frequency, s.adjustment, "
-            "dp.session_date, dp.close FROM series AS s "
-            "JOIN daily_prices AS dp ON dp.series_id = s.id"
-        ),
-        order_expression=("s.symbol, s.frequency, s.adjustment, dp.session_date, s.provider, s.id"),
-        key_columns=(
-            "symbol",
-            "frequency",
-            "adjustment",
-            "session_date",
-            "provider",
-            "series_id",
-        ),
-    )
+    provider_rows = _iter_cross_provider_rows(path)
     for (symbol, frequency, adjustment, session), observation_group in groupby(
         provider_rows,
         key=lambda row: (
@@ -444,7 +485,6 @@ def _read_candidates(path: Path, max_findings: int) -> tuple[list[dict], int]:
                         provider=provider,
                         adjustment=adjustment,
                         frequency=frequency,
-                        related_series_ids=(right["series_id"],),
                         session_date=session,
                         finding_type="provider_divergence",
                         severity="warning",
@@ -522,7 +562,7 @@ def _persist_scan_run(
     persisted_findings_total: int,
     status: str,
     truncated: bool,
-) -> int:
+) -> tuple[int, str]:
     metadata = {
         "started_at": started_at,
         "completed_at": completed_at,
@@ -562,7 +602,7 @@ def _persist_scan_run(
         row = conn.execute(
             "SELECT id FROM data_quality_scan_runs WHERE run_key = ?", (run_key,)
         ).fetchone()
-        return int(row[0])
+        return int(row[0]), run_key
     except sqlite3.Error:
         conn.rollback()
         raise
@@ -607,9 +647,129 @@ def _latest_scan_run(path: Path) -> dict | None:
         row = conn.execute(
             "SELECT id,started_at,completed_at,max_findings,findings_examined,findings_stored,"
             "total_known_findings,persisted_findings_total,status,truncated "
-            "FROM data_quality_scan_runs ORDER BY completed_at DESC, id DESC LIMIT 1"
+            ",run_key FROM data_quality_scan_runs ORDER BY completed_at DESC, id DESC LIMIT 1"
         ).fetchone()
         return dict(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def _source_identity(path: Path) -> str:
+    conn = _read_connection(path, snapshot=False)
+    if conn is None:
+        raise FileNotFoundError(path)
+    try:
+        facts = {
+            "schema_version": conn.execute("PRAGMA user_version").fetchone()[0],
+            "series": conn.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM series").fetchone(),
+            "daily_prices": conn.execute(
+                "SELECT COUNT(*), COALESCE(MAX(rowid), 0), "
+                "COALESCE(MAX(retrieved_at), '') FROM daily_prices"
+            ).fetchone(),
+            "index_daily_closes": conn.execute(
+                "SELECT COUNT(*), COALESCE(MAX(rowid), 0), "
+                "COALESCE(MAX(retrieved_at), '') FROM index_daily_closes"
+            ).fetchone(),
+        }
+        normalized = {
+            key: list(value) if isinstance(value, sqlite3.Row) else value
+            for key, value in facts.items()
+        }
+        return sha256(
+            json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+    finally:
+        conn.close()
+
+
+def _scan_progress(path: Path) -> dict | None:
+    conn = _read_connection(path)
+    if conn is None:
+        raise FileNotFoundError(path)
+    try:
+        if (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='data_quality_scan_progress'"
+            ).fetchone()
+            is None
+        ):
+            return None
+        row = conn.execute(
+            "SELECT scan_key,source_identity,source_data_version_start,"
+            "source_data_version_end,cursor_start,cursor_next,max_findings,"
+            "findings_examined,findings_stored,total_known_findings,"
+            "persisted_findings_total,status,stale,updated_at,last_run_key "
+            "FROM data_quality_scan_progress WHERE scan_key = ?",
+            (_SCAN_KEY,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+@serialized_storage_write
+def _persist_scan_progress(
+    path: Path,
+    *,
+    source_identity: str,
+    source_data_version_start: int,
+    source_data_version_end: int,
+    cursor_start: int,
+    cursor_next: int,
+    max_findings: int,
+    findings_examined: int,
+    findings_stored: int,
+    total_known_findings: int,
+    persisted_findings_total: int,
+    status: str,
+    stale: bool,
+    updated_at: str,
+    last_run_key: str,
+) -> None:
+    conn = _write_connection(path)
+    try:
+        conn.execute("BEGIN")
+        conn.execute(
+            "INSERT INTO data_quality_scan_progress("
+            "scan_key,source_identity,source_data_version_start,source_data_version_end,"
+            "cursor_start,cursor_next,max_findings,findings_examined,findings_stored,"
+            "total_known_findings,persisted_findings_total,status,stale,updated_at,last_run_key) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(scan_key) DO UPDATE SET "
+            "source_identity=excluded.source_identity,"
+            "source_data_version_start=excluded.source_data_version_start,"
+            "source_data_version_end=excluded.source_data_version_end,"
+            "cursor_start=excluded.cursor_start,cursor_next=excluded.cursor_next,"
+            "max_findings=excluded.max_findings,"
+            "findings_examined=excluded.findings_examined,"
+            "findings_stored=excluded.findings_stored,"
+            "total_known_findings=excluded.total_known_findings,"
+            "persisted_findings_total=excluded.persisted_findings_total,"
+            "status=excluded.status,stale=excluded.stale,updated_at=excluded.updated_at,"
+            "last_run_key=excluded.last_run_key",
+            (
+                _SCAN_KEY,
+                source_identity,
+                source_data_version_start,
+                source_data_version_end,
+                cursor_start,
+                cursor_next,
+                max_findings,
+                findings_examined,
+                findings_stored,
+                total_known_findings,
+                persisted_findings_total,
+                status,
+                int(stale),
+                updated_at,
+                last_run_key,
+            ),
+        )
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -627,14 +787,43 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
     # the potentially long read-only scan does not hold the process write lock.
     started_at = _iso_now()
     _ensure_quality_schema(path)
-    candidates, findings_examined = _read_candidates(path, max_findings)
+    source_identity = _source_identity(path)
+    version_connection = _read_connection(path, snapshot=False)
+    if version_connection is None:
+        raise FileNotFoundError(path)
+    source_data_version_start = int(version_connection.execute("PRAGMA data_version").fetchone()[0])
+    progress = _scan_progress(path)
+    cursor_start = 0
+    if (
+        progress is not None
+        and progress["status"] == "partial"
+        and not progress["stale"]
+        and progress["source_identity"] == source_identity
+    ):
+        cursor_start = int(progress["cursor_next"])
+    try:
+        candidates, findings_examined = _read_candidates(
+            path, max_findings, start_after=cursor_start
+        )
+        source_data_version_end = int(
+            version_connection.execute("PRAGMA data_version").fetchone()[0]
+        )
+    finally:
+        version_connection.close()
+    source_changed = (
+        source_data_version_end != source_data_version_start
+        or _source_identity(path) != source_identity
+    )
     _persist(path, candidates)
     findings_stored = len(candidates)
     total_known_findings, _ = _stored_finding_summary(path)
-    truncated = findings_examined > findings_stored
-    status = "partial" if truncated else "completed"
+    cursor_next = cursor_start + findings_stored
+    truncated = findings_examined > cursor_next
+    stale = source_changed
+    complete = not truncated and not stale
+    status = "completed" if complete else "partial"
     completed_at = _iso_now()
-    scan_id = _persist_scan_run(
+    scan_id, run_key = _persist_scan_run(
         path,
         started_at=started_at,
         completed_at=completed_at,
@@ -646,13 +835,36 @@ def run_quality_scan(path: Path, *, max_findings: int = 1000) -> dict:
         status=status,
         truncated=truncated,
     )
+    _persist_scan_progress(
+        path,
+        source_identity=source_identity,
+        source_data_version_start=source_data_version_start,
+        source_data_version_end=source_data_version_end,
+        cursor_start=cursor_start,
+        cursor_next=0 if stale or complete else cursor_next,
+        max_findings=max_findings,
+        findings_examined=findings_examined,
+        findings_stored=findings_stored,
+        total_known_findings=findings_examined,
+        persisted_findings_total=total_known_findings,
+        status="stale" if stale else status,
+        stale=stale,
+        updated_at=completed_at,
+        last_run_key=run_key,
+    )
     counts = Counter(item["finding_type"] for item in candidates)
     severity = Counter(item["severity"] for item in candidates)
     return {
         "scan_id": scan_id,
-        "status": status,
-        "complete": not truncated,
+        "status": "stale" if stale else status,
+        "complete": complete,
         "truncated": truncated,
+        "stale": stale,
+        "source_data_version_start": source_data_version_start,
+        "source_data_version_end": source_data_version_end,
+        "cursor_start": cursor_start,
+        "cursor_next": 0 if stale or complete else cursor_next,
+        "resumed": cursor_start > 0,
         "max_findings": max_findings,
         "findings_examined": findings_examined,
         "findings_stored": findings_stored,
@@ -803,11 +1015,28 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
     findings = list_findings(path, limit=limit)
     persisted_findings_total, counts = _stored_finding_summary(path)
     scan_run = _latest_scan_run(path)
+    progress = _scan_progress(path)
+    scan_metadata_available = (
+        scan_run is not None
+        and progress is not None
+        and progress["last_run_key"] == scan_run["run_key"]
+    )
     pagination_truncated = bool(findings["truncated"])
-    scan_truncated = bool(scan_run["truncated"]) if scan_run is not None else False
-    scan_complete = scan_run is not None and not scan_truncated
+    scan_truncated = bool(scan_run["truncated"]) if scan_metadata_available else False
+    scan_stale = bool(progress["stale"]) if scan_metadata_available else False
+    scan_complete = (
+        scan_metadata_available
+        and not scan_truncated
+        and not scan_stale
+        and progress["status"] == "completed"
+    )
+    scan_status = (
+        "stale" if scan_stale else scan_run["status"] if scan_metadata_available else "unknown"
+    )
     complete = scan_complete and not pagination_truncated
-    status = "unknown" if scan_run is None else ("completed" if complete else "partial")
+    status = (
+        "unknown" if not scan_metadata_available else ("completed" if complete else scan_status)
+    )
     total_known_findings = (
         int(scan_run["total_known_findings"]) if scan_run is not None else persisted_findings_total
     )
@@ -831,16 +1060,21 @@ def quality_report(path: Path, *, limit: int = 500) -> dict:
         "scan_completeness": (
             {
                 "scan_id": scan_run["id"],
-                "status": scan_run["status"],
+                "status": scan_status,
                 "complete": scan_complete,
                 "truncated": scan_truncated,
+                "stale": scan_stale,
                 "max_findings": scan_run["max_findings"],
                 "findings_examined": scan_run["findings_examined"],
                 "findings_stored": scan_run["findings_stored"],
                 "total_known_findings": scan_run["total_known_findings"],
                 "persisted_findings_total": scan_run["persisted_findings_total"],
+                "source_data_version_start": progress["source_data_version_start"],
+                "source_data_version_end": progress["source_data_version_end"],
+                "cursor_start": progress["cursor_start"],
+                "cursor_next": progress["cursor_next"],
             }
-            if scan_run is not None
+            if scan_metadata_available
             else None
         ),
         "pagination": {
