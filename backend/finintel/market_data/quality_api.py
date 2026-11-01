@@ -15,6 +15,7 @@ from finintel.market_data.quality import (
     review_finding,
     run_quality_scan,
 )
+from finintel.market_data.reconciliation import ReconciliationPolicy, reconciliation_summary
 from finintel.settings.api import _require_managed
 from finintel.storage.db import database_path
 
@@ -30,6 +31,11 @@ class AnomalyThresholdRequest(BaseModel):
     zero_volume_baseline_minimum: int | None = Field(default=None, ge=1)
     stale_after_days: int | None = Field(default=None, ge=1)
     volume_lookback: int | None = Field(default=None, ge=2)
+    reconciliation_relative_tolerance: Decimal | None = Field(default=None, ge=0, le=1)
+    reconciliation_absolute_tolerance: Decimal | None = Field(default=None, ge=0)
+    reconciliation_provider_priority: list[
+        Literal["alpaca_sip", "tiingo", "alpha_vantage"]
+    ] | None = None
 
 
 class ScanRequest(BaseModel):
@@ -64,6 +70,27 @@ def scan(request: ScanRequest, http_request: Request) -> dict:
         ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/reconciliation/policy")
+def reconciliation_policy() -> dict:
+    """Read-only default policy and explicit source eligibility."""
+    policy = ReconciliationPolicy()
+    return {
+        **policy.identity(),
+        "note": "Provider priority is advisory; no winning observation is selected.",
+    }
+
+
+@router.get("/reconciliation/summary")
+def reconciliation_status(code: str | None = Query(default=None, max_length=32)) -> dict:
+    """Read-only aggregate; no external provider requests or local mutations."""
+    try:
+        return reconciliation_summary(database_path(), code=code)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=503, detail="Local market database is unavailable."
+        ) from exc
 
 
 @router.get("/findings")
