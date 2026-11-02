@@ -7,8 +7,8 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from finintel.market_data.analytics import AnalyticsError
-from finintel.market_data.analytics_store import run_analytics
 from finintel.market_data.analytics_basket import run_index_basket
+from finintel.market_data.analytics_store import run_analytics
 from finintel.storage.db import StorageError
 
 router = APIRouter(prefix="/api/v1/analytics", tags=["local-analytics"])
