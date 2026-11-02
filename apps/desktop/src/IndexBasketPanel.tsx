@@ -72,18 +72,21 @@ export function basketMetricLines(result: BasketResult, metric: BasketMetric) {
     }),
   }));
 }
+/** Preserve original first/last observations; render sampling never changes calculations. */
+export function decimateBasketLines(lines: ReturnType<typeof basketMetricLines>, max = 450) {
+  return lines.map(line => {
+    if (line.points.length <= max) return line;
+    const indices = new Set(Array.from({ length: max }, (_, index) =>
+      Math.round(index * (line.points.length - 1) / (max - 1))));
+    return { ...line, points: line.points.filter((_, index) => indices.has(index)) };
+  });
+}
 export function BasketChart({ result, metric }: { result: BasketResult; metric: BasketMetric }) {
   const { t, language } = useLocale();
   const series = basketMetricLines(result, metric);
   const nonEmpty = series.filter(line => line.points.length > 0);
   if (!nonEmpty.length) return <p role="status" className="py-8 text-center text-sm text-muted-foreground">{t("Not enough shared observations for this metric.")}</p>;
-  const maxSamples = 450;
-  const plot = nonEmpty.map(line => ({
-    ...line,
-    points: line.points.length <= maxSamples ? line.points :
-      line.points.filter((_, i) => Math.round(i * (maxSamples - 1) / (line.points.length - 1)) !==
-        Math.round((i - 1) * (maxSamples - 1) / (line.points.length - 1))),
-  }));
+  const plot = decimateBasketLines(nonEmpty);
   const values = plot.flatMap(line => line.points.map(point => point.value));
   const floor = Math.min(...values), ceiling = Math.max(...values);
   const pad = Math.max((ceiling - floor) * 0.08, Math.abs(ceiling) * 0.002, 0.0001);
