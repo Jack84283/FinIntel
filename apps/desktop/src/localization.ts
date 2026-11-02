@@ -108,6 +108,8 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Start date": "开始日期",
+  "End date": "结束日期",
   "Index Intelligence": "指数智能分析",
   "FinIntel / Index Intelligence": "FinIntel / 指数智能分析",
   "Compare locally stored index levels using reproducible, source-backed calculations.": "使用可复现且可追溯来源的计算比较本地指数点位。",
