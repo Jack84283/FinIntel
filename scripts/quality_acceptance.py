@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Issue #29 acceptance evidence on disposable fixtures or explicit read-only data.
 
 Synthetic acceptance is NOT production acceptance. No provider calls, credentials,
