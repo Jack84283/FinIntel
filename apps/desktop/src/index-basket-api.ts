@@ -64,6 +64,7 @@ export function parseBasketResult(payload: unknown, query: BasketQuery): BasketR
     result.quality_policy !== query.qualityPolicy ||
     typeof quality.quality_verified !== "boolean" || typeof quality.status !== "string" ||
     result.unverified_data !== !quality.quality_verified ||
+    (query.qualityPolicy === "require_complete" && quality.quality_verified !== true) ||
     result.alignment !== "intersection" ||
     typeof result.calculation_version !== "string" || !/^index-analytics-v\d+$/.test(result.calculation_version) ||
     result.read_only !== true || result.no_network !== true || result.no_synthetic_sessions !== true ||
