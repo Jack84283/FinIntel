@@ -215,8 +215,10 @@ def propose(payload: CorrectionProposalRequest, request: Request) -> dict:
     _require_managed(request)
     try:
         return propose_correction(
-            database_path(), finding_id=payload.finding_id,
-            provider=payload.provider, proposed_close=str(payload.proposed_close),
+            database_path(),
+            finding_id=payload.finding_id,
+            provider=payload.provider,
+            proposed_close=str(payload.proposed_close),
             rationale=payload.rationale,
         )
     except (KeyError, ValueError, FileNotFoundError) as exc:
@@ -248,8 +250,13 @@ def resolve_correction(
 ) -> dict:
     try:
         return resolved_close(
-            database_path(), kind=instrument_kind, code=code, provider=provider,
-            adjustment=adjustment, frequency=frequency, session_date=session_date.isoformat(),
+            database_path(),
+            kind=instrument_kind,
+            code=code,
+            provider=provider,
+            adjustment=adjustment,
+            frequency=frequency,
+            session_date=session_date.isoformat(),
         )
     except (KeyError, ValueError, FileNotFoundError) as exc:
         raise _correction_error(exc) from exc
