@@ -6,7 +6,7 @@ PR #46 provides an index-first desktop view using the deterministic local analyt
 
 The main navigation exposes **Index Intelligence** separately from Market, Quality, and Data Acquisition. Primary selection defaults to SP500 and supports DJIA, NASDAQCOM, NDX and VIX. An optional **single** benchmark can be selected for pairwise comparisons; arbitrary 3+ index groups will follow in a later PR.
 
-Select 1Y, 5Y, all stored history, or manual start/end. The Last available control finds the last common stored date in the local index catalog (not the computer clock). Rolling windows use actual observed sessions. Selections are persisted only in localStorage; storage failures are nonblocking.
+Select 1Y, 5Y, all stored history, or manual start/end. The Last available control uses the earlier latest date within overlapping catalog coverage (not the computer clock); the exact last common observed session is established only by the analytics engine. Rolling windows use actual observed sessions. Selections are persisted only in localStorage; storage failures are nonblocking.
 
 The API defaults to **require_complete** quality: missing, stale, partial, or active unresolved findings block verified analysis. Explicit **allow_unverified** permits labeled research results only. VIX is a volatility level by default, not an equity return; mixed VIX benchmark comparisons are disallowed. There is no implicit provider fallback, interpolation or invented market observation.
 
