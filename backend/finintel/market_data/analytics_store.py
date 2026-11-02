@@ -114,13 +114,15 @@ def _quality_status(conn: sqlite3.Connection, codes: list[str]) -> dict:
     source = conn.execute(
         "SELECT source_version FROM data_quality_source_state WHERE id=1"
     ).fetchone()
-    bad = conn.execute(
-        "SELECT COUNT(*) FROM data_quality_findings "
+    unresolved = conn.execute(
+        "SELECT COUNT(*) AS total, "
+        "SUM(CASE WHEN severity='error' THEN 1 ELSE 0 END) AS errors "
+        "FROM data_quality_findings "
         "WHERE code IN (" + ",".join("?" for _ in codes) + ") "
-        "AND superseded_at IS NULL AND severity='error' "
-        "AND review_state NOT IN ('rejected','accepted_correction')",
+        "AND superseded_at IS NULL AND review_state <> 'rejected'",
         codes,
-    ).fetchone()[0]
+    ).fetchone()
+    bad = unresolved["errors"] or 0
     current = datetime.now(UTC).date().isoformat()
     complete = bool(
         scan is not None
@@ -132,8 +134,9 @@ def _quality_status(conn: sqlite3.Connection, codes: list[str]) -> dict:
     )
     return {
         "status": "complete" if complete else "stale_or_partial",
-        "quality_verified": complete and bad == 0,
+        "quality_verified": complete and unresolved["total"] == 0,
         "active_unresolved_errors": bad,
+        "active_unresolved_findings": unresolved["total"],
         "scan_complete_current": complete,
     }
 
