@@ -127,10 +127,14 @@ def run_index_basket(
             "no_network": True,
             "no_synthetic_sessions": True,
             "notes": [
-                ("All returns, drawdowns and rolling metrics are recomputed on the same "
-                 "intersection of stored sessions, not independently aligned charts."),
-                ("Missing dates are never forward-filled; consecutive shared sessions may "
-                 "be more than one exchange session apart."),
+                (
+                    "All returns, drawdowns and rolling metrics are recomputed on the same "
+                    "intersection of stored sessions, not independently aligned charts."
+                ),
+                (
+                    "Missing dates are never forward-filled; consecutive shared sessions may "
+                    "be more than one exchange session apart."
+                ),
                 "Daily price-index levels exclude dividend reinvestment and are not total returns.",
             ],
         }
