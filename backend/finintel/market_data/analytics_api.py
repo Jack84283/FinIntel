@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from finintel.market_data.analytics import AnalyticsError
 from finintel.market_data.analytics_store import run_analytics
+from finintel.market_data.analytics_basket import run_index_basket
 from finintel.storage.db import StorageError
 
 router = APIRouter(prefix="/api/v1/analytics", tags=["local-analytics"])
@@ -131,6 +132,72 @@ def local_analytics(
             missing_policy=missing_policy,
             quality_policy=quality_policy,
             allow_volatility_returns=allow_volatility_returns,
+        )
+    except AnalyticsError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+class BasketMetric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    normalized_100: str
+    simple_return: str | None
+    drawdown: str | None
+    rolling_volatility_annualized: str | None
+    relative_strength: str | None
+    rolling_correlation: str | None
+
+
+class BasketPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_date: str
+    values: dict[str, BasketMetric]
+
+
+class BasketSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    identity: SeriesReference
+    source: dict[str, str | None]
+    stored_sessions: int
+    excluded_nonshared_sessions: int
+
+
+class BasketResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    calculation_version: str
+    codes: list[str]
+    baseline_code: str
+    request: dict[str, str | int]
+    quality: dict[str, str | bool | int | None]
+    quality_policy: Literal["require_complete", "allow_unverified"]
+    unverified_data: bool
+    alignment: Literal["intersection"]
+    common_sessions: int
+    first_common_session: str
+    last_common_session: str
+    series: list[BasketSource]
+    points: list[BasketPoint]
+    read_only: bool
+    no_network: bool
+    no_synthetic_sessions: bool
+    notes: list[str]
+
+
+@router.get("/basket", response_model=BasketResponse)
+def local_index_basket(
+    start: Annotated[date, Query(description="Inclusive first requested session")],
+    end: Annotated[date, Query(description="Inclusive last requested session")],
+    codes: Annotated[str, Query(min_length=1, max_length=40)],
+    window: int = Query(default=20, ge=5, le=252),
+    quality_policy: Literal["require_complete", "allow_unverified"] = "require_complete",
+) -> dict:
+    # CSV contains strictly provider-independent code IDs; no free-form SQL or provider fields.
+    selected = codes.split(",")
+    try:
+        return run_index_basket(
+            codes=selected, start=start, end=end, window=window,
+            quality_policy=quality_policy,
         )
     except AnalyticsError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
