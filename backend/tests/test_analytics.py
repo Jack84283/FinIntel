@@ -47,9 +47,15 @@ def _seed_index(path):
                 "INSERT INTO index_daily_closes"
                 "(index_code,provider,session_date,close,retrieved_at,source_url) "
                 "VALUES (?,'fred',?,?,'2026-10-29T00:00:00+00:00',?)",
-                [(code, f"2026-10-{10 + i:02d}", value,
-                  f"https://fred.stlouisfed.org/series/{code}")
-                 for i, value in enumerate(levels)],
+                [
+                    (
+                        code,
+                        f"2026-10-{10 + i:02d}",
+                        value,
+                        f"https://fred.stlouisfed.org/series/{code}",
+                    )
+                    for i, value in enumerate(levels)
+                ],
             )
     conn.close()
 
@@ -94,7 +100,9 @@ def test_vix_level_only_without_explicit_opt_in():
     assert all(row["simple_return"] is None and row["drawdown"] is None for row in raw["points"])
     assert raw["points"][-1]["moving_average"] == "21.4"
     requested = compute_series(
-        vix, points(20, 30, 40, 25, 20, 21), window=5,
+        vix,
+        points(20, 30, 40, 25, 20, 21),
+        window=5,
         allow_volatility_returns=True,
     )
     assert requested["metrics_enabled"] is True
@@ -103,14 +111,26 @@ def test_vix_level_only_without_explicit_opt_in():
 
 
 def test_common_sessions_only_rejects_strict_misalignment_and_constant_beta():
-    left = validated_observations([
-        ("2026-10-10", "100"), ("2026-10-11", "105"), ("2026-10-13", "110"),
-        ("2026-10-14", "120"), ("2026-10-15", "126"), ("2026-10-16", "128"),
-    ])
-    right = validated_observations([
-        ("2026-10-10", "200"), ("2026-10-12", "190"), ("2026-10-13", "210"),
-        ("2026-10-14", "215"), ("2026-10-15", "220"), ("2026-10-16", "230"),
-    ])
+    left = validated_observations(
+        [
+            ("2026-10-10", "100"),
+            ("2026-10-11", "105"),
+            ("2026-10-13", "110"),
+            ("2026-10-14", "120"),
+            ("2026-10-15", "126"),
+            ("2026-10-16", "128"),
+        ]
+    )
+    right = validated_observations(
+        [
+            ("2026-10-10", "200"),
+            ("2026-10-12", "190"),
+            ("2026-10-13", "210"),
+            ("2026-10-14", "215"),
+            ("2026-10-15", "220"),
+            ("2026-10-16", "230"),
+        ]
+    )
     result = compare_series(index_identity(), left, index_identity("DJIA"), right, window=5)
     assert result["overlap_sessions"] == 5
     assert result["left_only_sessions"] == result["right_only_sessions"] == 1
@@ -118,8 +138,9 @@ def test_common_sessions_only_rejects_strict_misalignment_and_constant_beta():
     assert result["points"][1]["session_date"] == "2026-10-13"
     assert Decimal(result["points"][0]["left_normalized_100"]) == 100
     with pytest.raises(AnalyticsError, match="identical observed"):
-        compare_series(index_identity(), left, index_identity("DJIA"), right,
-                       missing_policy="strict")
+        compare_series(
+            index_identity(), left, index_identity("DJIA"), right, missing_policy="strict"
+        )
 
 
 def test_rolling_correlation_beta_tracking_error_against_independent_reference():
@@ -130,9 +151,9 @@ def test_rolling_correlation_beta_tracking_error_against_independent_reference()
     expected_l = [float(left[i].close / left[i - 1].close - 1) for i in range(3, 8)]
     expected_r = [float(right[i].close / right[i - 1].close - 1) for i in range(3, 8)]
     avg_l, avg_r = sum(expected_l) / 5, sum(expected_r) / 5
-    covariance = sum(
-        (a - avg_l) * (b - avg_r) for a, b in zip(expected_l, expected_r, strict=True)
-    ) / 4
+    covariance = (
+        sum((a - avg_l) * (b - avg_r) for a, b in zip(expected_l, expected_r, strict=True)) / 4
+    )
     var_r = sum((b - avg_r) ** 2 for b in expected_r) / 4
     assert float(last["rolling_covariance"]) == pytest.approx(covariance, abs=1e-14)
     assert float(last["rolling_beta"]) == pytest.approx(covariance / var_r, rel=1e-12)
@@ -140,13 +161,16 @@ def test_rolling_correlation_beta_tracking_error_against_independent_reference()
     assert float(last["rolling_tracking_error_annualized"]) >= 0
 
 
-@pytest.mark.parametrize("levels", [
-    [("2026-10-10", "100"), ("2026-10-10", "101")],
-    [("2026-10-11", "101"), ("2026-10-10", "100")],
-    [("2026-10-10", "0")],
-    [("2026-10-10", "-12")],
-    [("2026-10-10", "NaN")],
-])
+@pytest.mark.parametrize(
+    "levels",
+    [
+        [("2026-10-10", "100"), ("2026-10-10", "101")],
+        [("2026-10-11", "101"), ("2026-10-10", "100")],
+        [("2026-10-10", "0")],
+        [("2026-10-10", "-12")],
+        [("2026-10-10", "NaN")],
+    ],
+)
 def test_bad_or_revised_input_rows_rejected(levels):
     with pytest.raises(AnalyticsError):
         validated_observations(levels)
@@ -160,8 +184,12 @@ def test_read_only_api_quality_gate_source_snapshot_and_cross_index(tmp_path, mo
     with pytest.raises(AnalyticsError, match="complete quality scan"):
         run_analytics(start=start, end=end, db=db)
     result = run_analytics(
-        start=start, end=end, window=5, comparison_code="DJIA",
-        quality_policy="allow_unverified", db=db,
+        start=start,
+        end=end,
+        window=5,
+        comparison_code="DJIA",
+        quality_policy="allow_unverified",
+        db=db,
     )
     assert result["identity"]["code"] == "SP500"
     assert result["source"]["snapshot_sha256"]
@@ -169,14 +197,23 @@ def test_read_only_api_quality_gate_source_snapshot_and_cross_index(tmp_path, mo
     assert result["unverified_data"] is True
     assert result["read_only"] and result["no_network"]
     with TestClient(app) as client:
-        response = client.get("/api/v1/analytics/series", params={
-            "start": start.isoformat(), "end": end.isoformat(),
-            "window": 5, "comparison_code": "DJIA",
-            "quality_policy": "allow_unverified",
-        })
-        denied = client.get("/api/v1/analytics/series", params={
-            "start": start.isoformat(), "end": end.isoformat(),
-        })
+        response = client.get(
+            "/api/v1/analytics/series",
+            params={
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "window": 5,
+                "comparison_code": "DJIA",
+                "quality_policy": "allow_unverified",
+            },
+        )
+        denied = client.get(
+            "/api/v1/analytics/series",
+            params={
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            },
+        )
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["points"][0]["normalized_100"] == "100"
@@ -191,10 +228,14 @@ def test_no_database_creation_or_implicit_provider_calls(tmp_path, monkeypatch):
     absent = tmp_path / "missing.sqlite3"
     monkeypatch.setenv("FININTEL_DB_PATH", str(absent))
     with TestClient(app) as client:
-        result = client.get("/api/v1/analytics/series", params={
-            "start": "2026-10-10", "end": "2026-10-16",
-            "quality_policy": "allow_unverified",
-        })
+        result = client.get(
+            "/api/v1/analytics/series",
+            params={
+                "start": "2026-10-10",
+                "end": "2026-10-16",
+                "quality_policy": "allow_unverified",
+            },
+        )
     assert result.status_code == 422
     assert not absent.exists()
 
@@ -203,8 +244,10 @@ def test_source_revision_hash_changes_without_mutating_history(tmp_path):
     db = tmp_path / "index.sqlite3"
     _seed_index(db)
     args = {
-        "start": date(2026, 10, 10), "end": date(2026, 10, 16),
-        "quality_policy": "allow_unverified", "db": db,
+        "start": date(2026, 10, 10),
+        "end": date(2026, 10, 16),
+        "quality_policy": "allow_unverified",
+        "db": db,
     }
     first = run_analytics(**args)
     same = run_analytics(**args)
@@ -225,8 +268,11 @@ def test_vix_api_requires_opt_in_and_rejects_incompatible_benchmark(tmp_path):
     db = tmp_path / "index.sqlite3"
     _seed_index(db)
     args = {
-        "start": date(2026, 10, 10), "end": date(2026, 10, 16),
-        "code": "VIX", "quality_policy": "allow_unverified", "db": db,
+        "start": date(2026, 10, 10),
+        "end": date(2026, 10, 16),
+        "code": "VIX",
+        "quality_policy": "allow_unverified",
+        "db": db,
     }
     levels = run_analytics(**args)
     assert levels["metrics_enabled"] is False
@@ -244,6 +290,8 @@ def test_range_and_provider_unknown_rejected(tmp_path):
         run_analytics(start=date(2026, 10, 16), end=date(2026, 10, 10), db=db)
     with pytest.raises(AnalyticsError, match="Unsupported stored"):
         run_analytics(
-            start=date(2026, 10, 10), end=date(2026, 10, 16),
-            provider="another_provider", db=db,
+            start=date(2026, 10, 10),
+            end=date(2026, 10, 16),
+            provider="another_provider",
+            db=db,
         )
