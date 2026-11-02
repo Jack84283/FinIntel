@@ -205,6 +205,7 @@ def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, obje
 def _merge(staging: Path, source: Path) -> None:
     """Merge supported data; use source IDs only through mapping tables."""
     with sqlite3.connect(staging, timeout=30) as dest:
+        dest.row_factory = sqlite3.Row
         dest.execute("PRAGMA foreign_keys = ON")
         dest.execute("ATTACH DATABASE ? AS incoming", (str(source.resolve()),))
         try:
@@ -651,6 +652,8 @@ def _merge(staging: Path, source: Path) -> None:
                                 (row["id"],),
                             )
                         ]
+                        if not source_events or source_events[-1][3] != row["state"]:
+                            raise StorageError("Correction audit events do not match proposal state")
                         if stored is None:
                             columns = ",".join(correction_fields)
                             values = ",".join("?" for _ in correction_fields)
@@ -678,6 +681,8 @@ def _merge(staging: Path, source: Path) -> None:
                                     (row["id"],),
                                 )
                             ]
+                            if not current_events or current_events[-1][3] != stored["state"]:
+                                raise StorageError("Existing correction audit history is inconsistent")
                             shorter = min(len(current_events), len(source_events))
                             if current_events[:shorter] != source_events[:shorter]:
                                 raise StorageError(
