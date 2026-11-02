@@ -270,7 +270,7 @@ def test_completed_scan_reactivates_reviewed_finding_after_threshold_restoration
             "WHERE finding_id=?",
             (finding_id,),
         ).fetchone()[:3] == (finding_id, "candidate", "confirmed")
-    assert quality_report(db, limit=100)["complete"] is True
+    assert quality_report(db, limit=100, as_of=date(2026, 11, 1))["complete"] is True
 
     third = run_quality_scan(
         db,
@@ -644,7 +644,7 @@ def test_quality_report_marks_ingestion_metadata_revision_stale(tmp_path):
     db = tmp_path / "quality.sqlite3"
     seed_quality_database(db)
     run_quality_scan(db, as_of=date(2026, 11, 1))
-    assert quality_report(db)["complete"] is True
+    assert quality_report(db, as_of=date(2026, 11, 1))["complete"] is True
 
     with sqlite3.connect(db) as conn:
         conn.execute(
@@ -940,7 +940,7 @@ def test_pr38_index_anomaly_upgrade_reuses_reviewed_finding(tmp_path):
     conn.close()
 
     with sqlite3.connect(db) as check:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 15
         assert "superseded_at" not in {
             row[1] for row in check.execute("PRAGMA table_info(data_quality_findings)")
         }
@@ -1630,7 +1630,7 @@ def test_v13_database_migrates_to_quality_tables_without_erasing_observations(tm
     conn = _write_connection(db)
     conn.close()
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 15
         assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == before
         assert conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='data_quality_findings'"
@@ -1669,7 +1669,7 @@ def test_failed_quality_migration_rolls_back_and_retry_succeeds(tmp_path, monkey
     conn = _write_connection(db)
     conn.close()
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 15
 
 
 def test_quality_api_scans_filters_and_reviews_with_managed_token(tmp_path, monkeypatch):
@@ -1708,7 +1708,7 @@ def test_quality_api_scans_filters_and_reviews_with_managed_token(tmp_path, monk
         )
         assert reviewed.status_code == 200
         assert reviewed.json()["review_state"] == "rejected"
-        report = client.get("/api/v1/quality/report", params={"limit": 1})
+        report = client.get("/api/v1/quality/report", params={"limit": 1, "as_of": "2026-11-01"})
         assert report.status_code == 200
         assert report.json()["truncated"] is True
         assert report.json()["scan_completeness"]["complete"] is True

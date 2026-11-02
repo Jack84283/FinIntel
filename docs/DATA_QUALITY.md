@@ -160,3 +160,61 @@ These APIs never correct values, merge series, make provider requests, or export
 raw feed payloads. Corrections and corporate-action confirmation remain separate
 Task 2 work. This phase also does not substitute for live-provider tests on a
 disposable database or final whole-database performance acceptance.
+
+
+## Corporate-action evidence and reversible corrections (Issue #29 — Task 2)
+
+Schema v15 is additive: it creates `corporate_action_evidence`,
+`quality_corrections`, and append-only `quality_correction_events`.
+Existing equity `daily_prices` and index `index_daily_closes` are not rewritten,
+even on approval or reversal. Revisions, proposals, and audit records remain in
+local SQLite backups and are imported conservatively on database merge.
+
+**Financial semantics:** Equity corrections are presently restricted to
+`1d/raw_unadjusted` close in USD/share. Index corrections use the
+`index_series_catalog.series_type` contract and `daily` observations:
+`price_index` is different from `volatility_index`; neither is assumed to
+be a total-return index. Split-adjusted, dividend-adjusted, other currencies,
+other units, and synthetic returns must not be silently reinterpreted as these
+series. V1 overlays change the *explicitly resolved close* for one instrument,
+source, and session, not OHLCV as a whole and not the regular historical APIs.
+
+**Workflow:** Operators must first confirm a current quality finding using the
+existing finding review API. A proposed close is captured with the source value,
+retrieval timestamp, return semantics, linked stable finding fingerprint and
+rationale. Preview reports delta, staleness and any approved overlay conflict.
+Validation checks source and finding. Approval rechecks both and requires a note.
+A rejected proposal is not applied. Reversal removes the effective overlay and
+appends a permanent audit event; it does not delete the approval. Repeated
+transitions to the same state are idempotent. Only one approved overlay is allowed
+for an observation key. A newer provider revision automatically makes any
+old approved overlay stale in the explicit resolved view; it never masks the
+new source value. Review state `accepted_correction` alone does **not** apply an
+overlay.
+
+**Managed desktop APIs:**
+- `POST /api/v1/quality/corrections`: `{finding_id,provider,proposed_close,rationale}`
+- `GET /api/v1/quality/corrections/{id}/preview`: read-only comparison and
+  eligibility, including stale-source and collision flags.
+- `POST /api/v1/quality/corrections/{id}/{validate|approve|reject|reverse}`:
+  explicit state transitions (`{note}` is required for approve/reject/reverse).
+- `GET /api/v1/quality/corrections` and `/{id}`: paginated status and
+  immutable event history for review.
+- `GET /api/v1/quality/corrections/resolve` with
+  `instrument_kind,code,provider,adjustment,frequency,session_date`: opt-in
+  effective close, original value, and stale-overlay status.
+- `POST /api/v1/quality/corporate-actions/verify` with `{symbol}`:
+  explicit Tiingo reference fetch, requiring configured provider credentials.
+  It persists only redacted split/dividend facts, retrieval/source identity and
+  screening checks, never credentials or raw provider payloads.
+- `GET /api/v1/quality/corporate-actions?code=AAPL`: distinct persisted
+  **sourced** split/dividend evidence and **suspected** price-jump candidates.
+  A split screening check is not a proof of a bad price.
+
+Protected write endpoints require the managed desktop process token.
+Read-only endpoints do not contact providers. Database merge remaps finding
+fingerprints using the existing finding mapping, imports UUID-keyed proposals
+and their audit events, and rejects divergent same-proposal histories. A
+source revision after merge prevents an old overlay from silently applying.
+Manual native desktop testing and live Tiingo verification must be documented
+separately; CI synthetic tests do not establish provider entitlement.

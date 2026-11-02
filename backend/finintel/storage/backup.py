@@ -70,6 +70,9 @@ def _validated(path: Path, *, version: bool = True) -> dict[str, object]:
                     "data_quality_reviews",
                     "data_quality_scan_runs",
                     "data_quality_scan_progress",
+                    "corporate_action_evidence",
+                    "quality_corrections",
+                    "quality_correction_events",
                 )
                 if table in tables
             }
@@ -605,6 +608,130 @@ def _merge(staging: Path, source: Path) -> None:
                     "WHERE d.index_code=index_series_catalog.index_code "
                     "AND d.provider=index_series_catalog.provider)"
                 )
+                # v15 overlays are naturally keyed by stable UUIDs, not source
+                # database series IDs. Re-map finding fingerprints during import
+                # and conservatively reject divergent audit event histories.
+                if "corporate_action_evidence" in incoming_tables:
+                    dest.execute(
+                        "INSERT OR IGNORE INTO corporate_action_evidence "
+                        "SELECT * FROM incoming.corporate_action_evidence"
+                    )
+                if "quality_corrections" in incoming_tables:
+                    incoming_corrections = dest.execute(
+                        "SELECT * FROM incoming.quality_corrections ORDER BY created_at,id"
+                    ).fetchall()
+                    correction_fields = [
+                        "id",
+                        "instrument_kind",
+                        "code",
+                        "provider",
+                        "adjustment",
+                        "frequency",
+                        "return_semantics",
+                        "session_date",
+                        "source_close",
+                        "source_retrieved_at",
+                        "proposed_close",
+                        "finding_fingerprint",
+                        "rationale",
+                        "evidence_json",
+                        "state",
+                        "validated_at",
+                        "created_at",
+                        "updated_at",
+                    ]
+                    for incoming in incoming_corrections:
+                        row = dict(zip(correction_fields, incoming, strict=True))
+                        if "data_quality_findings" in incoming_tables:
+                            mapped = dest.execute(
+                                "SELECT d.fingerprint FROM incoming.data_quality_findings f "
+                                "JOIN _quality_finding_map m ON m.old_id=f.id "
+                                "JOIN data_quality_findings d ON d.id=m.new_id "
+                                "WHERE f.fingerprint=?",
+                                (row["finding_fingerprint"],),
+                            ).fetchone()
+                            if mapped:
+                                row["finding_fingerprint"] = mapped[0]
+                        stored = dest.execute(
+                            "SELECT * FROM quality_corrections WHERE id=?", (row["id"],)
+                        ).fetchone()
+                        if stored is not None:
+                            stored = dict(zip(correction_fields, stored, strict=True))
+                        source_events = [
+                            tuple(event)
+                            for event in dest.execute(
+                                "SELECT id,correction_id,from_state,to_state,note,occurred_at "
+                                "FROM incoming.quality_correction_events "
+                                "WHERE correction_id=? ORDER BY occurred_at,id",
+                                (row["id"],),
+                            )
+                        ]
+                        if not source_events or source_events[-1][3] != row["state"]:
+                            raise StorageError(
+                                "Correction audit events do not match proposal state"
+                            )
+                        if stored is None:
+                            columns = ",".join(correction_fields)
+                            values = ",".join("?" for _ in correction_fields)
+                            dest.execute(
+                                f"INSERT INTO quality_corrections({columns}) VALUES ({values})",
+                                tuple(row[field] for field in correction_fields),
+                            )
+                        else:
+                            for field in (
+                                "instrument_kind",
+                                "code",
+                                "provider",
+                                "adjustment",
+                                "frequency",
+                                "return_semantics",
+                                "session_date",
+                                "source_close",
+                                "source_retrieved_at",
+                                "proposed_close",
+                                "rationale",
+                                "evidence_json",
+                                "finding_fingerprint",
+                            ):
+                                if stored[field] != row[field]:
+                                    raise StorageError(
+                                        "Cannot merge conflicting immutable correction proposal"
+                                    )
+                            current_events = [
+                                tuple(event)
+                                for event in dest.execute(
+                                    "SELECT id,correction_id,from_state,to_state,note,occurred_at "
+                                    "FROM quality_correction_events "
+                                    "WHERE correction_id=? ORDER BY occurred_at,id",
+                                    (row["id"],),
+                                )
+                            ]
+                            if not current_events or current_events[-1][3] != stored["state"]:
+                                raise StorageError(
+                                    "Existing correction audit history is inconsistent"
+                                )
+                            shorter = min(len(current_events), len(source_events))
+                            if current_events[:shorter] != source_events[:shorter]:
+                                raise StorageError(
+                                    "Cannot merge divergent correction decision histories"
+                                )
+                            if len(source_events) > len(current_events):
+                                dest.execute(
+                                    "UPDATE quality_corrections SET "
+                                    "state=?,validated_at=?,updated_at=? WHERE id=?",
+                                    (
+                                        row["state"],
+                                        row["validated_at"],
+                                        row["updated_at"],
+                                    ),
+                                )
+                        for event in source_events:
+                            dest.execute(
+                                "INSERT OR IGNORE INTO quality_correction_events "
+                                "(id,correction_id,from_state,to_state,note,occurred_at) "
+                                "VALUES (?,?,?,?,?,?)",
+                                event,
+                            )
                 dest.execute(
                     "INSERT INTO action_events("
                     "occurred_at,action,status,symbol,provider,import_id,error_code,duration_ms) "
