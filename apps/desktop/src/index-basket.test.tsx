@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { fetchIndexBasket, parseBasketResult, validateBasketQuery,
   type BasketQuery, type BasketResult, type BasketValues } from "./index-basket-api";
-import { IndexBasketPanel, BasketChart, basketCoverage, basketMetricCell, basketMetricLines } from "./IndexBasketPanel";
+import { IndexBasketPanel, BasketChart, basketCoverage, basketMetricCell, basketMetricLines, decimateBasketLines } from "./IndexBasketPanel";
 import { translate } from "./localization";
 import type { IndexCatalogRecord } from "./index-history-api";
 
@@ -135,6 +135,13 @@ describe("multi-index chart/grid consistency and date envelope", () => {
     expect(layout).toContain("Multi-index historical comparison chart");
     expect(renderToStaticMarkup(<IndexBasketPanel catalog={[]} catalogError="" />))
       .toContain("Open multi-index comparison");
+    const longLine = { ...series[0], points: Array.from({ length: 750 }, (_, i) => ({
+      date: "2026-10-10", value: i,
+    })) };
+    const sample = decimateBasketLines([longLine])[0].points;
+    expect(sample).toHaveLength(450);
+    expect(sample[0].value).toBe(0);
+    expect(sample.at(-1)?.value).toBe(749);
   });
 
   it("requires overlapping local coverage and never invents last-common dates", () => {
