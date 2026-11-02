@@ -238,12 +238,13 @@ def corrections(
 
 @router.get("/corrections/resolve")
 def resolve_correction(
+    *,
     instrument_kind: Literal["equity", "index"],
     code: str = Query(min_length=1, max_length=32),
     provider: str = Query(min_length=1, max_length=80),
     adjustment: str = Query(min_length=1, max_length=80),
     frequency: str = Query(min_length=1, max_length=20),
-    session_date: date = Query(),
+    session_date: date,
 ) -> dict:
     try:
         return resolved_close(
