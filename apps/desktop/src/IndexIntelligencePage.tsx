@@ -148,7 +148,7 @@ export function IndexIntelligencePage() {
   const latest = latestCommonDate(catalog, code, comparisonCode);
   const counts = result?.observations ?? 0;
   const showComparisonMetrics = Boolean(result?.comparison);
-  const modes: ChartMetric[] = showComparisonMetrics
+  const modes: ChartMetric[] = !result?.metrics_enabled ? ["normalized"] : showComparisonMetrics
     ? ["normalized", "drawdown", "volatility", "relative", "correlation"]
     : ["normalized", "drawdown", "volatility"];
   const rows = result ? metricRows(result, metric) : [];
