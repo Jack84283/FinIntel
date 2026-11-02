@@ -398,13 +398,17 @@ def resolved_close(path: Path, *, kind: str, code: str, provider: str,
         conn.close()
 
 
-@serialized_storage_write
 def record_verified_actions(path: Path, symbol: str, *, client=None) -> dict:
-    """An explicit operator action fetches Tiingo references, then stores sourced evidence."""
+    """Fetch on explicit request without holding the storage writer lock."""
 
-    # Do not acquire write connection until after provider verification. The
-    # network call never holds a SQLite write transaction.
     result = verify_events(path, symbol, client=client)
+    return _save_verified_actions(path, result)
+
+
+@serialized_storage_write
+def _save_verified_actions(path: Path, result: dict) -> dict:
+    """Persist screened events atomically after all remote I/O completes."""
+
     conn = _write_connection(path)
     saved = 0
     try:
