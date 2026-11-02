@@ -63,8 +63,14 @@ def test_basket_recomputes_returns_from_only_shared_dates(tmp_path):
     assert first["first_common_session"] == "2026-10-10"
     assert first["last_common_session"] == "2026-10-19"
     assert [item["session_date"] for item in first["points"]] == [
-        "2026-10-10", "2026-10-13", "2026-10-14", "2026-10-15",
-        "2026-10-16", "2026-10-17", "2026-10-18", "2026-10-19",
+        "2026-10-10",
+        "2026-10-13",
+        "2026-10-14",
+        "2026-10-15",
+        "2026-10-16",
+        "2026-10-17",
+        "2026-10-18",
+        "2026-10-19",
     ]
     assert [item["excluded_nonshared_sessions"] for item in first["series"]] == [2, 1, 1]
     assert all(len(item["source"]["snapshot_sha256"]) == 64 for item in first["series"])
@@ -90,8 +96,12 @@ def test_rejects_vix_duplicate_unsupported_and_unverified_default(tmp_path):
     db = tmp_path / "basket.sqlite3"
     _seed(db)
     for codes in (
-        ["SP500", "SP500"], ["SP500", "VIX"], ["VIX", "SP500"],
-        ["SP500", "UNKNOWN"], ["SP500"], ["SP500", "DJIA", "NDX", "VIX", "NASDAQCOM"],
+        ["SP500", "SP500"],
+        ["SP500", "VIX"],
+        ["VIX", "SP500"],
+        ["SP500", "UNKNOWN"],
+        ["SP500"],
+        ["SP500", "DJIA", "NDX", "VIX", "NASDAQCOM"],
     ):
         with pytest.raises(AnalyticsError):
             _run(db, codes=codes)
