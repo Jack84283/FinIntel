@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from finintel.market_data.models import HistoricalBatch
 from finintel.market_data.symbol_catalog import ASSET_TYPES, STARTER_SYMBOLS, synchronized_rows
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024
 
 # SQLite stores financial price DECIMAL values as TEXT, never REAL, to avoid
@@ -566,6 +566,121 @@ SCHEMA_V14_QUALITY_SOURCE_TRIGGERS = (
     """,
 )
 
+# Corrections are separate overlays. Original OHLCV and index levels are never changed.
+# Stable UUIDs and natural source keys survive remapping of SQLite series IDs in backups.
+SCHEMA_V15_CORRECTION_TABLES = (
+    """
+    CREATE TABLE IF NOT EXISTS corporate_action_evidence (
+        id TEXT PRIMARY KEY NOT NULL,
+        code TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        session_date TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK(kind IN ('split', 'dividend')),
+        split_factor TEXT NOT NULL,
+        cash_dividend TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('sourced', 'suspected')),
+        source_name TEXT NOT NULL,
+        source_observed_at TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        UNIQUE(code, provider, session_date, kind, split_factor, cash_dividend, status,
+               source_name, source_observed_at)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS corporate_action_evidence_lookup
+    ON corporate_action_evidence(code, session_date DESC, status)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quality_corrections (
+        id TEXT PRIMARY KEY NOT NULL,
+        instrument_kind TEXT NOT NULL CHECK(instrument_kind IN ('equity', 'index')),
+        code TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        adjustment TEXT NOT NULL,
+        frequency TEXT NOT NULL,
+        return_semantics TEXT NOT NULL,
+        session_date TEXT NOT NULL,
+        source_close TEXT NOT NULL,
+        source_retrieved_at TEXT NOT NULL,
+        proposed_close TEXT NOT NULL,
+        finding_fingerprint TEXT,
+        rationale TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN (
+            'proposed', 'validated', 'approved', 'rejected', 'reversed'
+        )),
+        validated_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS quality_corrections_unique_approved
+    ON quality_corrections(instrument_kind, code, provider, adjustment, frequency, session_date)
+    WHERE state='approved'
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS quality_corrections_lookup
+    ON quality_corrections(code, session_date DESC, state, id)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quality_correction_events (
+        id TEXT PRIMARY KEY NOT NULL,
+        correction_id TEXT NOT NULL REFERENCES quality_corrections(id),
+        from_state TEXT,
+        to_state TEXT NOT NULL CHECK(to_state IN (
+            'proposed', 'validated', 'approved', 'rejected', 'reversed'
+        )),
+        note TEXT,
+        occurred_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS quality_correction_events_lookup
+    ON quality_correction_events(correction_id, occurred_at, id)
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS quality_correction_events_immutable_update
+    BEFORE UPDATE ON quality_correction_events BEGIN
+        SELECT RAISE(ABORT, 'Correction history is immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS quality_correction_events_immutable_delete
+    BEFORE DELETE ON quality_correction_events BEGIN
+        SELECT RAISE(ABORT, 'Correction history is immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS quality_corrections_no_delete
+    BEFORE DELETE ON quality_corrections BEGIN
+        SELECT RAISE(ABORT, 'Corrections must be reversed, not deleted');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS quality_corrections_immutable_proposal
+    BEFORE UPDATE OF instrument_kind,code,provider,adjustment,frequency,
+    return_semantics,session_date,source_close,source_retrieved_at,
+    proposed_close,finding_fingerprint,rationale,evidence_json,created_at
+    ON quality_corrections BEGIN
+        SELECT RAISE(ABORT, 'Correction proposal content is immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS corporate_action_evidence_no_update
+    BEFORE UPDATE ON corporate_action_evidence BEGIN
+        SELECT RAISE(ABORT, 'Corporate action evidence is immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS corporate_action_evidence_no_delete
+    BEFORE DELETE ON corporate_action_evidence BEGIN
+        SELECT RAISE(ABORT, 'Corporate action evidence is immutable');
+    END
+    """,
+)
+
 # Keep this seed data in the storage migration so a read-only API can expose a
 # truthful capability catalog without mutating a user's database on first read.
 INDEX_SERIES_CATALOG_SEED = (
@@ -1039,6 +1154,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if conn.in_transaction:
                 conn.rollback()
             raise StorageError("Unable to initialize data-quality storage v14") from exc
+        version = 14
+    if version == 14:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            for statement in SCHEMA_V15_CORRECTION_TABLES:
+                conn.execute(statement)
+            conn.execute("PRAGMA user_version = 15")
+            conn.commit()
+        except sqlite3.Error as exc:
+            if conn.in_transaction:
+                conn.rollback()
+            raise StorageError("Unable to migrate correction overlay storage to v15") from exc
 
 
 def _write_connection(path: Path) -> sqlite3.Connection:
