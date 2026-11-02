@@ -62,7 +62,7 @@ def test_exact_simple_log_cumulative_drawdown_recovery_and_warmup():
     assert Decimal(p[1]["simple_return"]) == Decimal("0.1")
     assert float(p[1]["log_return"]) == pytest.approx(math.log(1.1), abs=1e-14)
     assert Decimal(p[2]["drawdown"]) == Decimal("-0.1")
-    assert Decimal(p[3]["normalized_100"]) == Decimal("121")
+    assert Decimal(p[3]["normalized_100"]) == Decimal(121)
     assert Decimal(p[6]["cumulative_return"]) == Decimal("0.24")
     assert Decimal(result["max_drawdown"]) == Decimal("-0.1")
     assert result["longest_underwater_observed_sessions"] == 1
