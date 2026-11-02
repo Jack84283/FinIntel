@@ -12,6 +12,7 @@ import {
   type QualityPolicy, ANALYTICS_WINDOWS,
 } from "./index-intelligence-api";
 import { IndexMetricChart, metricCell, metricRows, type ChartMetric } from "./IndexIntelligenceChart";
+import { IndexBasketPanel } from "./IndexBasketPanel";
 
 const STORAGE_KEY = "finintel.index-intelligence.v1";
 type Preset = "1Y" | "5Y" | "ALL" | "custom";
@@ -324,6 +325,7 @@ export function IndexIntelligencePage() {
           </CardContent>
         </Card>
       </>}
+      <IndexBasketPanel catalog={catalog} catalogError={catalogError} />
       <p className="text-xs text-muted-foreground">
         <BarChart3 aria-hidden="true" className="mr-1 inline size-3" />
         {t("Analysis configurations are saved on this device only. No acquisition or corrections are triggered.")}
