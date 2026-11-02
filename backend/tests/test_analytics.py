@@ -295,3 +295,43 @@ def test_range_and_provider_unknown_rejected(tmp_path):
             provider="another_provider",
             db=db,
         )
+
+
+def test_completed_scan_with_unreviewed_warning_is_not_labeled_verified(tmp_path):
+    from datetime import UTC, datetime
+
+    from finintel.market_data.analytics_store import _quality_status
+    from finintel.market_data.quality import _candidate, _persist, run_quality_scan
+    from finintel.storage.db import _read_connection
+
+    db = tmp_path / "quality.sqlite3"
+    _seed_index(db)
+    run_quality_scan(db, as_of=datetime.now(UTC).date())
+    candidate = _candidate(
+        instrument_kind="index",
+        series_id=None,
+        code="SP500",
+        provider="fred",
+        session_date="2026-10-13",
+        finding_type="price_anomaly",
+        severity="warning",
+        confidence="low",
+        rule="synthetic_review_candidate",
+        adjustment="price_index",
+        frequency="1d",
+        evidence={"candidate_only": True},
+    )
+    _persist(db, [candidate])
+    conn = _read_connection(db)
+    try:
+        state = _quality_status(conn, ["SP500"])
+    finally:
+        conn.close()
+    assert state["scan_complete_current"] is True
+    assert state["active_unresolved_findings"] >= 1
+    assert state["quality_verified"] is False
+    with pytest.raises(AnalyticsError, match="complete quality scan"):
+        run_analytics(
+            start=date(2026, 10, 10), end=date(2026, 10, 16),
+            quality_policy="require_complete", db=db,
+        )
