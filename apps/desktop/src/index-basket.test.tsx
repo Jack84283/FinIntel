@@ -113,6 +113,10 @@ describe("Issue 31 batch local index APIs", () => {
     mismatched.baseline_code = "NDX";
     expect(() => parseBasketResult(mismatched, query)).toThrow();
     expect(parseBasketResult(example(), query).points).toHaveLength(3);
+    const strict = { ...query, qualityPolicy: "require_complete" as const };
+    const unverified = example();
+    unverified.quality_policy = "require_complete";
+    expect(() => parseBasketResult(unverified, strict)).toThrow();
   });
 });
 
