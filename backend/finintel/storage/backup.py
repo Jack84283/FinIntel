@@ -205,7 +205,6 @@ def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, obje
 def _merge(staging: Path, source: Path) -> None:
     """Merge supported data; use source IDs only through mapping tables."""
     with sqlite3.connect(staging, timeout=30) as dest:
-        dest.row_factory = sqlite3.Row
         dest.execute("PRAGMA foreign_keys = ON")
         dest.execute("ATTACH DATABASE ? AS incoming", (str(source.resolve()),))
         try:
@@ -656,6 +655,8 @@ def _merge(staging: Path, source: Path) -> None:
                         stored = dest.execute(
                             "SELECT * FROM quality_corrections WHERE id=?", (row["id"],)
                         ).fetchone()
+                        if stored is not None:
+                            stored = dict(zip(correction_fields, stored, strict=True))
                         source_events = [
                             tuple(event)
                             for event in dest.execute(
