@@ -49,7 +49,9 @@ def test_readonly_opt_in_existing_database_remains_unchanged(tmp_path):
         before = (
             conn.execute("PRAGMA user_version").fetchone()[0],
             tuple(conn.execute("SELECT * FROM daily_prices ORDER BY series_id,session_date")),
-            tuple(conn.execute("SELECT * FROM index_daily_closes ORDER BY index_code,session_date")),
+            tuple(
+                conn.execute("SELECT * FROM index_daily_closes ORDER BY index_code,session_date")
+            ),
         )
     output = tmp_path / "inspect.json"
     assert MODULE.main(["--output", str(output), "--inspect-db", str(existing)]) == 0
@@ -62,7 +64,9 @@ def test_readonly_opt_in_existing_database_remains_unchanged(tmp_path):
         after = (
             conn.execute("PRAGMA user_version").fetchone()[0],
             tuple(conn.execute("SELECT * FROM daily_prices ORDER BY series_id,session_date")),
-            tuple(conn.execute("SELECT * FROM index_daily_closes ORDER BY index_code,session_date")),
+            tuple(
+                conn.execute("SELECT * FROM index_daily_closes ORDER BY index_code,session_date")
+            ),
         )
     assert after == before
     assert "https://example.test" not in output.read_text()
@@ -74,9 +78,9 @@ def test_harness_never_overwrites_user_files_or_database_journals(tmp_path):
     with pytest.raises(SystemExit):
         MODULE.main(["--output", str(user_data), "--inspect-db", str(user_data)])
     with pytest.raises(SystemExit):
-        MODULE.main([
-            "--output", str(Path(str(user_data) + "-wal")), "--inspect-db", str(user_data)
-        ])
+        MODULE.main(
+            ["--output", str(Path(str(user_data) + "-wal")), "--inspect-db", str(user_data)]
+        )
     existing_report = tmp_path / "report.json"
     existing_report.write_text("DO NOT OVERWRITE", encoding="utf-8")
     with pytest.raises(SystemExit):
