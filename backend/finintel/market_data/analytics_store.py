@@ -39,14 +39,19 @@ def _read_series(
         if row is None or row["units"] != "index_points" or row["frequency"] != "daily":
             raise AnalyticsError("Index return semantics or source metadata are unavailable")
         semantics = "volatility_index" if row["series_type"] == "volatility" else "price_index"
-        identity = SeriesIdentity(kind, code, provider, semantics, semantics, "daily", "index_points")
+        identity = SeriesIdentity(
+            kind, code, provider, semantics, semantics, "daily", "index_points"
+        )
         sql = (
             "SELECT session_date,close,retrieved_at FROM index_daily_closes "
             "WHERE index_code=? AND provider=? AND session_date>=? AND session_date<=? "
             "ORDER BY session_date LIMIT ?"
         )
         args = (code, provider, start.isoformat(), end.isoformat(), MAX_OBSERVATIONS + 1)
-        provenance = {"source_url": row["source_url"], "coverage_updated_at": row["coverage_updated_at"]}
+        provenance = {
+            "source_url": row["source_url"],
+            "coverage_updated_at": row["coverage_updated_at"],
+        }
     elif kind == "equity":
         if not code or len(code) > 20 or not code.replace("-", "").replace(".", "").isalnum():
             raise AnalyticsError("Invalid equity instrument")
@@ -58,8 +63,13 @@ def _read_series(
         if row is None:
             raise AnalyticsError("No supported raw daily equity series for this source")
         identity = SeriesIdentity(
-            kind, code, provider, "raw_unadjusted",
-            "raw_unadjusted_equity_price_usd_per_share", "1d", "usd_per_share",
+            kind,
+            code,
+            provider,
+            "raw_unadjusted",
+            "raw_unadjusted_equity_price_usd_per_share",
+            "1d",
+            "usd_per_share",
         )
         sql = (
             "SELECT session_date,close,retrieved_at FROM daily_prices "
@@ -89,7 +99,8 @@ def _read_series(
 
 def _quality_status(conn: sqlite3.Connection, codes: list[str]) -> dict:
     tables = {
-        row[0] for row in conn.execute(
+        row[0]
+        for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
             "('data_quality_scan_progress','data_quality_findings','data_quality_source_state')"
         )
@@ -112,8 +123,10 @@ def _quality_status(conn: sqlite3.Connection, codes: list[str]) -> dict:
     ).fetchone()[0]
     current = datetime.now(UTC).date().isoformat()
     complete = bool(
-        scan is not None and source is not None
-        and scan["status"] == "completed" and not scan["stale"]
+        scan is not None
+        and source is not None
+        and scan["status"] == "completed"
+        and not scan["stale"]
         and scan["source_data_version_end"] == source["source_version"]
         and scan["validation_reference_date"] == current
     )
@@ -160,8 +173,12 @@ def run_analytics(
         codes = [code]
         if comparison_code:
             comparison, other_rows, other_provenance = _read_series(
-                conn, kind=comparison_kind, code=comparison_code,
-                provider=comparison_provider, start=start, end=end,
+                conn,
+                kind=comparison_kind,
+                code=comparison_code,
+                provider=comparison_provider,
+                start=start,
+                end=end,
             )
             codes.append(comparison_code)
         quality = _quality_status(conn, codes)
@@ -174,21 +191,27 @@ def run_analytics(
         result = compute_series(
             identity, records, window=window, allow_volatility_returns=allow_volatility_returns
         )
-        result.update({
-            "request": {"start": start.isoformat(), "end": end.isoformat()},
-            "source": provenance,
-            "quality": quality,
-            "quality_policy": quality_policy,
-            "unverified_data": not quality["quality_verified"],
-            "read_only": True,
-            "no_network": True,
-            "no_synthetic_sessions": True,
-        })
+        result.update(
+            {
+                "request": {"start": start.isoformat(), "end": end.isoformat()},
+                "source": provenance,
+                "quality": quality,
+                "quality_policy": quality_policy,
+                "unverified_data": not quality["quality_verified"],
+                "read_only": True,
+                "no_network": True,
+                "no_synthetic_sessions": True,
+            }
+        )
         if comparison:
             other = validated_observations(other_rows)
             result["comparison"] = compare_series(
-                identity, records, comparison, other,
-                window=window, missing_policy=missing_policy,
+                identity,
+                records,
+                comparison,
+                other,
+                window=window,
+                missing_policy=missing_policy,
             )
             result["comparison"]["source"] = other_provenance
         return result
