@@ -883,6 +883,38 @@ async fn analytics_series(
     read_backend("/api/v1/analytics/series", &parameters).await
 }
 
+/// Read-only, bounded multi-index query with fixed local FRED series.
+#[tauri::command]
+async fn analytics_basket(
+    codes: Vec<String>,
+    start: String,
+    end: String,
+    window: u16,
+    quality_policy: String,
+) -> Result<serde_json::Value, String> {
+    if !(2..=4).contains(&codes.len())
+        || codes.iter().any(|code| !valid_index_history_code(code) || code == "VIX")
+        || codes.iter().collect::<std::collections::HashSet<_>>().len() != codes.len()
+        || !valid_index_history_date(&start)
+        || !valid_index_history_date(&end)
+        || start > end
+        || !matches!(window, 5 | 10 | 14 | 20 | 21 | 50 | 63 | 126 | 200 | 252)
+        || !matches!(quality_policy.as_str(), "require_complete" | "allow_unverified")
+    {
+        return Err("Invalid multi-index comparison selection.".to_string());
+    }
+    read_backend(
+        "/api/v1/analytics/basket",
+        &[
+            ("codes", codes.join(",")),
+            ("start", start),
+            ("end", end),
+            ("window", window.to_string()),
+            ("quality_policy", quality_policy),
+        ],
+    ).await
+}
+
 #[tauri::command]
 async fn index_history_catalog() -> Result<serde_json::Value, String> {
     read_backend("/api/v1/market-data/index-history", &[]).await
@@ -1241,6 +1273,7 @@ fn main() {
             index_history_catalog,
             index_history_daily,
             analytics_series,
+            analytics_basket,
             index_history_acquire,
             daily_acquisition_status,
             daily_acquisition_settings,
