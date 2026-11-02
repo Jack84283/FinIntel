@@ -26,11 +26,22 @@ jobs:
         run: python -m pip install -e './backend[dev]'
       - name: Python lint
         run: |
-          ruff check backend scripts/preserve_local_data.py scripts/daily_acquisition_acceptance.py
-          ruff format --diff backend scripts/preserve_local_data.py scripts/daily_acquisition_acceptance.py
-          ruff format --check backend scripts/preserve_local_data.py scripts/daily_acquisition_acceptance.py
+          ruff check backend scripts/preserve_local_data.py scripts/daily_acquisition_acceptance.py scripts/quality_acceptance.py
+          ruff format --diff backend scripts/preserve_local_data.py scripts/daily_acquisition_acceptance.py scripts/quality_acceptance.py
+          ruff format --check backend scripts/preserve_local_data.py scripts/daily_acquisition_acceptance.py scripts/quality_acceptance.py
       - name: Unit tests
         run: python -m pytest backend/tests -q
+      - name: Generate disposable Issue 29 acceptance evidence
+        run: |
+          mkdir -p artifacts
+          python scripts/quality_acceptance.py --output artifacts/quality-acceptance.json
+      - name: Archive redacted synthetic acceptance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: finintel-issue29-synthetic-acceptance
+          path: artifacts/quality-acceptance.json
+          if-no-files-found: error
+          retention-days: 14
 
   frontend:
     name: Frontend / React
