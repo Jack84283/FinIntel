@@ -204,7 +204,7 @@ export function exportQualityJson(code: string, summary: QualityOverview, findin
 
 function csvCell(value: unknown): string {
   let item = String(value ?? "");
-  if (/^[=+\-@]/.test(item)) item = "'" + item;
+  if (/^[\s\p{Cc}]*[=+\-@]/u.test(item)) item = "'" + item;
   return '"' + item.replaceAll('"', '""') + '"';
 }
 export function exportQualityCsv(findings: QualityFinding[]): string {
