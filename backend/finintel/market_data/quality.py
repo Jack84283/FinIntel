@@ -2358,7 +2358,8 @@ def quality_overview(path: Path, *, code: str | None = None, as_of: date | None 
         for column in ("severity", "finding_type", "review_state", "instrument_kind"):
             rows = conn.execute(
                 f"SELECT {column} AS item, COUNT(*) AS count "
-                "FROM data_quality_findings WHERE " + filters
+                "FROM data_quality_findings WHERE "
+                + filters
                 + f" GROUP BY {column} ORDER BY {column}",
                 args,
             ).fetchall()
@@ -2371,9 +2372,11 @@ def quality_overview(path: Path, *, code: str | None = None, as_of: date | None 
                 "status": report["status"],
                 "stale": report["stale"],
                 "complete": report["scan_completeness"]["complete"]
-                if report["scan_completeness"] else False,
+                if report["scan_completeness"]
+                else False,
                 "partial": report["scan_completeness"]["status"] == "partial"
-                if report["scan_completeness"] else False,
+                if report["scan_completeness"]
+                else False,
                 "findings_examined": report["findings_examined"],
                 "findings_stored": report["findings_stored"],
                 "total_known_findings": report["total_known_findings"],
@@ -2382,9 +2385,11 @@ def quality_overview(path: Path, *, code: str | None = None, as_of: date | None 
                 "source_revision_changed": report["source_revision_changed"],
                 "source_catalog_identity_changed": report["source_catalog_identity_changed"],
                 "cursor_phase": report["scan_completeness"]["cursor_phase"]
-                if report["scan_completeness"] else None,
+                if report["scan_completeness"]
+                else None,
                 "cursor_next": report["scan_completeness"]["cursor_next"]
-                if report["scan_completeness"] else None,
+                if report["scan_completeness"]
+                else None,
             },
             "not_confirmed": True,
         }
