@@ -139,10 +139,13 @@ def compute_series(
     if identity.frequency not in {"1d", "daily"}:
         raise AnalyticsError("Only stored daily series are supported")
     allowed = identity.return_semantics in {
-        "price_index", "raw_unadjusted_equity_price_usd_per_share"
+        "price_index",
+        "raw_unadjusted_equity_price_usd_per_share",
     } or (identity.return_semantics == "volatility_index" and allow_volatility_returns)
     if identity.return_semantics not in {
-        "price_index", "raw_unadjusted_equity_price_usd_per_share", "volatility_index"
+        "price_index",
+        "raw_unadjusted_equity_price_usd_per_share",
+        "volatility_index",
     }:
         raise AnalyticsError("Unsupported source return semantics")
     dates = [item.session_date.isoformat() for item in observations]
@@ -183,7 +186,8 @@ def compute_series(
                 "drawdown": _decimal(drawdown) if allowed else None,
                 "rolling_volatility_annualized": (
                     _decimal(stdev(roll) * math.sqrt(ANNUAL_SESSIONS))
-                    if allowed and len(roll) >= 2 else None
+                    if allowed and len(roll) >= 2
+                    else None
                 ),
                 "moving_average": _decimal(ma) if ma is not None else None,
                 "momentum": _decimal(momentum) if allowed and momentum is not None else None,
@@ -192,7 +196,8 @@ def compute_series(
         )
     period = (
         {name: _period_returns(observations, name) for name in ("week", "month", "year")}
-        if allowed else {"week": [], "month": [], "year": []}
+        if allowed
+        else {"week": [], "month": [], "year": []}
     )
     return {
         "calculation_version": CALCULATION_VERSION,
@@ -274,9 +279,7 @@ def compare_series(
                 "right_normalized_100": _decimal(rvals[i] / rvals[0] * 100),
                 "left_return": _decimal(left_r[i - 1]) if i else None,
                 "right_return": _decimal(right_r[i - 1]) if i else None,
-                "relative_strength": _decimal(
-                    (lvals[i] / lvals[0]) / (rvals[i] / rvals[0])
-                ),
+                "relative_strength": _decimal((lvals[i] / lvals[0]) / (rvals[i] / rvals[0])),
                 "rolling_correlation": _decimal(corr) if corr is not None else None,
                 "rolling_covariance": _decimal(cov) if cov is not None else None,
                 "rolling_beta": _decimal(beta) if beta is not None else None,
