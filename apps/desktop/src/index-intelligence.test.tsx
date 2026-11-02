@@ -77,13 +77,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Index Intelligence local analytics API", () => {
-  it("rejects invalid/incompatible selections before any external or native access", () => {
+  it("rejects invalid/incompatible selections before any external or native access", async () => {
     expect(() => validateAnalyticsQuery({ ...query, code: "VIX", comparisonCode: "DJIA" })).toThrow();
     expect(() => validateAnalyticsQuery({ ...query, code: "SP500", comparisonCode: "SP500" })).toThrow();
     expect(() => validateAnalyticsQuery({ ...query, start: "2026-02-30" })).toThrow();
     expect(() => validateAnalyticsQuery({ ...query, start: "2026-10-23" })).toThrow();
     expect(() => validateAnalyticsQuery({ ...query, window: 7 as 20 })).toThrow();
-    expect(fetchIndexAnalytics({ ...query, comparisonCode: "VIX" })).rejects.toThrow();
+    await expect(fetchIndexAnalytics({ ...query, comparisonCode: "VIX" })).rejects.toThrow();
   });
 
   it("reads only the bounded local API using a fixed FRED provider and no caching", async () => {
