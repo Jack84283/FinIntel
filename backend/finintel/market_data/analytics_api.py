@@ -196,7 +196,10 @@ def local_index_basket(
     selected = codes.split(",")
     try:
         return run_index_basket(
-            codes=selected, start=start, end=end, window=window,
+            codes=selected,
+            start=start,
+            end=end,
+            window=window,
             quality_policy=quality_policy,
         )
     except AnalyticsError as exc:
