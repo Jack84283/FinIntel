@@ -332,6 +332,8 @@ def test_completed_scan_with_unreviewed_warning_is_not_labeled_verified(tmp_path
     assert state["quality_verified"] is False
     with pytest.raises(AnalyticsError, match="complete quality scan"):
         run_analytics(
-            start=date(2026, 10, 10), end=date(2026, 10, 16),
-            quality_policy="require_complete", db=db,
+            start=date(2026, 10, 10),
+            end=date(2026, 10, 16),
+            quality_policy="require_complete",
+            db=db,
         )
