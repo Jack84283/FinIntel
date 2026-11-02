@@ -172,5 +172,10 @@ describe("Index Intelligence UI and exact chart/grid values", () => {
     expect(latestCommonDate(catalog, "SP500", "DJIA")).toBe("2026-10-20");
     expect(latestCommonDate(catalog, "SP500", null)).toBe("2026-10-22");
     expect(latestCommonDate(catalog, "SP500", "VIX")).toBeNull();
+    const disjoint = [
+      { code: "SP500", first_session: "2026-10-21", last_session: "2026-10-22" },
+      { code: "DJIA", first_session: "2026-10-10", last_session: "2026-10-20" },
+    ] as IndexCatalogRecord[];
+    expect(latestCommonDate(disjoint, "SP500", "DJIA")).toBeNull();
   });
 });
