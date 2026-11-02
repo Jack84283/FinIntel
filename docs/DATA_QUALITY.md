@@ -218,3 +218,62 @@ and their audit events, and rejects divergent same-proposal histories. A
 source revision after merge prevents an old overlay from silently applying.
 Manual native desktop testing and live Tiingo verification must be documented
 separately; CI synthetic tests do not establish provider entitlement.
+
+
+## Data Quality investigation workspace (Issue #29 — Task 3)
+
+The desktop **Data & Operations → Data Quality** screen is a separate
+investigation workspace; Data Validation remains available. It starts with
+**S&P 500 (SP500)** and supports DJIA, NASDAQCOM, NDX, VIX plus stock/ETF
+ticker drilldowns. A single instrument is queried at a time to keep source
+matching explicit and avoid loading the entire historical database.
+
+The overview uses a bounded server-side SQL aggregate for active findings,
+including severity, review state and anomaly type. Scan metadata explicitly
+distinguishes completed, stale, partial, resumed and unknown scans. The
+**Run / resume quality scan** action runs the existing durable scan without
+making any automatic provider request; the UI indicates that completion is
+reported when the request resolves. The stored checkpoint phase and cursor
+are visible. A failed or incomplete scan is never labeled complete.
+
+Findings are paginated on the backend (20 per desktop page), with scope,
+finding type, review state and exact provider filters. Selecting **Inspect**
+shows an allowlisted, redacted evidence projection, durable review history
+(including superseded finding audit), and an explicit review form. Proposing
+a correction requires an already confirmed active finding and a rationale.
+The separate correction panel presents the original and proposed close,
+approval conflicts, stale source notices and append-only audit transitions.
+Approval requires explicit acknowledgment of the preview and a decision
+note; reversal restores the original effective-close view. This screen
+does **not** write to historical equity/index observations or implicitly
+apply overlays to Market charts or model calculations.
+
+A scoped corporate-action section distinguishes locally sourced Tiingo
+split/dividend references from suspected price-jump candidates. Verification
+is an explicit opt-in desktop action requiring the configured provider key;
+there is no hidden network refresh. The same page shows stored provider
+series coverage counts when available.
+
+**Local-only exports:** JSON and CSV generate on the user's device from
+at most 5,000 filtered findings, using backend pagination. Each row contains
+only instrument code, provider, session, rule, severity, confidence,
+review state and an **explicit scalar evidence allowlist**. Unknown evidence
+fields, nested provider payloads, credentials, URLs and review notes are
+excluded. CSV output escapes formulas to reduce spreadsheet injection risk.
+The UI warns when the matching set exceeds the bounded export cap. Neither
+format uploads any user data.
+
+The Tauri layer adds an allowlisted quality API bridge with fixed loopback
+routes, managed process-token forwarding and strict ID/query validation;
+the webview cannot select arbitrary URLs or read the token. Browser-only
+development can read local responses through the Vite proxy but protected
+writes still require managed desktop authorization.
+
+The existing `GET /api/v1/quality/findings/{id}/history` and
+`GET /api/v1/quality/overview?code=SP500` endpoints are read-only. The
+former returns historic decisions for a finding, including superseded
+records; the latter aggregates active scope counts plus scan freshness.
+Frontend and backend tests cover both workflows and local redaction.
+Native macOS/Windows/Linux and manual desktop behavior must be verified
+before merging; the separate Issue #29 Task 4 still owns final end-to-end
+acceptance and large-database benchmarks.
