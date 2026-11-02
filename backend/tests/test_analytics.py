@@ -98,7 +98,7 @@ def test_vix_level_only_without_explicit_opt_in():
     raw = compute_series(vix, points(20, 30, 40, 25, 20, 21), window=5)
     assert raw["metrics_enabled"] is False
     assert all(row["simple_return"] is None and row["drawdown"] is None for row in raw["points"])
-    assert raw["points"][-1]["moving_average"] == "21.4"
+    assert raw["points"][-1]["moving_average"] == "27.2"
     requested = compute_series(
         vix,
         points(20, 30, 40, 25, 20, 21),
