@@ -110,7 +110,7 @@ async fn read_backend(path: &str, params: &[(&str, String)]) -> Result<serde_jso
                 .to_string(),
         );
     }
-    if path == "/api/v1/analytics/series"
+    if matches!(path, "/api/v1/analytics/series" | "/api/v1/analytics/basket")
         && response.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY
     {
         // Fixed analytics endpoint reports safe validation/quality failures.
