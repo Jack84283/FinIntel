@@ -121,7 +121,7 @@ def _synthetic(path: Path, destination: Path, sessions_count: int) -> tuple[list
     before = _original_snapshot(path)
     checks = []
     started = time.monotonic()
-    first = run_quality_scan(path, max_findings=10, as_of=REFERENCE_DATE)
+    first = run_quality_scan(path, max_findings=1, as_of=REFERENCE_DATE)
     result = first
     resumes = 0
     while not result["complete"] and resumes < 500:
