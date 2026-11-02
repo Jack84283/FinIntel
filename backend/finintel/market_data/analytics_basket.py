@@ -61,7 +61,7 @@ def run_index_basket(
                 "rerun validation or explicitly allow_unverified"
             )
         observations = [validated_observations(rows) for _, rows, _ in inputs]
-        shared = set(p.session_date for p in observations[0])
+        shared = {p.session_date for p in observations[0]}
         for series in observations[1:]:
             shared.intersection_update(p.session_date for p in series)
         dates = sorted(shared)
@@ -127,10 +127,10 @@ def run_index_basket(
             "no_network": True,
             "no_synthetic_sessions": True,
             "notes": [
-                "All returns, drawdowns and rolling metrics are recomputed on the same "
-                "intersection of stored sessions, not independently aligned charts.",
-                "Missing dates are never forward-filled; consecutive shared sessions may "
-                "be more than one exchange session apart.",
+                ("All returns, drawdowns and rolling metrics are recomputed on the same "
+                 "intersection of stored sessions, not independently aligned charts."),
+                ("Missing dates are never forward-filled; consecutive shared sessions may "
+                 "be more than one exchange session apart."),
                 "Daily price-index levels exclude dividend reinvestment and are not total returns.",
             ],
         }
