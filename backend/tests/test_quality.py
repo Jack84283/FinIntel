@@ -1713,3 +1713,130 @@ def test_quality_api_scans_filters_and_reviews_with_managed_token(tmp_path, monk
         assert report.json()["truncated"] is True
         assert report.json()["scan_completeness"]["complete"] is True
         assert report.json()["total_known_findings"] == scan_payload["findings_stored"]
+
+
+def test_reconciliation_keeps_existing_review_and_source_rows(tmp_path):
+    """Re-running under changed preferences must preserve quality IDs and prices."""
+
+    db = tmp_path / "provider-reconcile.sqlite3"
+    seed_quality_database(db)
+    with sqlite3.connect(db) as conn:
+        before = conn.execute(
+            "SELECT series_id, session_date, close, retrieved_at, ingestion_id "
+            "FROM daily_prices ORDER BY series_id, session_date"
+        ).fetchall()
+
+    run_quality_scan(db, as_of=date(2026, 11, 1))
+    first = next(
+        item
+        for item in list_findings(db, finding_type="provider_divergence")["items"]
+        if item["rule"] == "overlapping_close_differs_over_1pct"
+    )
+    review_finding(db, first["id"], "confirmed", "Test review: compare source evidence.")
+    run_quality_scan(
+        db,
+        as_of=date(2026, 11, 1),
+        thresholds={"reconciliation_provider_priority": ["tiingo", "alpaca_sip", "alpha_vantage"]},
+    )
+    second = next(
+        item
+        for item in list_findings(db, finding_type="provider_divergence")["items"]
+        if item["fingerprint"] == first["fingerprint"]
+    )
+    assert second["id"] == first["id"]
+    assert second["review_state"] == "confirmed"
+    assert second["evidence"]["preferred_provider_for_future_analysis"] == "tiingo"
+    with sqlite3.connect(db) as conn:
+        assert (
+            conn.execute(
+                "SELECT series_id, session_date, close, retrieved_at, ingestion_id "
+                "FROM daily_prices ORDER BY series_id, session_date"
+            ).fetchall()
+            == before
+        )
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM data_quality_reviews WHERE finding_id = ?",
+                (first["id"],),
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_reconciliation_endpoint_is_read_only(tmp_path, monkeypatch):
+    db = tmp_path / "provider-reconcile.sqlite3"
+    seed_quality_database(db)
+    run_quality_scan(db, as_of=date(2026, 11, 1))
+    monkeypatch.setattr("finintel.market_data.quality_api.database_path", lambda: db)
+    with sqlite3.connect(db) as conn:
+        count_before = conn.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0]
+    client = TestClient(app)
+    policy = client.get("/api/v1/quality/reconciliation/policy")
+    assert policy.status_code == 200
+    assert "provider_priority" in policy.json()
+    response = client.get("/api/v1/quality/reconciliation/summary?code=AAPL")
+    assert response.status_code == 200
+    assert response.json()["scope"] == "AAPL"
+    assert response.json()["findings"]["active"] >= 1
+    with sqlite3.connect(db) as conn:
+        assert (
+            conn.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0] == count_before
+        )
+
+
+def test_reconciliation_backup_merge_remaps_series_without_losing_review(tmp_path):
+    """Provider evidence remains valid when a destination has different series IDs."""
+
+    from finintel.storage.backup import create_backup, restore_backup
+
+    source = tmp_path / "source.sqlite3"
+    destination = tmp_path / "destination.sqlite3"
+    seed_quality_database(source)
+    run_quality_scan(source, as_of=date(2026, 11, 1))
+    first = next(
+        item
+        for item in list_findings(source, finding_type="provider_divergence")["items"]
+        if item["rule"] == "overlapping_close_differs_over_1pct"
+    )
+    review_finding(source, first["id"], "confirmed", "Evidence verified before backup.")
+    backup = create_backup(db=source)
+
+    conn = _write_connection(destination)
+    with conn:
+        conn.execute("INSERT INTO instruments VALUES ('NVDA', '2026-10-01')")
+        conn.execute(
+            "INSERT INTO series(id,symbol,provider,frequency,adjustment,data_kind) "
+            "VALUES (1,'NVDA','alpaca_sip','1d','raw_unadjusted','historical_eod')"
+        )
+    conn.close()
+
+    result = restore_backup(backup["id"], "merge", db=destination)
+    assert result["status"] == "restored"
+    imported = next(
+        item
+        for item in list_findings(destination, finding_type="provider_divergence")["items"]
+        if item["rule"] == "overlapping_close_differs_over_1pct"
+    )
+    assert imported["review_state"] == "confirmed"
+    assert imported["series_id"] != first["series_id"]
+    assert imported["evidence"]["left_observation"]["source_revision"]["retrieved_at"]
+    assert "series_id" not in imported["evidence"]["left_observation"]
+    assert "ingestion_id" not in imported["evidence"]["left_observation"]["source_revision"]
+
+    run_quality_scan(destination, as_of=date(2026, 11, 1))
+    rescanned = next(
+        item
+        for item in list_findings(destination, finding_type="provider_divergence")["items"]
+        if item["rule"] == "overlapping_close_differs_over_1pct"
+    )
+    assert rescanned["id"] == imported["id"]
+    assert rescanned["review_state"] == "confirmed"
+    with sqlite3.connect(destination) as conn:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM data_quality_reviews WHERE finding_id=?",
+                (rescanned["id"],),
+            ).fetchone()[0]
+            == 1
+        )
