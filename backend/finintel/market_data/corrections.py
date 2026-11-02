@@ -39,8 +39,16 @@ def _positive(value: object) -> Decimal:
     return parsed
 
 
-def _source(conn: sqlite3.Connection, *, kind: str, code: str, provider: str,
-            adjustment: str, frequency: str, session: str) -> dict:
+def _source(
+    conn: sqlite3.Connection,
+    *,
+    kind: str,
+    code: str,
+    provider: str,
+    adjustment: str,
+    frequency: str,
+    session: str,
+) -> dict:
     """Resolve by stable natural key, never by database-local series/ingestion ID."""
 
     if kind == "equity":
@@ -118,8 +126,14 @@ def get_correction(path: Path, correction_id: str) -> dict:
         conn.close()
 
 
-def list_corrections(path: Path, *, code: str | None = None, state: str | None = None,
-                     limit: int = 50, offset: int = 0) -> dict:
+def list_corrections(
+    path: Path,
+    *,
+    code: str | None = None,
+    state: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
     if state is not None and state not in STATES:
         raise ValueError("Invalid correction state")
     if not 1 <= limit <= 500 or offset < 0:
@@ -137,9 +151,12 @@ def list_corrections(path: Path, *, code: str | None = None, state: str | None =
             clauses.append("state=?")
             values.append(state)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        total = conn.execute("SELECT COUNT(*) FROM quality_corrections" + where, values).fetchone()[0]
+        total = conn.execute("SELECT COUNT(*) FROM quality_corrections" + where, values).fetchone()[
+            0
+        ]
         rows = conn.execute(
-            "SELECT id FROM quality_corrections" + where
+            "SELECT id FROM quality_corrections"
+            + where
             + " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
             [*values, limit, offset],
         ).fetchall()
@@ -153,8 +170,14 @@ def list_corrections(path: Path, *, code: str | None = None, state: str | None =
         conn.close()
 
 
-def _record_event(conn: sqlite3.Connection, correction_id: str, old: str | None,
-                  new: str, note: str | None, now: str) -> None:
+def _record_event(
+    conn: sqlite3.Connection,
+    correction_id: str,
+    old: str | None,
+    new: str,
+    note: str | None,
+    now: str,
+) -> None:
     conn.execute(
         "INSERT INTO quality_correction_events "
         "(id,correction_id,from_state,to_state,note,occurred_at) "
@@ -164,8 +187,9 @@ def _record_event(conn: sqlite3.Connection, correction_id: str, old: str | None,
 
 
 @serialized_storage_write
-def propose_correction(path: Path, *, finding_id: int, provider: str,
-                       proposed_close: str, rationale: str) -> dict:
+def propose_correction(
+    path: Path, *, finding_id: int, provider: str, proposed_close: str, rationale: str
+) -> dict:
     """Require an explicitly confirmed, currently active quality finding."""
 
     proposed = _positive(proposed_close)
@@ -182,7 +206,9 @@ def propose_correction(path: Path, *, finding_id: int, provider: str,
         if finding is None:
             raise KeyError("Quality finding was not found")
         if finding["review_state"] != "confirmed" or finding["superseded_at"] is not None:
-            raise CorrectionConflict("A confirmed, active finding is required before proposing a correction")
+            raise CorrectionConflict(
+                "A confirmed, active finding is required before proposing a correction"
+            )
         if finding["session_date"] is None:
             raise ValueError("Finding does not identify a specific observed session")
         kind, code = finding["instrument_kind"], finding["code"]
@@ -206,11 +232,18 @@ def propose_correction(path: Path, *, finding_id: int, provider: str,
             ).fetchone()
             if meta is None:
                 raise ValueError("Index source semantics are unknown")
-            adjustment = "volatility_index" if meta["series_type"] == "volatility" else "price_index"
+            adjustment = (
+                "volatility_index" if meta["series_type"] == "volatility" else "price_index"
+            )
             frequency = "daily"
         source = _source(
-            conn, kind=kind, code=code, provider=provider,
-            adjustment=adjustment, frequency=frequency, session=finding["session_date"],
+            conn,
+            kind=kind,
+            code=code,
+            provider=provider,
+            adjustment=adjustment,
+            frequency=frequency,
+            session=finding["session_date"],
         )
         if proposed == _positive(source["close"]):
             raise ValueError("Proposed close must differ from the recorded observation")
@@ -222,12 +255,25 @@ def propose_correction(path: Path, *, finding_id: int, provider: str,
             "finding_fingerprint,rationale,evidence_json,state,validated_at,created_at,updated_at) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'proposed',NULL,?,?)",
             (
-                key, kind, code, provider, adjustment, frequency,
-                source["return_semantics"], finding["session_date"],
-                source["close"], source["retrieved_at"], str(proposed),
-                finding["fingerprint"], rationale.strip(),
-                json.dumps({"candidate_only": True, "source_semantics": source["return_semantics"]},
-                           sort_keys=True), now, now,
+                key,
+                kind,
+                code,
+                provider,
+                adjustment,
+                frequency,
+                source["return_semantics"],
+                finding["session_date"],
+                source["close"],
+                source["retrieved_at"],
+                str(proposed),
+                finding["fingerprint"],
+                rationale.strip(),
+                json.dumps(
+                    {"candidate_only": True, "source_semantics": source["return_semantics"]},
+                    sort_keys=True,
+                ),
+                now,
+                now,
             ),
         )
         _record_event(conn, key, None, "proposed", rationale.strip(), now)
@@ -243,9 +289,13 @@ def propose_correction(path: Path, *, finding_id: int, provider: str,
 def _status(conn: sqlite3.Connection, proposal: dict) -> tuple[dict, bool]:
     try:
         current = _source(
-            conn, kind=proposal["instrument_kind"], code=proposal["code"],
-            provider=proposal["provider"], adjustment=proposal["adjustment"],
-            frequency=proposal["frequency"], session=proposal["session_date"],
+            conn,
+            kind=proposal["instrument_kind"],
+            code=proposal["code"],
+            provider=proposal["provider"],
+            adjustment=proposal["adjustment"],
+            frequency=proposal["frequency"],
+            session=proposal["session_date"],
         )
     except (KeyError, ValueError):
         return {}, True
@@ -270,8 +320,15 @@ def preview_correction(path: Path, correction_id: str) -> dict:
             "SELECT id FROM quality_corrections WHERE instrument_kind=? AND code=? "
             "AND provider=? AND adjustment=? AND frequency=? AND session_date=? "
             "AND state='approved' AND id<>?",
-            (p["instrument_kind"], p["code"], p["provider"], p["adjustment"],
-             p["frequency"], p["session_date"], p["id"]),
+            (
+                p["instrument_kind"],
+                p["code"],
+                p["provider"],
+                p["adjustment"],
+                p["frequency"],
+                p["session_date"],
+                p["id"],
+            ),
         ).fetchone()
         proposed, original = _positive(p["proposed_close"]), _positive(p["source_close"])
         return {
@@ -294,8 +351,9 @@ def preview_correction(path: Path, correction_id: str) -> dict:
 
 
 @serialized_storage_write
-def transition_correction(path: Path, correction_id: str, action: str,
-                          note: str | None = None) -> dict:
+def transition_correction(
+    path: Path, correction_id: str, action: str, note: str | None = None
+) -> dict:
     """Atomically validate, approve, reject or reverse, recording every transition."""
 
     targets = {
@@ -323,16 +381,27 @@ def transition_correction(path: Path, correction_id: str, action: str,
         if action in ("validate", "approve"):
             _, stale = _status(conn, p)
             if stale:
-                raise CorrectionConflict("Source observation or semantics changed; propose a new correction")
+                raise CorrectionConflict(
+                    "Source observation or semantics changed; propose a new correction"
+                )
             match = conn.execute(
                 "SELECT id FROM quality_corrections WHERE instrument_kind=? AND code=? "
                 "AND provider=? AND adjustment=? AND frequency=? AND session_date=? "
                 "AND state='approved' AND id<>?",
-                (p["instrument_kind"], p["code"], p["provider"], p["adjustment"],
-                 p["frequency"], p["session_date"], p["id"]),
+                (
+                    p["instrument_kind"],
+                    p["code"],
+                    p["provider"],
+                    p["adjustment"],
+                    p["frequency"],
+                    p["session_date"],
+                    p["id"],
+                ),
             ).fetchone()
             if match is not None:
-                raise CorrectionConflict("A different approved overlay already exists for this observation")
+                raise CorrectionConflict(
+                    "A different approved overlay already exists for this observation"
+                )
             # A finding can be superseded after a proposal was created. Approval
             # requires the evidence to remain confirmed and active, not merely a
             # compatible source close.
@@ -340,8 +409,14 @@ def transition_correction(path: Path, correction_id: str, action: str,
                 "SELECT review_state,superseded_at FROM data_quality_findings WHERE fingerprint=?",
                 (p["finding_fingerprint"],),
             ).fetchone()
-            if finding is None or finding["review_state"] != "confirmed" or finding["superseded_at"]:
-                raise CorrectionConflict("The linked quality finding is no longer confirmed and active")
+            if (
+                finding is None
+                or finding["review_state"] != "confirmed"
+                or finding["superseded_at"]
+            ):
+                raise CorrectionConflict(
+                    "The linked quality finding is no longer confirmed and active"
+                )
         now = _now()
         conn.execute(
             "UPDATE quality_corrections SET state=?,updated_at=?,validated_at="
@@ -353,7 +428,9 @@ def transition_correction(path: Path, correction_id: str, action: str,
         return get_correction(path, correction_id)
     except sqlite3.IntegrityError as exc:
         conn.rollback()
-        raise CorrectionConflict("Conflicting approved correction or invalid audit transition") from exc
+        raise CorrectionConflict(
+            "Conflicting approved correction or invalid audit transition"
+        ) from exc
     except Exception:
         conn.rollback()
         raise
@@ -361,8 +438,16 @@ def transition_correction(path: Path, correction_id: str, action: str,
         conn.close()
 
 
-def resolved_close(path: Path, *, kind: str, code: str, provider: str,
-                   adjustment: str, frequency: str, session_date: str) -> dict:
+def resolved_close(
+    path: Path,
+    *,
+    kind: str,
+    code: str,
+    provider: str,
+    adjustment: str,
+    frequency: str,
+    session_date: str,
+) -> dict:
     """Explicit read-side overlay. A stale approval never masks a provider revision."""
 
     conn = _read_connection(path)
@@ -370,8 +455,13 @@ def resolved_close(path: Path, *, kind: str, code: str, provider: str,
         raise FileNotFoundError(path)
     try:
         current = _source(
-            conn, kind=kind, code=code, provider=provider,
-            adjustment=adjustment, frequency=frequency, session=session_date,
+            conn,
+            kind=kind,
+            code=code,
+            provider=provider,
+            adjustment=adjustment,
+            frequency=frequency,
+            session=session_date,
         )
         row = conn.execute(
             "SELECT id,source_close,source_retrieved_at,return_semantics,proposed_close "
@@ -426,13 +516,25 @@ def _save_verified_actions(path: Path, result: dict) -> dict:
                     "source_name,source_observed_at,evidence_json,recorded_at) "
                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
-                        str(uuid4()), result["symbol"], "tiingo", event["date"], kind,
-                        event["split_factor"], event["cash_dividend"], "sourced",
-                        "Tiingo daily event fields", observed,
-                        json.dumps({"check": event["check"],
-                                    "observed_close_ratio": event.get("observed_close_ratio"),
-                                    "expected_split_ratio": event.get("expected_split_ratio")},
-                                   sort_keys=True), observed,
+                        str(uuid4()),
+                        result["symbol"],
+                        "tiingo",
+                        event["date"],
+                        kind,
+                        event["split_factor"],
+                        event["cash_dividend"],
+                        "sourced",
+                        "Tiingo daily event fields",
+                        observed,
+                        json.dumps(
+                            {
+                                "check": event["check"],
+                                "observed_close_ratio": event.get("observed_close_ratio"),
+                                "expected_split_ratio": event.get("expected_split_ratio"),
+                            },
+                            sort_keys=True,
+                        ),
+                        observed,
                     ),
                 )
                 saved += cursor.rowcount
@@ -470,9 +572,12 @@ def list_corporate_actions(path: Path, code: str, *, limit: int = 100) -> dict:
             item.pop("evidence_json")
         suspected = [
             {
-                "finding_id": row["id"], "session_date": row["session_date"],
-                "provider": row["provider"], "status": "suspected",
-                "rule": row["rule"], "review_state": row["review_state"],
+                "finding_id": row["id"],
+                "session_date": row["session_date"],
+                "provider": row["provider"],
+                "status": "suspected",
+                "rule": row["rule"],
+                "review_state": row["review_state"],
             }
             for row in conn.execute(
                 "SELECT id,session_date,provider,rule,review_state FROM data_quality_findings "
@@ -482,7 +587,9 @@ def list_corporate_actions(path: Path, code: str, *, limit: int = 100) -> dict:
             )
         ]
         return {
-            "code": code, "sourced": sourced, "suspected": suspected,
+            "code": code,
+            "sourced": sourced,
+            "suspected": suspected,
             "note": "A price-jump suspicion is not a sourced corporate action or an approved correction.",
         }
     finally:
