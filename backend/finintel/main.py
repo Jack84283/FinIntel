@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from finintel import __version__
+from finintel.market_data.analytics_api import router as analytics_router
 from finintel.market_data.daily_status_api import router as daily_status_router
 from finintel.market_data.daily_status_api import start_scheduler, stop_scheduler
 from finintel.market_data.index_history_api import router as index_history_router
@@ -52,6 +53,7 @@ def health() -> HealthResponse:
 
 
 app.include_router(market_data_router)
+app.include_router(analytics_router)
 app.include_router(validation_router)
 app.include_router(quality_router)
 app.include_router(membership_router)
