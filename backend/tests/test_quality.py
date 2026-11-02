@@ -940,7 +940,7 @@ def test_pr38_index_anomaly_upgrade_reuses_reviewed_finding(tmp_path):
     conn.close()
 
     with sqlite3.connect(db) as check:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 15
         assert "superseded_at" not in {
             row[1] for row in check.execute("PRAGMA table_info(data_quality_findings)")
         }
