@@ -48,8 +48,7 @@ def run_index_basket(
     if conn is None:
         raise AnalyticsError("No local observations are available")
     try:
-        # A single SQLite snapshot is required even when an ingestion is running.
-        conn.execute("BEGIN")
+        # _read_connection already begins a read-only SQLite snapshot.
         inputs = [
             _read_series(conn, kind="index", code=code, provider="fred", start=start, end=end)
             for code in codes
@@ -104,7 +103,6 @@ def run_index_basket(
                     "rolling_correlation": relative["rolling_correlation"] if relative else None,
                 }
             points.append({"session_date": day.isoformat(), "values": values})
-        conn.commit()
         return {
             "calculation_version": CALCULATION_VERSION,
             "codes": codes,
