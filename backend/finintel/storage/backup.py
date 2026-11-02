@@ -622,11 +622,24 @@ def _merge(staging: Path, source: Path) -> None:
                         "SELECT * FROM incoming.quality_corrections ORDER BY created_at,id"
                     ).fetchall()
                     correction_fields = [
-                        "id", "instrument_kind", "code", "provider", "adjustment",
-                        "frequency", "return_semantics", "session_date",
-                        "source_close", "source_retrieved_at", "proposed_close",
-                        "finding_fingerprint", "rationale", "evidence_json",
-                        "state", "validated_at", "created_at", "updated_at",
+                        "id",
+                        "instrument_kind",
+                        "code",
+                        "provider",
+                        "adjustment",
+                        "frequency",
+                        "return_semantics",
+                        "session_date",
+                        "source_close",
+                        "source_retrieved_at",
+                        "proposed_close",
+                        "finding_fingerprint",
+                        "rationale",
+                        "evidence_json",
+                        "state",
+                        "validated_at",
+                        "created_at",
+                        "updated_at",
                     ]
                     for incoming in incoming_corrections:
                         row = dict(zip(correction_fields, incoming, strict=True))
@@ -653,7 +666,9 @@ def _merge(staging: Path, source: Path) -> None:
                             )
                         ]
                         if not source_events or source_events[-1][3] != row["state"]:
-                            raise StorageError("Correction audit events do not match proposal state")
+                            raise StorageError(
+                                "Correction audit events do not match proposal state"
+                            )
                         if stored is None:
                             columns = ",".join(correction_fields)
                             values = ",".join("?" for _ in correction_fields)
@@ -663,10 +678,19 @@ def _merge(staging: Path, source: Path) -> None:
                             )
                         else:
                             for field in (
-                                "instrument_kind", "code", "provider", "adjustment",
-                                "frequency", "return_semantics", "session_date",
-                                "source_close", "source_retrieved_at", "proposed_close",
-                                "rationale", "evidence_json", "finding_fingerprint",
+                                "instrument_kind",
+                                "code",
+                                "provider",
+                                "adjustment",
+                                "frequency",
+                                "return_semantics",
+                                "session_date",
+                                "source_close",
+                                "source_retrieved_at",
+                                "proposed_close",
+                                "rationale",
+                                "evidence_json",
+                                "finding_fingerprint",
                             ):
                                 if stored[field] != row[field]:
                                     raise StorageError(
@@ -682,7 +706,9 @@ def _merge(staging: Path, source: Path) -> None:
                                 )
                             ]
                             if not current_events or current_events[-1][3] != stored["state"]:
-                                raise StorageError("Existing correction audit history is inconsistent")
+                                raise StorageError(
+                                    "Existing correction audit history is inconsistent"
+                                )
                             shorter = min(len(current_events), len(source_events))
                             if current_events[:shorter] != source_events[:shorter]:
                                 raise StorageError(
@@ -693,8 +719,9 @@ def _merge(staging: Path, source: Path) -> None:
                                     "UPDATE quality_corrections SET "
                                     "state=?,validated_at=?,updated_at=? WHERE id=?",
                                     (
-                                        row["state"], row["validated_at"],
-                                        row["updated_at"], row["id"],
+                                        row["state"],
+                                        row["validated_at"],
+                                        row["updated_at"],
                                     ),
                                 )
                         for event in source_events:
