@@ -331,6 +331,152 @@ async fn market_imports_search(
     ).await
 }
 
+
+// Restricted Tauri bridge for data-quality investigation. The webview cannot
+// provide a host, token, arbitrary HTTP route or query parameter name.
+fn valid_quality_id(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if [8, 13, 18, 23].contains(&index) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
+#[tauri::command]
+async fn quality_read(
+    route: String,
+    query: serde_json::Value,
+    id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let (path, permitted): (String, &[&str]) = match route.as_str() {
+        "overview" => ("/api/v1/quality/overview".into(), &["code"]),
+        "findings" => (
+            "/api/v1/quality/findings".into(),
+            &["code", "finding_type", "provider", "review_state", "limit", "offset"],
+        ),
+        "report" => ("/api/v1/quality/report".into(), &["limit"]),
+        "corrections" => (
+            "/api/v1/quality/corrections".into(),
+            &["code", "state", "limit", "offset"],
+        ),
+        "corporate-actions" => (
+            "/api/v1/quality/corporate-actions".into(),
+            &["code", "limit"],
+        ),
+        "reconciliation" => (
+            "/api/v1/quality/reconciliation/summary".into(),
+            &["code"],
+        ),
+        "history" | "correction" | "preview" => {
+            let key = id.ok_or("Missing record identifier.")?;
+            if route == "history" {
+                if key.parse::<u64>().ok().filter(|value| *value > 0).is_none() {
+                    return Err("Invalid finding ID.".into());
+                }
+                (format!("/api/v1/quality/findings/{key}/history"), &[])
+            } else {
+                if !valid_quality_id(&key) {
+                    return Err("Invalid correction ID.".into());
+                }
+                (
+                    if route == "preview" {
+                        format!("/api/v1/quality/corrections/{key}/preview")
+                    } else {
+                        format!("/api/v1/quality/corrections/{key}")
+                    },
+                    &[],
+                )
+            }
+        }
+        _ => return Err("Unsupported data-quality read route.".into()),
+    };
+    let map = query.as_object().ok_or("Invalid data-quality filter object.")?;
+    if map.len() > permitted.len() {
+        return Err("Unexpected data-quality filters.".into());
+    }
+    let mut params: Vec<(&str, String)> = Vec::new();
+    for (key, value) in map {
+        if !permitted.contains(&key.as_str()) {
+            return Err("Unrecognized data-quality filter.".into());
+        }
+        let val = match value {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Number(n) => n.to_string(),
+            _ => return Err("Invalid data-quality filter value.".into()),
+        };
+        if val.len() > 80 {
+            return Err("Data-quality filter is too long.".into());
+        }
+        params.push((key.as_str(), val));
+    }
+    read_backend(&path, &params).await
+}
+
+#[tauri::command]
+async fn quality_write(
+    route: String,
+    body: serde_json::Value,
+    id: Option<String>,
+    action: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() {
+        return Err("Data-quality changes require the managed desktop.".into());
+    }
+    let path = match route.as_str() {
+        "scan" => "/api/v1/quality/scan".to_string(),
+        "propose" => "/api/v1/quality/corrections".to_string(),
+        "corporate-verify" => "/api/v1/quality/corporate-actions/verify".to_string(),
+        "review" => {
+            let key = id.ok_or("Missing finding identifier.")?;
+            if key.parse::<u64>().ok().filter(|value| *value > 0).is_none() {
+                return Err("Invalid finding ID.".into());
+            }
+            format!("/api/v1/quality/findings/{key}/review")
+        }
+        "transition" => {
+            let key = id.ok_or("Missing correction identifier.")?;
+            if !valid_quality_id(&key) {
+                return Err("Invalid correction ID.".into());
+            }
+            let operation = action.ok_or("Missing correction action.")?;
+            if !["validate", "approve", "reject", "reverse"].contains(&operation.as_str()) {
+                return Err("Unsupported correction action.".into());
+            }
+            format!("/api/v1/quality/corrections/{key}/{operation}")
+        }
+        _ => return Err("Unsupported data-quality write route.".into()),
+    };
+    if !body.is_object() || body.to_string().len() > 8192 {
+        return Err("Invalid data-quality request body.".into());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(if route == "scan" { 600 } else { 90 }))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize the local quality client.".to_string())?;
+    let response = client
+        .post(format!("{}{}", backend_base(), path))
+        .header("x-finintel-process-token", backend_token())
+        .json(&body)
+        .send()
+        .await
+        .map_err(|_| "Could not reach the managed local data-quality backend.".to_string())?;
+    let status = response.status();
+    let result = response.json::<serde_json::Value>().await
+        .map_err(|_| "The local quality backend returned malformed JSON.".to_string())?;
+    if !status.is_success() {
+        return Err(format!(
+            "HTTP {}: {}",
+            status.as_u16(),
+            result["detail"].as_str().unwrap_or("Data-quality request failed."),
+        ));
+    }
+    Ok(result)
+}
+
 #[tauri::command]
 async fn validation_status() -> Result<serde_json::Value, String> {
     read_backend("/api/v1/validation/status", &[]).await
@@ -1027,6 +1173,8 @@ fn main() {
             database_backup_create,
             database_backup_preview,
             database_backup_restore,
+            quality_read,
+            quality_write,
             validation_status,
             validation_start,
             validation_corporate_reference,

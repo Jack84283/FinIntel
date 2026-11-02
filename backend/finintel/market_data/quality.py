@@ -2336,3 +2336,90 @@ def quality_report(path: Path, *, limit: int = 500, as_of: date | None = None) -
             "A candidate is not a confirmed defect or an automatic correction.",
         ],
     }
+
+
+def quality_overview(path: Path, *, code: str | None = None, as_of: date | None = None) -> dict:
+    """Index/equity-scoped counts without retrieving all findings or source payloads."""
+
+    report = quality_report(path, limit=1, as_of=as_of)
+    conn = _read_connection(path)
+    if conn is None:
+        raise FileNotFoundError(path)
+    try:
+        filters = "superseded_at IS NULL"
+        args: list[object] = []
+        if code:
+            filters += " AND code = ?"
+            args.append(code)
+        total = conn.execute(
+            "SELECT COUNT(*) FROM data_quality_findings WHERE " + filters, args
+        ).fetchone()[0]
+        groups = {}
+        for column in ("severity", "finding_type", "review_state", "instrument_kind"):
+            rows = conn.execute(
+                f"SELECT {column} AS item, COUNT(*) AS count "
+                "FROM data_quality_findings WHERE "
+                + filters
+                + f" GROUP BY {column} ORDER BY {column}",
+                args,
+            ).fetchall()
+            groups[column] = {row["item"]: row["count"] for row in rows}
+        return {
+            "code": code,
+            "total": total,
+            "counts": groups,
+            "scan": {
+                "status": report["status"],
+                "stale": report["stale"],
+                "complete": report["scan_completeness"]["complete"]
+                if report["scan_completeness"]
+                else False,
+                "partial": report["scan_completeness"]["status"] == "partial"
+                if report["scan_completeness"]
+                else False,
+                "findings_examined": report["findings_examined"],
+                "findings_stored": report["findings_stored"],
+                "total_known_findings": report["total_known_findings"],
+                "validation_reference_date_saved": report["validation_reference_date_saved"],
+                "validation_reference_date": report["validation_reference_date"],
+                "source_revision_changed": report["source_revision_changed"],
+                "source_catalog_identity_changed": report["source_catalog_identity_changed"],
+                "cursor_phase": report["scan_completeness"]["cursor_phase"]
+                if report["scan_completeness"]
+                else None,
+                "cursor_next": report["scan_completeness"]["cursor_next"]
+                if report["scan_completeness"]
+                else None,
+            },
+            "not_confirmed": True,
+        }
+    finally:
+        conn.close()
+
+
+def finding_history(path: Path, finding_id: int) -> dict:
+    """Read-only review timeline; show superseded findings by their original ID."""
+
+    finding = _get_finding(path, finding_id)
+    conn = _read_connection(path)
+    if conn is None:
+        raise FileNotFoundError(path)
+    try:
+        history = conn.execute(
+            "SELECT id,from_state,to_state,note,reviewed_at "
+            "FROM data_quality_reviews WHERE finding_id=? "
+            "ORDER BY reviewed_at,id",
+            (finding_id,),
+        ).fetchall()
+        return {
+            "finding": finding,
+            "reviews": [dict(row) for row in history],
+            "source_revision": {
+                "created_at": finding["created_at"],
+                "updated_at": finding["updated_at"],
+                "superseded_at": finding["superseded_at"],
+                "supersession_reason": finding["supersession_reason"],
+            },
+        }
+    finally:
+        conn.close()

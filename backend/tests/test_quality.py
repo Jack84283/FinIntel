@@ -1840,3 +1840,60 @@ def test_reconciliation_backup_merge_remaps_series_without_losing_review(tmp_pat
             ).fetchone()[0]
             == 1
         )
+
+
+def test_quality_workspace_overview_is_scoped_read_only(tmp_path, monkeypatch):
+    from finintel.market_data.quality import quality_overview
+
+    path = tmp_path / "quality.sqlite3"
+    seed_quality_database(path)
+    run_quality_scan(path, as_of=date(2026, 11, 1))
+    with sqlite3.connect(path) as conn:
+        before = conn.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0]
+    index_summary = quality_overview(path, code="SP500", as_of=date(2026, 11, 1))
+    equity_summary = quality_overview(path, code="AAPL", as_of=date(2026, 11, 1))
+    assert index_summary["code"] == "SP500"
+    assert index_summary["total"] >= 1
+    assert index_summary["counts"]["instrument_kind"] == {"index": index_summary["total"]}
+    assert equity_summary["counts"]["instrument_kind"] == {"equity": equity_summary["total"]}
+    assert index_summary["scan"]["complete"] is True
+    assert index_summary["not_confirmed"] is True
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0] == before
+
+    monkeypatch.setattr("finintel.market_data.quality_api.database_path", lambda: path)
+    with TestClient(app) as client:
+        response = client.get("/api/v1/quality/overview?code=SP500")
+        assert response.status_code == 200
+        assert response.json()["counts"]["instrument_kind"]["index"] >= 1
+
+
+def test_quality_workspace_review_history_and_supersession_are_visible(tmp_path, monkeypatch):
+    from finintel.market_data.quality import finding_history
+
+    path = tmp_path / "quality.sqlite3"
+    seed_quality_database(path)
+    run_quality_scan(path, as_of=date(2026, 11, 1))
+    target = list_findings(path, code="AAPL")["items"][0]
+    review_finding(path, target["id"], "confirmed", "Checked with independent source")
+    review_finding(path, target["id"], "rejected", "Incorrect classification")
+    detail = finding_history(path, target["id"])
+    assert detail["finding"]["id"] == target["id"]
+    assert [event["to_state"] for event in detail["reviews"]] == ["confirmed", "rejected"]
+    assert detail["reviews"][0]["note"] == "Checked with independent source"
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE data_quality_findings SET superseded_at='2026-11-02T00:00:00+00:00',"
+            "supersession_reason='Reclassified' WHERE id=?",
+            (target["id"],),
+        )
+    historical = finding_history(path, target["id"])
+    assert historical["finding"]["superseded"] is True
+    assert historical["source_revision"]["supersession_reason"] == "Reclassified"
+    monkeypatch.setattr("finintel.market_data.quality_api.database_path", lambda: path)
+    with TestClient(app) as client:
+        response = client.get(f"/api/v1/quality/findings/{target['id']}/history")
+        assert response.status_code == 200
+        assert len(response.json()["reviews"]) == 2
+        assert client.get("/api/v1/quality/findings/999999/history").status_code == 404
