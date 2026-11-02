@@ -13,11 +13,12 @@ import { createHealthPoller, type HealthConnection } from "./health-poller";
 import { PreferencesPage } from "./PreferencesPage";
 import { ActionHistoryPage } from "./ActionHistoryPage";
 import { DataValidationPage } from "./DataValidationPage";
+import { DataQualityPage } from "./DataQualityPage";
 import { IndexMembershipPage } from "./IndexMembershipPage";
 import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
 import { resolveMarketSelection } from "./market-selection";
 
-type Screen = "overview" | "market" | "intelligence" | "data-acquisition" | "data-validation" | "index-membership" | "action-history" | "portfolio" | "settings";
+type Screen = "overview" | "market" | "intelligence" | "data-acquisition" | "data-validation" | "data-quality" | "index-membership" | "action-history" | "portfolio" | "settings";
 const groups = [
   { heading: "Workspace", items: [
     { id: "overview", label: "Overview", icon: Activity },
@@ -27,6 +28,7 @@ const groups = [
   { heading: "Data & Operations", items: [
     { id: "data-acquisition", label: "Data Acquisition", icon: Database },
     { id: "data-validation", label: "Data Validation", icon: ShieldCheck },
+    { id: "data-quality", label: "Data Quality", icon: ShieldCheck },
     { id: "index-membership", label: "Index Constituents", icon: ListFilter },
     { id: "action-history", label: "Action History", icon: History },
   ] },
@@ -101,6 +103,8 @@ export default function App() {
           <DataAcquisitionPage onViewMarket={openMarkets} />
         ) : screen === "data-validation" ? (
           <DataValidationPage />
+        ) : screen === "data-quality" ? (
+          <DataQualityPage />
         ) : screen === "index-membership" ? (
           <IndexMembershipPage />
         ) : screen === "action-history" ? (
