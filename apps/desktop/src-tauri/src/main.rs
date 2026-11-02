@@ -110,6 +110,16 @@ async fn read_backend(path: &str, params: &[(&str, String)]) -> Result<serde_jso
                 .to_string(),
         );
     }
+    if path == "/api/v1/analytics/series"
+        && response.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY
+    {
+        // Fixed analytics endpoint reports safe validation/quality failures.
+        // Never forward arbitrary provider payloads or credentials to the WebView.
+        let detail = response.json::<serde_json::Value>().await.ok()
+            .and_then(|payload| payload.get("detail").and_then(serde_json::Value::as_str).map(str::to_string));
+        return Err(detail.filter(|message| !message.is_empty() && message.len() <= 300)
+            .unwrap_or_else(|| "Index analytics selection or quality policy was rejected.".to_string()));
+    }
     if !response.status().is_success() {
         return Err(format!("Local backend returned HTTP {}.", response.status()));
     }
