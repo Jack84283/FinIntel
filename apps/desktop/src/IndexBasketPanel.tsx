@@ -10,7 +10,7 @@ import {
 } from "./index-basket-api";
 import { ANALYTICS_WINDOWS, type AnalyticsWindow, type QualityPolicy } from "./index-intelligence-api";
 
-const PRICE_CODES = INDEX_CODES.filter(code => code !== "VIX");
+const PRICE_CODES: readonly IndexCode[] = INDEX_CODES.filter(code => code !== "VIX");
 const KEY = "finintel.index-basket.v1";
 type BasketMode = "1Y" | "5Y" | "ALL" | "custom";
 type Selection = {
