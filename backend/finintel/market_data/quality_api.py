@@ -7,6 +7,18 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from finintel.market_data.corrections import (
+    CorrectionConflict,
+    get_correction,
+    list_corporate_actions,
+    list_corrections,
+    preview_correction,
+    propose_correction,
+    record_verified_actions,
+    resolved_close,
+    transition_correction,
+)
+from finintel.market_data.provider import ProviderError
 from finintel.market_data.quality import (
     FINDING_TYPES,
     REVIEW_STATES,
@@ -148,3 +160,125 @@ def report(
         raise HTTPException(
             status_code=503, detail="Local market database is unavailable."
         ) from exc
+
+
+class CorrectionProposalRequest(BaseModel):
+    finding_id: int = Field(gt=0)
+    provider: str = Field(min_length=1, max_length=80)
+    proposed_close: Decimal = Field(gt=0)
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+class CorrectionTransitionRequest(BaseModel):
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class CorporateReferenceRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=32)
+
+
+def _correction_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, KeyError):
+        return HTTPException(status_code=404, detail=str(exc.args[0]))
+    if isinstance(exc, CorrectionConflict):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, FileNotFoundError):
+        return HTTPException(status_code=503, detail="Local market database is unavailable.")
+    return HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/corporate-actions/verify")
+def verify_corporate_actions(payload: CorporateReferenceRequest, request: Request) -> dict:
+    """Explicit provider request; never initiated automatically during scanning."""
+    _require_managed(request)
+    try:
+        return record_verified_actions(database_path(), payload.symbol)
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        raise _correction_error(exc) from exc
+    except ProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/corporate-actions")
+def corporate_actions(
+    code: str = Query(min_length=1, max_length=32),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    try:
+        return list_corporate_actions(database_path(), code, limit=limit)
+    except (FileNotFoundError, ValueError) as exc:
+        raise _correction_error(exc) from exc
+
+
+@router.post("/corrections")
+def propose(payload: CorrectionProposalRequest, request: Request) -> dict:
+    _require_managed(request)
+    try:
+        return propose_correction(
+            database_path(), finding_id=payload.finding_id,
+            provider=payload.provider, proposed_close=str(payload.proposed_close),
+            rationale=payload.rationale,
+        )
+    except (KeyError, ValueError, FileNotFoundError) as exc:
+        raise _correction_error(exc) from exc
+
+
+@router.get("/corrections")
+def corrections(
+    code: str | None = Query(default=None, max_length=32),
+    state: Literal["proposed", "validated", "approved", "rejected", "reversed"] | None = None,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> dict:
+    try:
+        return list_corrections(database_path(), code=code, state=state, limit=limit, offset=offset)
+    except (FileNotFoundError, ValueError) as exc:
+        raise _correction_error(exc) from exc
+
+
+@router.get("/corrections/resolve")
+def resolve_correction(
+    instrument_kind: Literal["equity", "index"],
+    code: str = Query(min_length=1, max_length=32),
+    provider: str = Query(min_length=1, max_length=80),
+    adjustment: str = Query(min_length=1, max_length=80),
+    frequency: str = Query(min_length=1, max_length=20),
+    session_date: date = Query(),
+) -> dict:
+    try:
+        return resolved_close(
+            database_path(), kind=instrument_kind, code=code, provider=provider,
+            adjustment=adjustment, frequency=frequency, session_date=session_date.isoformat(),
+        )
+    except (KeyError, ValueError, FileNotFoundError) as exc:
+        raise _correction_error(exc) from exc
+
+
+@router.get("/corrections/{correction_id}")
+def correction(correction_id: str) -> dict:
+    try:
+        return get_correction(database_path(), correction_id)
+    except (KeyError, FileNotFoundError) as exc:
+        raise _correction_error(exc) from exc
+
+
+@router.get("/corrections/{correction_id}/preview")
+def preview(correction_id: str) -> dict:
+    try:
+        return preview_correction(database_path(), correction_id)
+    except (KeyError, FileNotFoundError, ValueError) as exc:
+        raise _correction_error(exc) from exc
+
+
+@router.post("/corrections/{correction_id}/{action}")
+def decide(
+    correction_id: str,
+    action: Literal["validate", "approve", "reject", "reverse"],
+    payload: CorrectionTransitionRequest,
+    request: Request,
+) -> dict:
+    _require_managed(request)
+    try:
+        return transition_correction(database_path(), correction_id, action, payload.note)
+    except (KeyError, ValueError, FileNotFoundError) as exc:
+        raise _correction_error(exc) from exc
