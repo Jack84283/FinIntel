@@ -108,6 +108,7 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Latest shared coverage end": "最新共享覆盖区间终点",
   "Start date": "开始日期",
   "End date": "结束日期",
   "Index Intelligence": "指数智能分析",
