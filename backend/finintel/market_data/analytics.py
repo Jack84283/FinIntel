@@ -130,7 +130,7 @@ def compute_series(
     Simple daily: P_t / P_(t-1) - 1; log: ln(P_t / P_(t-1)).
     Rolling vol: sample stddev(simple daily returns, ddof=1) * sqrt(252).
     Moving average: mean of levels over trailing W actual observations.
-    RSI: Wilder rolling simple ratio of trailing W gains/losses, not interpolated.
+    RSI: simple rolling W-session gains/(gains+losses), not Wilder smoothing.
     """
     if window not in ALLOWED_WINDOWS:
         raise AnalyticsError("Unsupported window; use a configured session count")
@@ -163,10 +163,6 @@ def compute_series(
             longest_unrecovered = max(longest_unrecovered, current_underwater)
         drawdown = level / peak - 1
         worst = min(worst, drawdown)
-        roll = (
-            [float(item) for item in returns[i - window + 1 : i]]
-            if i >= window else []
-        )
         # On observation i, W returns require W+1 levels.
         roll = [float(v) for v in returns[i - window : i]] if i >= window else []
         ma = sum(prices[i - window + 1 : i + 1]) / window if i + 1 >= window else None
@@ -176,7 +172,7 @@ def compute_series(
             differences = [prices[j] - prices[j - 1] for j in range(i - window + 1, i + 1)]
             gains = sum((max(value, Decimal(0)) for value in differences), Decimal(0))
             losses = sum((-min(value, Decimal(0)) for value in differences), Decimal(0))
-            rsi = Decimal(100) if losses == 0 else Decimal(100) * gains / (gains + losses)
+            rsi = Decimal(50) if gains + losses == 0 else Decimal(100) * gains / (gains + losses)
         points.append(
             {
                 "session_date": day,
