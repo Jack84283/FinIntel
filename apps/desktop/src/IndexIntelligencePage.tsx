@@ -61,10 +61,16 @@ function readableError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 export function latestCommonDate(catalog: IndexCatalogRecord[], code: IndexCode, benchmark: IndexCode | null): string | null {
-  const a = catalog.find(item => item.code === code)?.last_session;
-  const b = benchmark ? catalog.find(item => item.code === benchmark)?.last_session : null;
+  const primary = catalog.find(item => item.code === code);
+  const other = benchmark ? catalog.find(item => item.code === benchmark) : null;
+  const a = primary?.last_session;
+  const b = benchmark ? other?.last_session : null;
   if (!a || (benchmark && !b)) return null;
-  return b && b < a ? b : a;
+  const upper = b && b < a ? b : a;
+  const lower = benchmark && other?.first_session && primary?.first_session
+    ? (other.first_session > primary.first_session ? other.first_session : primary.first_session)
+    : primary?.first_session;
+  return lower && lower > upper ? null : upper;
 }
 function presetDates(catalog: IndexCatalogRecord[], code: IndexCode, benchmark: IndexCode | null, preset: Preset) {
   const last = latestCommonDate(catalog, code, benchmark);
@@ -212,7 +218,7 @@ export function IndexIntelligencePage() {
             <Button type="button" size="sm" variant="outline" disabled={!latest} onClick={lastAvailable}>
               <CalendarClock aria-hidden="true" className="size-4" />{t("Last available")}
             </Button>
-            {latest && <span className="text-xs text-muted-foreground">{t("Latest common session")}: {latest}</span>}
+            {latest && <span className="text-xs text-muted-foreground">{t("Latest shared coverage end")}: {latest}</span>}
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:max-w-[760px]">
             <MarketDatePicker label={t("Start date")} value={start}
