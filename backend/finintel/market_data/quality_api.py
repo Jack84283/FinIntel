@@ -22,8 +22,8 @@ from finintel.market_data.provider import ProviderError
 from finintel.market_data.quality import (
     FINDING_TYPES,
     REVIEW_STATES,
-    list_findings,
     finding_history,
+    list_findings,
     quality_overview,
     quality_report,
     review_finding,
