@@ -1630,7 +1630,7 @@ def test_v13_database_migrates_to_quality_tables_without_erasing_observations(tm
     conn = _write_connection(db)
     conn.close()
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 15
         assert conn.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == before
         assert conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='data_quality_findings'"
@@ -1669,7 +1669,7 @@ def test_failed_quality_migration_rolls_back_and_retry_succeeds(tmp_path, monkey
     conn = _write_connection(db)
     conn.close()
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 15
 
 
 def test_quality_api_scans_filters_and_reviews_with_managed_token(tmp_path, monkeypatch):
