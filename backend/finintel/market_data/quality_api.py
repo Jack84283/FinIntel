@@ -141,7 +141,9 @@ def overview(code: str | None = Query(default=None, max_length=32)) -> dict:
     try:
         return quality_overview(database_path(), code=code)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=503, detail="Local market database is unavailable.") from exc
+        raise HTTPException(
+            status_code=503, detail="Local market database is unavailable."
+        ) from exc
 
 
 @router.get("/findings/{finding_id}/history")
@@ -149,7 +151,9 @@ def history(finding_id: int) -> dict:
     try:
         return finding_history(database_path(), finding_id)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=503, detail="Local market database is unavailable.") from exc
+        raise HTTPException(
+            status_code=503, detail="Local market database is unavailable."
+        ) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Quality finding was not found.") from exc
 
