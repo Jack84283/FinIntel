@@ -1,8 +1,6 @@
 """Issue #29: explicit sourced actions and reversible, audit-backed corrections."""
 
-import json
 import sqlite3
-from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
