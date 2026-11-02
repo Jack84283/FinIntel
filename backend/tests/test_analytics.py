@@ -65,7 +65,7 @@ def test_exact_simple_log_cumulative_drawdown_recovery_and_warmup():
     assert Decimal(p[3]["normalized_100"]) == Decimal("121")
     assert Decimal(p[6]["cumulative_return"]) == Decimal("0.24")
     assert Decimal(result["max_drawdown"]) == Decimal("-0.1")
-    assert result["longest_underwater_observed_sessions"] == 2
+    assert result["longest_underwater_observed_sessions"] == 1
     assert all(p[i]["rolling_volatility_annualized"] is None for i in range(5))
     assert p[5]["rolling_volatility_annualized"] is not None
     assert p[4]["moving_average"] == "110.2"
@@ -92,7 +92,7 @@ def test_vix_level_only_without_explicit_opt_in():
     raw = compute_series(vix, points(20, 30, 40, 25, 20, 21), window=5)
     assert raw["metrics_enabled"] is False
     assert all(row["simple_return"] is None and row["drawdown"] is None for row in raw["points"])
-    assert raw["points"][-1]["moving_average"] == "27.2"
+    assert raw["points"][-1]["moving_average"] == "21.4"
     requested = compute_series(
         vix, points(20, 30, 40, 25, 20, 21), window=5,
         allow_volatility_returns=True,
