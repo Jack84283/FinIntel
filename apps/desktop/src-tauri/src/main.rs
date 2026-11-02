@@ -833,6 +833,46 @@ fn valid_index_history_date(value: &str) -> bool {
     day <= days_in_month
 }
 
+/// Fixed-shape read-only local analytics query; no arbitrary paths or providers.
+#[tauri::command]
+async fn analytics_series(
+    code: String,
+    comparison_code: Option<String>,
+    start: String,
+    end: String,
+    window: u16,
+    quality_policy: String,
+) -> Result<serde_json::Value, String> {
+    if !valid_index_history_code(&code)
+        || comparison_code.as_deref().is_some_and(|value| {
+            !valid_index_history_code(value) || value == code
+                || code == "VIX" || value == "VIX"
+        })
+        || !valid_index_history_date(&start)
+        || !valid_index_history_date(&end)
+        || start > end
+        || !matches!(window, 5 | 10 | 14 | 20 | 21 | 50 | 63 | 126 | 200 | 252)
+        || !matches!(quality_policy.as_str(), "require_complete" | "allow_unverified")
+    {
+        return Err("Invalid index analytics query.".to_string());
+    }
+    let mut parameters = vec![
+        ("kind", "index".to_string()),
+        ("code", code),
+        ("provider", "fred".to_string()),
+        ("start", start),
+        ("end", end),
+        ("window", window.to_string()),
+        ("quality_policy", quality_policy),
+    ];
+    if let Some(benchmark) = comparison_code {
+        parameters.push(("comparison_code", benchmark));
+        parameters.push(("comparison_kind", "index".to_string()));
+        parameters.push(("comparison_provider", "fred".to_string()));
+    }
+    read_backend("/api/v1/analytics/series", &parameters).await
+}
+
 #[tauri::command]
 async fn index_history_catalog() -> Result<serde_json::Value, String> {
     read_backend("/api/v1/market-data/index-history", &[]).await
@@ -1190,6 +1230,7 @@ fn main() {
             index_acquire,
             index_history_catalog,
             index_history_daily,
+            analytics_series,
             index_history_acquire,
             daily_acquisition_status,
             daily_acquisition_settings,
