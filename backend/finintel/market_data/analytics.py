@@ -150,14 +150,13 @@ def compute_series(
     returns = [_simple(prices[i - 1], prices[i]) for i in range(1, len(prices))]
     log_returns = [_log(prices[i - 1], prices[i]) for i in range(1, len(prices))]
     peak: Decimal | None = None
-    peak_date: str | None = None
     worst = Decimal(0)
     longest_unrecovered = 0
     current_underwater = 0
     points = []
     for i, (day, level) in enumerate(zip(dates, prices, strict=True)):
         if peak is None or level >= peak:
-            peak, peak_date, current_underwater = level, day, 0
+            peak, current_underwater = level, 0
         else:
             current_underwater += 1
             longest_unrecovered = max(longest_unrecovered, current_underwater)
@@ -238,9 +237,12 @@ def compare_series(
         raise AnalyticsError("Incompatible adjustment or total-return semantics")
     if left.frequency not in {"1d", "daily"} or right.frequency not in {"1d", "daily"}:
         raise AnalyticsError("Comparison requires daily observations")
-    if left.instrument_kind == right.instrument_kind and left.code == right.code:
-        if left.provider == right.provider:
-            raise AnalyticsError("A series cannot be compared to itself")
+    if (
+        left.instrument_kind == right.instrument_kind
+        and left.code == right.code
+        and left.provider == right.provider
+    ):
+        raise AnalyticsError("A series cannot be compared to itself")
     left_map = {point.session_date: point.close for point in left_rows}
     right_map = {point.session_date: point.close for point in right_rows}
     if missing_policy == "strict" and set(left_map) != set(right_map):
