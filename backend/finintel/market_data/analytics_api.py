@@ -119,12 +119,17 @@ def local_analytics(
 ) -> dict:
     try:
         return run_analytics(
-            kind=kind, code=code, provider=provider,
-            start=start, end=end, window=window,
+            kind=kind,
+            code=code,
+            provider=provider,
+            start=start,
+            end=end,
+            window=window,
             comparison_code=comparison_code,
             comparison_kind=comparison_kind,
             comparison_provider=comparison_provider,
-            missing_policy=missing_policy, quality_policy=quality_policy,
+            missing_policy=missing_policy,
+            quality_policy=quality_policy,
             allow_volatility_returns=allow_volatility_returns,
         )
     except AnalyticsError as exc:
