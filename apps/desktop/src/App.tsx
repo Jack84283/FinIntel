@@ -15,14 +15,16 @@ import { ActionHistoryPage } from "./ActionHistoryPage";
 import { DataValidationPage } from "./DataValidationPage";
 import { DataQualityPage } from "./DataQualityPage";
 import { IndexMembershipPage } from "./IndexMembershipPage";
+import { IndexIntelligencePage } from "./IndexIntelligencePage";
 import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
 import { resolveMarketSelection } from "./market-selection";
 
-type Screen = "overview" | "market" | "intelligence" | "data-acquisition" | "data-validation" | "data-quality" | "index-membership" | "action-history" | "portfolio" | "settings";
+type Screen = "overview" | "market" | "index-intelligence" | "intelligence" | "data-acquisition" | "data-validation" | "data-quality" | "index-membership" | "action-history" | "portfolio" | "settings";
 const groups = [
   { heading: "Workspace", items: [
     { id: "overview", label: "Overview", icon: Activity },
     { id: "market", label: "Market", icon: BarChart3 },
+    { id: "index-intelligence", label: "Index Intelligence", icon: BarChart3 },
     { id: "intelligence", label: "Intelligence", icon: BrainCircuit },
   ] },
   { heading: "Data & Operations", items: [
@@ -99,6 +101,8 @@ export default function App() {
             onSelectionChange={setMarketSelection}
             onOpenAcquisition={() => setScreen("data-acquisition")}
           />
+        ) : screen === "index-intelligence" ? (
+          <IndexIntelligencePage />
         ) : screen === "data-acquisition" ? (
           <DataAcquisitionPage onViewMarket={openMarkets} />
         ) : screen === "data-validation" ? (
