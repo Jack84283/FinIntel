@@ -10,6 +10,12 @@ import {
 import { useLocale } from "./localization";
 
 const PAGE_SIZE = 50;
+export const OVERLAP_SEARCH_MAX_CHARACTERS = 80;
+
+/** Limit Unicode code points, not UTF-16 input units (emoji count as one character). */
+export function limitOverlapSearch(value: string): string {
+  return Array.from(value).slice(0, OVERLAP_SEARCH_MAX_CHARACTERS).join("");
+}
 const selectClass = "h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const statuses: Record<OverlapStatus, string> = {
   verified_snapshot: "Both source snapshots verified for the exact selected date",
@@ -162,8 +168,8 @@ export function ConstituentOverlapPanel({
         <form onSubmit={submitSearch} className="flex flex-wrap items-end gap-2">
           <label className="grid min-w-0 flex-1 gap-1 text-xs text-muted-foreground">
             {t("Filter overlap symbols or names")}
-            <input className={selectClass + " w-full"} type="search" maxLength={80}
-              value={searchInput} onChange={event => setSearchInput(event.target.value)}
+            <input className={selectClass + " w-full"} type="search"
+              value={searchInput} onChange={event => setSearchInput(limitOverlapSearch(event.target.value))}
               placeholder={t("Symbol or company name")} />
           </label>
           <Button size="sm" variant="outline" type="submit">{t("Search")}</Button>
