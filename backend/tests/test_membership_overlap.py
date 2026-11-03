@@ -185,6 +185,31 @@ def test_invalid_inputs_rejected_without_writes(tmp_path, left, right, when, que
         constituent_overlap(left, right, as_of=when, query=query, limit=limit, offset=offset, db=db)
 
 
+def test_unicode_search_limit_matches_native_and_browser(tmp_path, monkeypatch):
+    db = tmp_path / "overlap.sqlite"
+    _load(db)
+    allowed = "中" * 80
+    assert constituent_overlap(
+        "SP500", "NDX", as_of="2026-10-01", query=allowed, db=db
+    )["filtered_total"] == 0
+    with pytest.raises(ValueError, match="Invalid constituent search"):
+        constituent_overlap("SP500", "NDX", as_of="2026-10-01", query="中" * 81, db=db)
+    monkeypatch.setenv("FININTEL_DB_PATH", str(db))
+    params = {"left": "SP500", "right": "NDX", "as_of": "2026-10-01"}
+    with TestClient(app) as client:
+        allowed_response = client.get(
+            "/api/v1/market-data/indexes/overlap",
+            params={**params, "q": allowed},
+        )
+        denied_response = client.get(
+            "/api/v1/market-data/indexes/overlap",
+            params={**params, "q": "中" * 81},
+        )
+    assert allowed_response.status_code == 200, allowed_response.text
+    assert allowed_response.json()["filtered_total"] == 0
+    assert denied_response.status_code == 422
+
+
 def test_http_api_and_absent_database_no_implicit_creation(tmp_path, monkeypatch):
     db = tmp_path / "overlap.sqlite"
     _load(db)
