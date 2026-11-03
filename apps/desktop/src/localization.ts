@@ -108,6 +108,10 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Underlying source as-of date": "底层来源数据截至日期",
+  "Select constituent index": "请选择成分股指数",
+  "Select a constituent index to begin the overlap comparison.": "请选择一个成分股指数以开始重叠比较。",
+  "No sourced constituent catalog for this analysis index. Choose constituent indexes explicitly; overlap does not represent the selected price index.": "所选分析指数没有可追溯来源的成分股目录。请明确选择要比较的成分股指数；此重叠结果不代表当前选定的价格指数。",
   "Dated constituent overlap": "按日期比较指数成分股重叠",
   "Inspect only sourced membership snapshots; price history does not establish constituents.": "仅比较有来源的成分股快照；价格历史不能证明指数成分。",
   "Explore constituent overlap": "查看成分股重叠",
