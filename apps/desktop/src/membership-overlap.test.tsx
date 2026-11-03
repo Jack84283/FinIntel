@@ -5,7 +5,7 @@ import {
   type OverlapQuery, type OverlapResult, type OverlapSource,
 } from "./membership-overlap-api";
 import {
-  ConstituentOverlapPanel, membershipIndexForMarket, overlapStatusDescription,
+  ConstituentOverlapPanel, OverlapSourceDates, membershipIndexForMarket, overlapStatusDescription,
 } from "./ConstituentOverlapPanel";
 import { translate } from "./localization";
 
@@ -54,6 +54,10 @@ describe("Dated membership overlap API", () => {
     expect(() => validateOverlapQuery({ ...query, right: "SP500" })).toThrow();
     expect(() => validateOverlapQuery({ ...query, asOf: "2026-02-30" })).toThrow();
     expect(() => validateOverlapQuery({ ...query, q: "x".repeat(81) })).toThrow();
+    expect(() => validateOverlapQuery({ ...query, q: "中".repeat(80) })).not.toThrow();
+    expect(() => validateOverlapQuery({ ...query, q: "中".repeat(81) })).toThrow();
+    expect(() => validateOverlapQuery({ ...query, q: "📈".repeat(80) })).not.toThrow();
+    expect(() => validateOverlapQuery({ ...query, q: "📈".repeat(81) })).toThrow();
     expect(() => validateOverlapQuery({ ...query, q: "\n" })).toThrow();
     expect(() => validateOverlapQuery({ ...query, limit: 101 })).toThrow();
     expect(() => validateOverlapQuery({ ...query, offset: -1 })).toThrow();
@@ -84,6 +88,17 @@ describe("Dated membership overlap API", () => {
       q: "", limit: 50, offset: 0,
     });
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("passes an 80-character Chinese company search unchanged to native IPC", async () => {
+    native.enabled = true;
+    const chineseQuery = { ...query, q: "中".repeat(80) };
+    native.invoke.mockRejectedValue(new Error("No matching local symbols"));
+    await expect(fetchMembershipOverlap(chineseQuery)).rejects.toThrow("No matching local symbols");
+    expect(native.invoke).toHaveBeenCalledWith("index_membership_overlap", {
+      left: "SP500", right: "NDX", asOf: query.asOf,
+      q: chineseQuery.q, limit: 50, offset: 0,
+    });
   });
 
   it("preserves offline and backend policy errors instead of inventing membership", async () => {
@@ -119,6 +134,13 @@ describe("Dated membership overlap API", () => {
     const wrongRatio = example();
     wrongRatio.jaccard_ratio = "0.9";
     expect(() => parseOverlapResult(wrongRatio, query)).toThrow();
+    const forgedUnion = example();
+    forgedUnion.union_members = 20;
+    forgedUnion.jaccard_ratio = "0.1";
+    expect(() => parseOverlapResult(forgedUnion, query)).toThrow("Invalid sourced overlap counts.");
+    const missingCount = example();
+    missingCount.sources[0].member_count = null;
+    expect(() => parseOverlapResult(missingCount, query)).toThrow("Invalid sourced overlap counts.");
     const invalid = example();
     invalid.items[0].symbol = "AAPL";
     invalid.items[1].symbol = "AAPL";
@@ -152,17 +174,37 @@ describe("Dated membership overlap API", () => {
 });
 
 describe("Index Intelligence overlap entry and localized evidence", () => {
-  it("defaults to SP500 when selected price index has no constituent source", () => {
-    expect(membershipIndexForMarket("NASDAQCOM")).toBe("SP500");
-    expect(membershipIndexForMarket("VIX")).toBe("SP500");
+  it("requires explicit membership index selection when a price index is unsupported", () => {
+    expect(membershipIndexForMarket("NASDAQCOM")).toBeNull();
+    expect(membershipIndexForMarket("VIX")).toBeNull();
     expect(membershipIndexForMarket("NDX")).toBe("NDX");
     expect(membershipIndexForMarket("RUT")).toBe("RUT");
-    const html = renderToStaticMarkup(
+    const supported = renderToStaticMarkup(
       <ConstituentOverlapPanel primaryIndex="SP500" analysisEnd="2026-10-20" />,
     );
-    expect(html).toContain("Dated constituent overlap");
-    expect(html).toContain("Explore constituent overlap");
-    expect(html).not.toContain("Download index");
+    expect(supported).toContain("Dated constituent overlap");
+    expect(supported).toContain("Explore constituent overlap");
+    expect(supported).not.toContain("Download index");
+    const unsupported = renderToStaticMarkup(
+      <ConstituentOverlapPanel primaryIndex="NASDAQCOM" analysisEnd="2026-10-20" />,
+    );
+    expect(unsupported).toContain("NASDAQCOM");
+    expect(unsupported).toContain("No sourced constituent catalog for this analysis index.");
+    expect(unsupported).not.toContain("Download index");
+    expect(translate("zh-CN", "No sourced constituent catalog for this analysis index. Choose constituent indexes explicitly; overlap does not represent the selected price index."))
+      .not.toContain("No sourced constituent catalog");
+  });
+
+  it("renders the imported snapshot date and the distinct underlying source-as-of date", () => {
+    const olderEvidence = source("NDX");
+    olderEvidence.source_as_of = "2026-10-01";
+    const markup = renderToStaticMarkup(<OverlapSourceDates source={olderEvidence} />);
+    expect(markup).toContain("Source snapshot date");
+    expect(markup).toContain("2026-10-20");
+    expect(markup).toContain("Underlying source as-of date");
+    expect(markup).toContain("2026-10-01");
+    expect(translate("zh-CN", "Underlying source as-of date"))
+      .not.toBe("Underlying source as-of date");
   });
 
   it("labels ETF proxies and older snapshots explicitly in both languages", () => {
