@@ -5,7 +5,7 @@ import {
   type OverlapQuery, type OverlapResult, type OverlapSource,
 } from "./membership-overlap-api";
 import {
-  ConstituentOverlapPanel, OverlapSourceDates, membershipIndexForMarket, overlapStatusDescription,
+  ConstituentOverlapPanel, OverlapSourceDates, limitOverlapSearch, membershipIndexForMarket, overlapStatusDescription,
 } from "./ConstituentOverlapPanel";
 import { translate } from "./localization";
 
@@ -62,6 +62,19 @@ describe("Dated membership overlap API", () => {
     expect(() => validateOverlapQuery({ ...query, limit: 101 })).toThrow();
     expect(() => validateOverlapQuery({ ...query, offset: -1 })).toThrow();
     expect(() => validateOverlapQuery({ ...query, left: "VIX" as OverlapQuery["left"] })).toThrow();
+  });
+
+  it("limits pasted Unicode search text by code point without splitting emoji", () => {
+    expect(limitOverlapSearch("中".repeat(80))).toBe("中".repeat(80));
+    expect(limitOverlapSearch("中".repeat(81))).toBe("中".repeat(80));
+    expect(limitOverlapSearch("📈".repeat(80))).toBe("📈".repeat(80));
+    expect(limitOverlapSearch("📈".repeat(81))).toBe("📈".repeat(80));
+    const mixed = "A".repeat(79) + "📈" + "B";
+    expect(limitOverlapSearch(mixed)).toBe("A".repeat(79) + "📈");
+    expect([...limitOverlapSearch(mixed)]).toHaveLength(80);
+    expect(limitOverlapSearch("📈".repeat(80)).length).toBe(160);
+    const overlapQuery = { ...query, q: limitOverlapSearch("📈".repeat(81)) };
+    expect(() => validateOverlapQuery(overlapQuery)).not.toThrow();
   });
 
   it("uses a fixed same-origin read-only URL for browser development", async () => {
