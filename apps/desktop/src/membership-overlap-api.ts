@@ -45,7 +45,7 @@ export function validOverlapDate(value: string): boolean {
 export function validateOverlapQuery(query: OverlapQuery): void {
   if (!INDEX_CODES.includes(query.left) || !INDEX_CODES.includes(query.right) ||
     query.left === query.right || !validOverlapDate(query.asOf) ||
-    query.q.length > 80 || /[\x00-\x1f\x7f]/.test(query.q) ||
+    query.q.length > 80 || [...query.q].some(ch => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127) ||
     !Number.isSafeInteger(query.offset) || query.offset < 0 || query.offset > 1_000_000 ||
     !Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > 100) {
     throw new Error("Invalid point-in-time overlap selection.");
