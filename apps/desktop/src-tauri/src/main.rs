@@ -627,7 +627,7 @@ async fn index_membership_overlap(
 ) -> Result<serde_json::Value, String> {
     if !valid_index(&left) || !valid_index(&right) || left == right
         || !valid_date(&as_of)
-        || q.len() > 80 || q.chars().any(|ch| ch.is_control())
+        || q.chars().count() > 80 || q.chars().any(|ch| ch.is_control())
         || limit == 0 || limit > 100 || offset > 1_000_000
     {
         return Err("Invalid dated membership overlap query.".to_string());
