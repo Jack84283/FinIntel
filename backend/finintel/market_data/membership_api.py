@@ -240,8 +240,12 @@ class OverlapResponse(BaseModel):
     requested_as_of: str
     sources: list[OverlapSource]
     status: Literal[
-        "verified_snapshot", "earlier_snapshot", "proxy_only",
-        "incomplete", "unverified", "unavailable"
+        "verified_snapshot",
+        "earlier_snapshot",
+        "proxy_only",
+        "incomplete",
+        "unverified",
+        "unavailable",
     ]
     common_members: int | None
     union_members: int | None
