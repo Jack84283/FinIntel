@@ -47,7 +47,7 @@ export function ConstituentOverlapPanel({
   const { t, language } = useLocale();
   const initialIndex = membershipIndexForMarket(primaryIndex);
   const [expanded, setExpanded] = useState(false);
-  const [left, setLeft] = useState<IndexCode>(initialIndex);
+  const [left, setLeft] = useState<IndexCode | null>(initialIndex);
   const [right, setRight] = useState<IndexCode>(initialIndex === "NDX" ? "SP500" : "NDX");
   const [overrideDate, setOverrideDate] = useState("");
   const [searchInput, setSearchInput] = useState("");
