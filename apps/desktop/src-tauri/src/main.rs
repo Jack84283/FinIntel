@@ -615,6 +615,25 @@ async fn index_constituents(
     ).await
 }
 
+/// All three layers limit Unicode scalar characters (not UTF-8 bytes) to 80.
+fn valid_overlap_search(query: &str) -> bool {
+    query.chars().count() <= 80 && !query.chars().any(|ch| ch.is_control())
+}
+
+#[cfg(test)]
+mod overlap_search_tests {
+    use super::valid_overlap_search;
+
+    #[test]
+    fn chinese_search_counts_characters_not_utf8_bytes() {
+        assert!(valid_overlap_search(&"中".repeat(80)));
+        assert!(!valid_overlap_search(&"中".repeat(81)));
+        assert!(valid_overlap_search(&"📈".repeat(80)));
+        assert!(!valid_overlap_search(&"📈".repeat(81)));
+        assert!(!valid_overlap_search("newline\n"));
+    }
+}
+
 /// Dated membership overlap is a fixed read-only local route, not a provider lookup.
 #[tauri::command]
 async fn index_membership_overlap(
@@ -627,7 +646,7 @@ async fn index_membership_overlap(
 ) -> Result<serde_json::Value, String> {
     if !valid_index(&left) || !valid_index(&right) || left == right
         || !valid_date(&as_of)
-        || q.chars().count() > 80 || q.chars().any(|ch| ch.is_control())
+        || !valid_overlap_search(&q)
         || limit == 0 || limit > 100 || offset > 1_000_000
     {
         return Err("Invalid dated membership overlap query.".to_string());
