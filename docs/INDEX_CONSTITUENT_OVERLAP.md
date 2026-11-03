@@ -17,14 +17,14 @@ GET /api/v1/market-data/indexes/overlap?left=SP500&right=NDX&as_of=2026-10-20&li
 
 ## Desktop
 
-The new expandable **Dated constituent overlap** card appears on Index Intelligence after multi-index comparisons, preserving PR #46/#47 behavior. The first index follows the selected price index only when an actual membership catalog exists; NASDAQCOM and VIX fall back to SP500. The second defaults to NDX. The requested date follows the main analysis end date; a visible date override and reset are provided.
+The new expandable **Dated constituent overlap** card appears on Index Intelligence after multi-index comparisons, preserving PR #46/#47 behavior. The first index follows the selected price index only when a supported sourced membership catalog exists. NASDAQCOM and VIX have no supported constituent catalog: the panel explains this and requires **explicit** selection of a membership index rather than silently substituting SP500. The second defaults to NDX. The requested date follows the main analysis end date; a visible date override and reset are provided.
 
-The card shows source metadata *before* members and treats unavailable and indicative results distinctly. Search and 50-row pagination use the same requested date and source pair. In-flight stale responses never overwrite newer selections. The fixed native Tauri IPC command forwards only supported codes, calendar date and bounded search/pagination to the same local API.
+The card shows both the stored snapshot date and the underlying source-as-of evidence date *before* members and treats unavailable and indicative results distinctly. Search and 50-row pagination use the same requested date and source pair. In-flight stale responses never overwrite newer selections. The fixed native Tauri IPC command forwards only supported codes, calendar date and bounded search/pagination to the same local API.
 
 ## Acceptance evidence and limitations
 
 - Synthetic backend fixtures verify exact date snapshots, no lookahead, proxy and incomplete labeling, missing vs. zero overlap, search/pagination, unchanged SQLite rows and the FastAPI schema.
-- Frontend tests verify source identity, strict status consistency, no lookahead, malformed counts, native IPC vs same-origin browser, offline failures, default index fallback and Simplified Chinese evidence translations.
+- Frontend tests verify source identity, strict status consistency, no lookahead, exact union arithmetic, native IPC vs same-origin browser, offline failures, explicit selection for unsupported price indices, both source dates and Simplified Chinese evidence translations. Python/API and native Rust regression checks enforce an 80-Unicode-character query limit rather than an 80-UTF-8-byte limit.
 - Existing CI covers Ruff/pytest, TypeScript/ESLint/Vitest and macOS/Windows/Linux native packages.
 
 **Not established:** Real source completeness or licensed constituents, continuity of membership between dated snapshots, historical trends beyond available snapshots, large production-database latency, installed-device UX or accessibility. Do not use indicative overlap for backtests as if it were authoritative. Those remain separate manual and roadmap acceptance gates. Issue #31 stays open; do not auto-merge PR #48.
