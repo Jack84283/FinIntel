@@ -7,7 +7,7 @@ snapshots must exist before an overlap (including zero overlap) can be claimed.
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 from finintel.market_data.membership import (
@@ -114,7 +114,7 @@ def constituent_overlap(
                 "status": status,
                 "common_members": common,
                 "union_members": union,
-                "jaccard_ratio": str(common / union) if union else None,
+                "jaccard_ratio": str(Decimal(common) / Decimal(union)) if union else None,
             }
         )
         filter_sql = ""
