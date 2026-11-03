@@ -189,9 +189,12 @@ def test_unicode_search_limit_matches_native_and_browser(tmp_path, monkeypatch):
     db = tmp_path / "overlap.sqlite"
     _load(db)
     allowed = "中" * 80
-    assert constituent_overlap(
-        "SP500", "NDX", as_of="2026-10-01", query=allowed, db=db
-    )["filtered_total"] == 0
+    assert (
+        constituent_overlap("SP500", "NDX", as_of="2026-10-01", query=allowed, db=db)[
+            "filtered_total"
+        ]
+        == 0
+    )
     with pytest.raises(ValueError, match="Invalid constituent search"):
         constituent_overlap("SP500", "NDX", as_of="2026-10-01", query="中" * 81, db=db)
     monkeypatch.setenv("FININTEL_DB_PATH", str(db))
