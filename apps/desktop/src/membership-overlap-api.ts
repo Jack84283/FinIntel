@@ -125,7 +125,7 @@ export function parseOverlapResult(payload: unknown, query: OverlapQuery): Overl
       : sources.some(s => s.validation_status === "incomplete")
         ? "incomplete"
         : !trusted ? "unverified"
-          : left.snapshot_as_of !== query.asOf || right.snapshot_as_of !== query.asOf
+          : left.snapshot_as_of !== query.asOf || right.snapshot_as_of !== query.asOf ||\n          left.source_as_of !== query.asOf || right.source_as_of !== query.asOf
             ? "earlier_snapshot" : "verified_snapshot";
     if (value.status !== expected) throw new Error("Overlap confidence does not match provenance.");
   }
