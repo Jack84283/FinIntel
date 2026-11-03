@@ -95,7 +95,7 @@ def constituent_overlap(
             status = "incomplete"
         elif not all(_authoritative_snapshot(record) for record in records):
             status = "unverified"
-        elif any(record["as_of"] != when for record in records):
+        elif any(record["as_of"] != when or record["source_as_of"] != when for record in records):
             status = "earlier_snapshot"
         else:
             status = "verified_snapshot"
