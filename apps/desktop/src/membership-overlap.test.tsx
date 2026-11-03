@@ -105,6 +105,11 @@ describe("Dated membership overlap API", () => {
     expect(() => parseOverlapResult(earlier, query)).toThrow();
     earlier.status = "earlier_snapshot";
     expect(parseOverlapResult(earlier, query).status).toBe("earlier_snapshot");
+    const oldEvidence = example();
+    oldEvidence.sources[1].source_as_of = "2026-10-01";
+    expect(() => parseOverlapResult(oldEvidence, query)).toThrow();
+    oldEvidence.status = "earlier_snapshot";
+    expect(parseOverlapResult(oldEvidence, query).status).toBe("earlier_snapshot");
     const proxy = example();
     proxy.sources[1].source_kind = "fund_derived_proxy";
     proxy.sources[1].availability_status = "proxy_only";
