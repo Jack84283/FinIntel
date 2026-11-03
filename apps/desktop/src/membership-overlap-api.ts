@@ -45,7 +45,7 @@ export function validOverlapDate(value: string): boolean {
 export function validateOverlapQuery(query: OverlapQuery): void {
   if (!INDEX_CODES.includes(query.left) || !INDEX_CODES.includes(query.right) ||
     query.left === query.right || !validOverlapDate(query.asOf) ||
-    query.q.length > 80 || [...query.q].some(ch => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127) ||
+    [...query.q].length > 80 || [...query.q].some(ch => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127) ||
     !Number.isSafeInteger(query.offset) || query.offset < 0 || query.offset > 1_000_000 ||
     !Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > 100) {
     throw new Error("Invalid point-in-time overlap selection.");
@@ -103,9 +103,13 @@ export function parseOverlapResult(payload: unknown, query: OverlapQuery): Overl
       throw new Error("Unavailable membership cannot claim zero or any computed overlap.");
     }
   } else {
+    const leftMembers = sources[0].member_count;
+    const rightMembers = sources[1].member_count;
     if (value.status === "unavailable" || !nonnegative(value.common_members) ||
       !nonnegative(value.union_members) || !nonnegative(value.filtered_total) ||
-      (value.common_members as number) > Math.min(...sources.map(s => s.member_count as number)) ||
+      !nonnegative(leftMembers) || !nonnegative(rightMembers) ||
+      (value.common_members as number) > Math.min(leftMembers as number, rightMembers as number) ||
+      value.union_members !== (leftMembers as number) + (rightMembers as number) - (value.common_members as number) ||
       (value.filtered_total as number) > (value.common_members as number) ||
       (value.union_members as number) < (value.common_members as number) ||
       typeof value.jaccard_ratio !== "string" || value.jaccard_ratio.trim() === "" ||
