@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { MarketDatePicker } from "./components/MarketDatePicker";
 import { INDEX_CODES, type IndexCode } from "./index-api";
 import {
-  fetchMembershipOverlap, type OverlapQuery, type OverlapResult, type OverlapStatus,
+  fetchMembershipOverlap, type OverlapQuery, type OverlapResult, type OverlapSource, type OverlapStatus,
 } from "./membership-overlap-api";
 import { useLocale } from "./localization";
 
@@ -19,11 +19,21 @@ const statuses: Record<OverlapStatus, string> = {
   unverified: "Unverified source snapshots — overlap is indicative",
   unavailable: "Source snapshot unavailable — overlap is unknown, not zero",
 };
-export function membershipIndexForMarket(code: string): IndexCode {
-  return INDEX_CODES.includes(code as IndexCode) ? code as IndexCode : "SP500";
+/** Unknown price indexes have no sourced constituent catalog; never silently map them to SP500. */
+export function membershipIndexForMarket(code: string): IndexCode | null {
+  return INDEX_CODES.includes(code as IndexCode) ? code as IndexCode : null;
 }
 export function overlapStatusDescription(status: OverlapStatus): string {
   return statuses[status];
+}
+
+/** Show both the imported snapshot date and the underlying evidence's effective date. */
+export function OverlapSourceDates({ source }: { source: OverlapSource }) {
+  const { t } = useLocale();
+  return <>
+    <p>{t("Source snapshot date")}: {source.snapshot_as_of ?? t("Unavailable")}</p>
+    <p>{t("Underlying source as-of date")}: {source.source_as_of ?? t("Unavailable")}</p>
+  </>;
 }
 
 /** Independent point-in-time membership evidence, never inferred from price history. */
@@ -49,11 +59,12 @@ export function ConstituentOverlapPanel({
   const [error, setError] = useState("");
   const generation = useRef(0);
   const asOf = overrideDate || analysisEnd || new Date().toISOString().slice(0, 10);
+  const unsupportedAnalysisIndex = membershipIndexForMarket(primaryIndex) === null;
 
   useEffect(() => {
     const next = membershipIndexForMarket(primaryIndex);
     setLeft(next);
-    setRight(old => old === next ? (next === "SP500" ? "NDX" : "SP500") : old);
+    if (next) setRight(old => old === next ? (next === "SP500" ? "NDX" : "SP500") : old);
     setOffset(0);
   }, [primaryIndex]);
 
@@ -61,7 +72,7 @@ export function ConstituentOverlapPanel({
     const id = ++generation.current;
     setResult(null);
     setError("");
-    if (!expanded) { setBusy(false); return; }
+    if (!expanded || !left) { setBusy(false); return; }
     const query: OverlapQuery = { left, right, asOf, q: search, limit: PAGE_SIZE, offset };
     setBusy(true);
     fetchMembershipOverlap(query).then(value => {
@@ -81,7 +92,7 @@ export function ConstituentOverlapPanel({
 
   function changeLeft(next: IndexCode) {
     setLeft(next);
-    if (next === right) setRight(left);
+    if (next === right) setRight(left && left !== next ? left : next === "SP500" ? "NDX" : "SP500");
     setOffset(0);
   }
   function changeRight(next: IndexCode) {
@@ -111,6 +122,9 @@ export function ConstituentOverlapPanel({
           <CardDescription>
             {t("Inspect only sourced membership snapshots; price history does not establish constituents.")}
           </CardDescription>
+          {unsupportedAnalysisIndex && <p role="status" className="mt-2 text-xs text-muted-foreground">
+            {primaryIndex}: {t("No sourced constituent catalog for this analysis index. Choose constituent indexes explicitly; overlap does not represent the selected price index.")}
+          </p>}
         </div>
         <Button type="button" variant="outline" size="sm" aria-expanded={expanded}
           onClick={() => setExpanded(value => !value)}>
@@ -122,7 +136,8 @@ export function ConstituentOverlapPanel({
           <label className="grid gap-1 text-xs font-medium text-muted-foreground">
             {t("First constituent index")}
             <select className={selectClass} aria-label={t("First constituent index")}
-              value={left} onChange={event => changeLeft(event.target.value as IndexCode)}>
+              value={left ?? ""} onChange={event => changeLeft(event.target.value as IndexCode)}>
+              <option value="" disabled>{t("Select constituent index")}</option>
               {INDEX_CODES.map(code => <option value={code} key={code}>{code}</option>)}
             </select>
           </label>
@@ -156,6 +171,9 @@ export function ConstituentOverlapPanel({
             {t("Refresh")}
           </Button>
         </form>
+        {!left && <p role="status" className="text-sm text-muted-foreground">
+          {t("Select a constituent index to begin the overlap comparison.")}
+        </p>}
         {busy && <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
           {t("Checking local membership snapshots…")}
         </p>}
@@ -191,7 +209,7 @@ export function ConstituentOverlapPanel({
             {details.map(source => <div key={source.code}
               className="min-w-0 space-y-1 rounded-md border border-border p-3 text-xs text-muted-foreground">
               <strong className="text-sm text-foreground">{source.code} · {source.name}</strong>
-              <p>{t("Source snapshot date")}: {source.snapshot_as_of ?? t("Unavailable")}</p>
+              <OverlapSourceDates source={source} />
               <p>{t("Source")}: {source.source ?? t("Unavailable")}</p>
               <p>{t("Source classification")}: {t(source.source_kind ?? "unknown")}</p>
               <p>{t("Source completeness")}: {t(source.validation_status ?? "unknown")}</p>
