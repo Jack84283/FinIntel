@@ -84,6 +84,20 @@ def test_older_complete_snapshot_is_not_verified_for_future_requested_date(tmp_p
     assert later["sources"][1]["snapshot_as_of"] == "2026-10-25"
 
 
+def test_source_as_of_earlier_than_snapshot_does_not_get_verified_label(tmp_path):
+    db = tmp_path / "overlap.sqlite"
+    _load(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "UPDATE index_membership_snapshots SET source_as_of='2026-09-29' "
+            "WHERE index_code='NDX' AND as_of='2026-10-01'"
+        )
+    result = constituent_overlap("SP500", "NDX", as_of="2026-10-01", db=db)
+    assert result["sources"][1]["snapshot_as_of"] == "2026-10-01"
+    assert result["sources"][1]["source_as_of"] == "2026-09-29"
+    assert result["status"] == "earlier_snapshot"
+
+
 def test_proxy_and_incomplete_snapshots_never_claim_official_membership(tmp_path):
     db = tmp_path / "overlap.sqlite"
     _load(db)
