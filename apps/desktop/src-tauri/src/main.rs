@@ -615,6 +615,51 @@ async fn index_constituents(
     ).await
 }
 
+/// All three layers limit Unicode scalar characters (not UTF-8 bytes) to 80.
+fn valid_overlap_search(query: &str) -> bool {
+    query.chars().count() <= 80 && !query.chars().any(|ch| ch.is_control())
+}
+
+#[cfg(test)]
+mod overlap_search_tests {
+    use super::valid_overlap_search;
+
+    #[test]
+    fn chinese_search_counts_characters_not_utf8_bytes() {
+        assert!(valid_overlap_search(&"中".repeat(80)));
+        assert!(!valid_overlap_search(&"中".repeat(81)));
+        assert!(valid_overlap_search(&"📈".repeat(80)));
+        assert!(!valid_overlap_search(&"📈".repeat(81)));
+        assert!(!valid_overlap_search("newline\n"));
+    }
+}
+
+/// Dated membership overlap is a fixed read-only local route, not a provider lookup.
+#[tauri::command]
+async fn index_membership_overlap(
+    left: String,
+    right: String,
+    as_of: String,
+    q: String,
+    limit: u8,
+    offset: u32,
+) -> Result<serde_json::Value, String> {
+    if !valid_index(&left) || !valid_index(&right) || left == right
+        || !valid_date(&as_of)
+        || !valid_overlap_search(&q)
+        || limit == 0 || limit > 100 || offset > 1_000_000
+    {
+        return Err("Invalid dated membership overlap query.".to_string());
+    }
+    read_backend(
+        "/api/v1/market-data/indexes/overlap",
+        &[
+            ("left", left), ("right", right), ("as_of", as_of),
+            ("q", q), ("limit", limit.to_string()), ("offset", offset.to_string()),
+        ],
+    ).await
+}
+
 #[tauri::command]
 async fn index_stock_memberships(
     symbol: String,
@@ -1287,6 +1332,7 @@ fn main() {
             daily_acquisition_history,
             index_catalog,
             index_constituents,
+            index_membership_overlap,
             index_stock_memberships,
             index_membership_changes
         ])

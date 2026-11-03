@@ -95,6 +95,8 @@ jobs:
         run: npm run build
       - name: Check native Rust shell
         run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Run native overlap Unicode unit tests
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel overlap_search_tests
       - name: Package macOS app bundle
         if: runner.os == 'macOS'
         run: npm run tauri:build --workspace @finintel/desktop -- --bundles app

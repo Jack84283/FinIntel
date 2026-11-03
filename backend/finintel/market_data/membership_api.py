@@ -13,6 +13,7 @@ from finintel.market_data.membership import (
     membership_changes,
     symbol_index_memberships,
 )
+from finintel.market_data.membership_overlap import constituent_overlap
 from finintel.settings.api import _require_managed
 from finintel.storage.db import StorageError
 
@@ -201,6 +202,78 @@ def acquire_constituents(code: IndexCode, request: Request) -> dict:
     try:
         return acquire_index(code)
     except (EquiblesError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+class OverlapSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: IndexCode
+    name: str
+    requested_as_of: str
+    snapshot_as_of: str | None
+    source: str | None
+    source_kind: SourceKind | None
+    source_as_of: str | None
+    validation_status: ValidationStatus | None
+    availability_status: AvailabilityStatus
+    confidence: Confidence | None
+    expected_count: int | None
+    member_count: int | None
+
+
+class OverlapMember(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    name: str
+    asset_type: str
+
+
+class OverlapResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    left_code: IndexCode
+    right_code: IndexCode
+    requested_as_of: str
+    sources: list[OverlapSource]
+    status: Literal[
+        "verified_snapshot",
+        "earlier_snapshot",
+        "proxy_only",
+        "incomplete",
+        "unverified",
+        "unavailable",
+    ]
+    common_members: int | None
+    union_members: int | None
+    jaccard_ratio: str | None
+    limit: int
+    offset: int
+    query: str
+    filtered_total: int | None
+    items: list[OverlapMember]
+    snapshot_only: bool
+    no_lookahead: bool
+    read_only: bool
+
+
+@router.get("/overlap", response_model=OverlapResponse)
+def get_index_overlap(
+    left: IndexCode,
+    right: IndexCode,
+    as_of: date,
+    q: str = Query(default="", max_length=80),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=1_000_000),
+) -> dict:
+    try:
+        return constituent_overlap(
+            left, right, as_of=as_of.isoformat(), query=q, limit=limit, offset=offset
+        )
+    except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except StorageError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
