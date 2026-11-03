@@ -12,14 +12,22 @@ from finintel.market_data.membership_overlap import constituent_overlap
 
 def _load(db):
     load_membership(
-        "SP500", "2026-10-01", "verified-sp-01",
-        ["AAPL", "MSFT", "NVDA"], expected_count=3,
-        source_kind="verified_public", db=db,
+        "SP500",
+        "2026-10-01",
+        "verified-sp-01",
+        ["AAPL", "MSFT", "NVDA"],
+        expected_count=3,
+        source_kind="verified_public",
+        db=db,
     )
     load_membership(
-        "NDX", "2026-10-01", "verified-ndx-01",
-        ["AAPL", "NVDA", "GOOG"], expected_count=3,
-        source_kind="verified_public", db=db,
+        "NDX",
+        "2026-10-01",
+        "verified-ndx-01",
+        ["AAPL", "NVDA", "GOOG"],
+        expected_count=3,
+        source_kind="verified_public",
+        db=db,
     )
 
 
@@ -59,8 +67,13 @@ def test_older_complete_snapshot_is_not_verified_for_future_requested_date(tmp_p
     assert all(s["snapshot_as_of"] == "2026-10-01" for s in current["sources"])
     # Future membership cannot be projected backwards into a dated request.
     load_membership(
-        "NDX", "2026-10-25", "future-ndx", ["MSFT"],
-        expected_count=1, source_kind="verified_public", db=db,
+        "NDX",
+        "2026-10-25",
+        "future-ndx",
+        ["MSFT"],
+        expected_count=1,
+        source_kind="verified_public",
+        db=db,
     )
     earlier = constituent_overlap("SP500", "NDX", as_of="2026-10-20", db=db)
     assert earlier["common_members"] == 2
@@ -75,9 +88,13 @@ def test_proxy_and_incomplete_snapshots_never_claim_official_membership(tmp_path
     db = tmp_path / "overlap.sqlite"
     _load(db)
     load_membership(
-        "NDX", "2026-10-15", "ETF holdings-derived proxy",
-        ["AAPL", "GOOG"], expected_count=2,
-        source_kind="fund_derived_proxy", db=db,
+        "NDX",
+        "2026-10-15",
+        "ETF holdings-derived proxy",
+        ["AAPL", "GOOG"],
+        expected_count=2,
+        source_kind="fund_derived_proxy",
+        db=db,
     )
     proxied = constituent_overlap("SP500", "NDX", as_of="2026-10-15", db=db)
     assert proxied["status"] == "proxy_only"
@@ -85,9 +102,13 @@ def test_proxy_and_incomplete_snapshots_never_claim_official_membership(tmp_path
     assert proxied["common_members"] == 1
     # A partial import is not silently treated as complete even with a count.
     load_membership(
-        "NDX", "2026-10-18", "incomplete-source",
-        ["AAPL", "MSFT"], source_expected_count=100,
-        source_kind="verified_public", db=db,
+        "NDX",
+        "2026-10-18",
+        "incomplete-source",
+        ["AAPL", "MSFT"],
+        source_expected_count=100,
+        source_kind="verified_public",
+        db=db,
     )
     partial = constituent_overlap("SP500", "NDX", as_of="2026-10-18", db=db)
     assert partial["status"] == "incomplete"
@@ -115,9 +136,13 @@ def test_empty_overlap_is_zero_only_when_both_snapshots_exist(tmp_path):
     db = tmp_path / "overlap.sqlite"
     _load(db)
     load_membership(
-        "DJIA", "2026-10-01", "verified-djia",
-        ["IBM", "CAT"], expected_count=2,
-        source_kind="official_licensed", db=db,
+        "DJIA",
+        "2026-10-01",
+        "verified-djia",
+        ["IBM", "CAT"],
+        expected_count=2,
+        source_kind="official_licensed",
+        db=db,
     )
     result = constituent_overlap("SP500", "DJIA", as_of="2026-10-01", db=db)
     assert result["status"] == "verified_snapshot"
@@ -143,9 +168,7 @@ def test_invalid_inputs_rejected_without_writes(tmp_path, left, right, when, que
     db = tmp_path / "overlap.sqlite"
     _load(db)
     with pytest.raises(ValueError):
-        constituent_overlap(
-            left, right, as_of=when, query=query, limit=limit, offset=offset, db=db
-        )
+        constituent_overlap(left, right, as_of=when, query=query, limit=limit, offset=offset, db=db)
 
 
 def test_http_api_and_absent_database_no_implicit_creation(tmp_path, monkeypatch):
@@ -153,8 +176,11 @@ def test_http_api_and_absent_database_no_implicit_creation(tmp_path, monkeypatch
     _load(db)
     monkeypatch.setenv("FININTEL_DB_PATH", str(db))
     params = {
-        "left": "SP500", "right": "NDX", "as_of": "2026-10-01",
-        "limit": 1, "offset": 0,
+        "left": "SP500",
+        "right": "NDX",
+        "as_of": "2026-10-01",
+        "limit": 1,
+        "offset": 0,
     }
     with TestClient(app) as client:
         ok = client.get("/api/v1/market-data/indexes/overlap", params=params)
