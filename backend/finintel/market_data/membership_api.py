@@ -14,6 +14,7 @@ from finintel.market_data.membership import (
     symbol_index_memberships,
 )
 from finintel.market_data.membership_overlap import constituent_overlap
+from finintel.market_data.membership_trend import constituent_snapshot_trend
 from finintel.settings.api import _require_managed
 from finintel.storage.db import StorageError
 
@@ -272,6 +273,73 @@ def get_index_overlap(
     try:
         return constituent_overlap(
             left, right, as_of=as_of.isoformat(), query=q, limit=limit, offset=offset
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+class SnapshotTrendPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot_as_of: str
+    source: str | None
+    source_as_of: str | None
+    source_kind: SourceKind
+    validation_status: ValidationStatus
+    availability_status: AvailabilityStatus
+    confidence: Confidence
+    expected_count: int | None
+    member_count: int
+    evidence_status: Literal[
+        "verified_snapshot", "source_date_mismatch", "proxy_only", "incomplete", "unverified"
+    ]
+    previous_snapshot_as_of: str | None
+    previous_evidence_status: (
+        Literal[
+            "verified_snapshot", "source_date_mismatch", "proxy_only", "incomplete", "unverified"
+        ]
+        | None
+    )
+    added_members: int | None
+    removed_members: int | None
+    change_status: Literal["first_observed", "verified_pair", "indicative_pair"]
+
+
+class SnapshotTrendResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: IndexCode
+    name: str
+    from_as_of: str
+    to_as_of: str
+    total_snapshots: int
+    limit: int
+    offset: int
+    snapshots: list[SnapshotTrendPoint]
+    snapshot_only: bool
+    no_interpolation: bool
+    no_lookahead: bool
+    read_only: bool
+
+
+@router.get("/snapshot-trend", response_model=SnapshotTrendResponse)
+def get_snapshot_trend(
+    code: IndexCode,
+    from_as_of: date,
+    to_as_of: date,
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=1_000_000),
+) -> dict:
+    """Historical source snapshots only; never invent intermediate index membership."""
+    try:
+        return constituent_snapshot_trend(
+            code,
+            from_as_of=from_as_of.isoformat(),
+            to_as_of=to_as_of.isoformat(),
+            limit=limit,
+            offset=offset,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

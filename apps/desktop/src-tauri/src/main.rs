@@ -661,6 +661,31 @@ async fn index_membership_overlap(
 }
 
 #[tauri::command]
+async fn index_membership_trend(
+    code: String,
+    from_as_of: String,
+    to_as_of: String,
+    limit: u8,
+    offset: u32,
+) -> Result<serde_json::Value, String> {
+    if !valid_index(&code) || !valid_date(&from_as_of) || !valid_date(&to_as_of)
+        || from_as_of > to_as_of || limit == 0 || limit > 100 || offset > 1_000_000
+    {
+        return Err("Invalid dated membership trend query.".to_string());
+    }
+    read_backend(
+        "/api/v1/market-data/indexes/snapshot-trend",
+        &[
+            ("code", code),
+            ("from_as_of", from_as_of),
+            ("to_as_of", to_as_of),
+            ("limit", limit.to_string()),
+            ("offset", offset.to_string()),
+        ],
+    ).await
+}
+
+#[tauri::command]
 async fn index_stock_memberships(
     symbol: String,
     as_of: Option<String>,
@@ -1333,6 +1358,7 @@ fn main() {
             index_catalog,
             index_constituents,
             index_membership_overlap,
+            index_membership_trend,
             index_stock_memberships,
             index_membership_changes
         ])
