@@ -953,6 +953,64 @@ async fn analytics_series(
     read_backend("/api/v1/analytics/series", &parameters).await
 }
 
+/// A fixed, allowlisted research indicator: no dynamic code, arbitrary URL or orders.
+#[tauri::command]
+async fn model_research_evaluate(
+    code: String,
+    start: String,
+    end: String,
+    quality_policy: String,
+    fast_window: u16,
+    slow_window: u16,
+    expected_snapshot: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if backend_token().is_empty()
+        || !valid_index_history_code(&code) || code == "VIX"
+        || !valid_index_history_date(&start)
+        || !valid_index_history_date(&end) || start > end
+        || !matches!(quality_policy.as_str(), "require_complete" | "allow_unverified")
+        || !(2..=100).contains(&fast_window) || !(3..=252).contains(&slow_window)
+        || fast_window >= slow_window
+        || expected_snapshot.as_ref().is_some_and(|hash| {
+            hash.len() != 64 || !hash.bytes().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        })
+    {
+        return Err("Invalid or unauthorized local model evaluation.".to_string());
+    }
+    let body = serde_json::json!({
+        "model_id": "builtin.sma_crossover",
+        "model_version": "1.0.0",
+        "code": code,
+        "start": start,
+        "end": end,
+        "quality_policy": quality_policy,
+        "parameters": {"fast_window": fast_window, "slow_window": slow_window},
+        "expected_snapshot_sha256": expected_snapshot,
+    });
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize the local research client.".to_string())?;
+    let response = client
+        .post(format!("{}/api/v1/models/evaluate", backend_base()))
+        .header("x-finintel-process-token", backend_token())
+        .json(&body)
+        .send()
+        .await
+        .map_err(|_| "Could not reach the managed local model backend.".to_string())?;
+    let status = response.status();
+    let payload = response.json::<serde_json::Value>().await
+        .map_err(|_| "Local model backend returned malformed JSON.".to_string())?;
+    if !status.is_success() {
+        let detail = payload.get("detail").and_then(serde_json::Value::as_str)
+            .filter(|msg| msg.len() <= 300)
+            .unwrap_or("Local model execution was refused.");
+        return Err(format!("HTTP {}: {}", status.as_u16(), detail));
+    }
+    Ok(payload)
+}
+
 /// Read-only, bounded multi-index query with fixed local FRED series.
 #[tauri::command]
 async fn analytics_basket(
@@ -1344,6 +1402,7 @@ fn main() {
             index_history_daily,
             analytics_series,
             analytics_basket,
+            model_research_evaluate,
             index_history_acquire,
             daily_acquisition_status,
             daily_acquisition_settings,
