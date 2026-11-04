@@ -28,7 +28,7 @@ from finintel.storage.db import _write_connection
 START = date(2026, 9, 1)
 
 
-def _seed(path, count=35, *, code="SP500", step=2):
+def _seed(path, count=35, *, code="SP500", step=2, first_date=START):
     conn = _write_connection(path)
     with conn:
         conn.executemany(
@@ -38,7 +38,7 @@ def _seed(path, count=35, *, code="SP500", step=2):
             [
                 (
                     code,
-                    (START + timedelta(days=i)).isoformat(),
+                    (first_date + timedelta(days=i)).isoformat(),
                     str(100 + step * i),
                     f"https://fred.stlouisfed.org/series/{code}",
                 )
@@ -177,9 +177,14 @@ def test_resource_cap_and_absent_storage_do_not_create_data(tmp_path):
         _evaluate(absent)
     assert not absent.exists()
     db = tmp_path / "large.sqlite"
-    _seed(db, count=MAX_MODEL_OBSERVATIONS + 1, step=0)
+    historical_start = date(2020, 1, 1)
+    _seed(db, count=MAX_MODEL_OBSERVATIONS + 1, step=0, first_date=historical_start)
     with pytest.raises(AnalyticsError, match="2,000"):
-        _evaluate(db, count=MAX_MODEL_OBSERVATIONS + 1)
+        _evaluate(
+            db,
+            start=historical_start,
+            end=historical_start + timedelta(days=MAX_MODEL_OBSERVATIONS),
+        )
 
 
 def test_managed_desktop_api_validation_and_response_contract(tmp_path, monkeypatch):
