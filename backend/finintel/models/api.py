@@ -25,9 +25,7 @@ class ModelRunInput(BaseModel):
     end: date
     quality_policy: Literal["require_complete", "allow_unverified"] = "require_complete"
     parameters: ModelParameters = Field(default_factory=ModelParameters)
-    expected_snapshot_sha256: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
+    expected_snapshot_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class ModelResearchPoint(BaseModel):
