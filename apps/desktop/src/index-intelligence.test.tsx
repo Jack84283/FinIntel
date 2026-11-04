@@ -30,6 +30,15 @@ function sample(comparison = false): AnalyticsResult {
       missing_data_policy: "observed_sessions_only", numeric_boundary: "decimal" },
     observations: 3, first_session: "2026-10-20", last_session: "2026-10-22",
     metrics_enabled: true, max_drawdown: "-0.1", longest_underwater_observed_sessions: 1,
+    longest_completed_recovery_observed_sessions: null,
+    ongoing_drawdown_observed_sessions: 1,
+    drawdown_episodes: [{
+      status: "ongoing", peak_session_date: "2026-10-21",
+      trough_session_date: "2026-10-22", recovery_session_date: null,
+      trough_drawdown: "-0.1", underwater_observed_sessions: 1,
+      peak_to_recovery_observed_sessions: null,
+      trough_to_recovery_observed_sessions: null,
+    }],
     period_returns: { week: [], month: [], year: [] },
     points: [
       { session_date: "2026-10-20", close: "100", normalized_100: "100", simple_return: null,
@@ -123,6 +132,24 @@ describe("Index Intelligence local analytics API", () => {
     }));
     await expect(fetchIndexAnalytics({ ...query, qualityPolicy: "require_complete" }))
       .rejects.toThrow("Current complete quality scan required");
+  });
+
+  it("rejects fabricated drawdown recoveries, impossible dates and missing censoring", () => {
+    const invalidRecovery = sample();
+    invalidRecovery.drawdown_episodes[0].status = "recovered";
+    invalidRecovery.drawdown_episodes[0].recovery_session_date = "2026-10-23";
+    invalidRecovery.drawdown_episodes[0].peak_to_recovery_observed_sessions = 2;
+    expect(() => parseAnalyticsResult(invalidRecovery, query)).toThrow();
+    const invalidDuration = sample();
+    invalidDuration.drawdown_episodes[0].underwater_observed_sessions = 0;
+    expect(() => parseAnalyticsResult(invalidDuration, query)).toThrow();
+    const invalidTrough = sample();
+    invalidTrough.drawdown_episodes[0].trough_drawdown = "-0.5";
+    expect(() => parseAnalyticsResult(invalidTrough, query)).toThrow();
+    const invalidOverall = sample();
+    invalidOverall.longest_completed_recovery_observed_sessions = 3;
+    expect(() => parseAnalyticsResult(invalidOverall, query)).toThrow();
+    expect(parseAnalyticsResult(sample(), query).ongoing_drawdown_observed_sessions).toBe(1);
   });
 
   it("rejects wrong provider, mismatched dates and unsourced/malformed numbers", () => {
