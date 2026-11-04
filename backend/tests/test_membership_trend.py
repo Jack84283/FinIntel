@@ -153,7 +153,10 @@ def test_rejects_source_evidence_postdating_claimed_snapshot(tmp_path):
         )
     with pytest.raises(StorageError, match="postdates"):
         constituent_snapshot_trend(
-            "SP500", from_as_of="2026-10-01", to_as_of="2026-10-20", db=db
+            "SP500",
+            from_as_of="2026-10-01",
+            to_as_of="2026-10-20",
+            db=db,
         )
 
 
