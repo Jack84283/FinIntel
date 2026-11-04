@@ -187,6 +187,40 @@ def test_resource_cap_and_absent_storage_do_not_create_data(tmp_path):
         )
 
 
+def test_over_limit_rejected_before_analytics_computation(tmp_path, monkeypatch):
+    """The 2,001st row must fail at the SQL read boundary, not after compute_series."""
+    db = tmp_path / "cap.sqlite"
+    origin = date(2020, 1, 1)
+    _seed(db, count=MAX_MODEL_OBSERVATIONS + 1, step=0, first_date=origin)
+    import finintel.market_data.analytics_store as analytics_store
+
+    def must_not_compute(*_args, **_kwargs):
+        pytest.fail("Expensive general-series analytics ran before source cap validation")
+
+    monkeypatch.setattr(analytics_store, "compute_series", must_not_compute)
+    with pytest.raises(AnalyticsError, match="2,000"):
+        _evaluate(
+            db,
+            start=origin,
+            end=origin + timedelta(days=MAX_MODEL_OBSERVATIONS),
+        )
+
+
+def test_exactly_2000_observations_allowed_without_truncation(tmp_path):
+    db = tmp_path / "boundary.sqlite"
+    origin = date(2020, 1, 1)
+    _seed(db, count=MAX_MODEL_OBSERVATIONS, first_date=origin)
+    result = _evaluate(
+        db,
+        start=origin,
+        end=origin + timedelta(days=MAX_MODEL_OBSERVATIONS - 1),
+    )
+    assert result["observations"] == MAX_MODEL_OBSERVATIONS
+    assert result["points"][-1]["session_date"] == (
+        origin + timedelta(days=MAX_MODEL_OBSERVATIONS - 1)
+    ).isoformat()
+
+
 def test_managed_desktop_api_validation_and_response_contract(tmp_path, monkeypatch):
     db = tmp_path / "synthetic.sqlite"
     _seed(db)
