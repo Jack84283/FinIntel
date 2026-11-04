@@ -78,6 +78,7 @@ def evaluate_builtin_indicator(
         start=start,
         end=end,
         window=20,
+        max_observations=MAX_MODEL_OBSERVATIONS,
         quality_policy=quality_policy,
         db=db,
     )
@@ -96,8 +97,7 @@ def evaluate_builtin_indicator(
         raise AnalyticsError("Local source snapshot changed; refresh model inputs")
 
     rows = source["points"]
-    if len(rows) > MAX_MODEL_OBSERVATIONS:
-        raise AnalyticsError("Model limit exceeds 2,000 observations; narrow the date range")
+    # An oversized source is refused by the bounded SQLite SELECT before analytics.
     if len(rows) < params.slow_window + 1:
         raise AnalyticsError(
             "Insufficient observed sessions for slow window plus signal evaluation"
