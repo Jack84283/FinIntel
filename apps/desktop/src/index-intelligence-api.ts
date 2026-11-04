@@ -60,7 +60,8 @@ export type AnalyticsIdentity = {
 export type AnalyticsResult = {
   calculation_version: string;
   identity: AnalyticsIdentity;
-  settings: { window_sessions: number; annualization_sessions: number; missing_data_policy: string; numeric_boundary: string };
+  settings: { window_sessions: number; annualization_sessions: number; missing_data_policy: string;
+    numeric_boundary: string; volatility_returns_explicit: boolean };
   observations: number;
   first_session: string | null;
   last_session: string | null;
@@ -158,9 +159,25 @@ export function validRecoveryEpisodes(
   if (!Array.isArray(data.drawdown_episodes) ||
       data.drawdown_episodes.length > rawPoints.length) return false;
   if (!metricsEnabled) {
+    // A disabled volatility-level series may still expose closes, normalization
+    // and moving averages, but it must never carry financial return metrics.
+    const periods = data.period_returns;
+    const returnOnlyFields = [
+      "simple_return", "log_return", "cumulative_return", "drawdown",
+      "rolling_volatility_annualized", "momentum", "rsi",
+    ];
     return data.drawdown_episodes.length === 0 &&
+      data.max_drawdown === null &&
+      data.longest_underwater_observed_sessions === null &&
       data.longest_completed_recovery_observed_sessions === null &&
-      data.ongoing_drawdown_observed_sessions === null;
+      data.ongoing_drawdown_observed_sessions === null &&
+      !!periods && typeof periods === "object" && !Array.isArray(periods) &&
+      ["week", "month", "year"].every(period =>
+        Array.isArray((periods as Record<string, unknown>)[period]) &&
+        ((periods as Record<string, unknown>)[period] as unknown[]).length === 0
+      ) &&
+      Object.keys(periods).every(period => ["week", "month", "year"].includes(period)) &&
+      rawPoints.every(point => returnOnlyFields.every(field => record(point)[field] === null));
   }
   const points = rawPoints.map(record);
   const closes = points.map(p => decimalClose(p.close));
@@ -217,11 +234,15 @@ export function parseAnalyticsResult(value: unknown, query: AnalyticsQuery): Ana
   const v = record(value), identity = record(v.identity), source = record(v.source);
   const quality = record(v.quality), settings = record(v.settings);
   if (identity.code !== query.code || identity.instrument_kind !== "index" || identity.provider !== "fred" ||
-    identity.units !== "index_points" || !["price_index", "volatility_index"].includes(String(identity.return_semantics)) ||
+    identity.units !== "index_points" ||
+    identity.adjustment !== (query.code === "VIX" ? "volatility_index" : "price_index") ||
+    identity.return_semantics !== (query.code === "VIX" ? "volatility_index" : "price_index") ||
     typeof v.calculation_version !== "string" || !/^index-analytics-v\d+$/.test(v.calculation_version) ||
     !Number.isSafeInteger(v.observations) || (v.observations as number) > 10000 ||
     !Array.isArray(v.points) || v.observations !== v.points.length || !validPoints(v.points, query.code) ||
     typeof v.metrics_enabled !== "boolean" ||
+    v.metrics_enabled !== (query.code !== "VIX") ||
+    settings.volatility_returns_explicit !== false ||
     !validRecoveryEpisodes(v, v.points, v.metrics_enabled as boolean) ||
     !scalar(v.first_session) || !scalar(v.last_session) ||
     typeof source.snapshot_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(source.snapshot_sha256) ||
