@@ -79,7 +79,7 @@ def _read_series(
             "WHERE series_id=? AND session_date>=? AND session_date<=? "
             "ORDER BY session_date LIMIT ?"
         )
-        args = (row["id"], start.isoformat(), end.isoformat(), MAX_OBSERVATIONS + 1)
+        args = (row["id"], start.isoformat(), end.isoformat(), max_observations + 1)
         provenance = {"source_url": None, "coverage_updated_at": None}
     else:
         raise AnalyticsError("Only index or equity source observations are supported")
