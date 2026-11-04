@@ -85,8 +85,7 @@ def constituent_snapshot_trend(
     if conn is None:
         return response
     try:
-        # One consistent SQLite read transaction while other jobs might import.
-        conn.execute("BEGIN")
+        # _read_connection already starts one consistent read-only snapshot.
         if conn.execute("PRAGMA user_version").fetchone()[0] < 5:
             return response
         where = "WHERE index_code=? AND as_of>=? AND as_of<=?"
