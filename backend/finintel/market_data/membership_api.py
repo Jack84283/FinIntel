@@ -296,9 +296,12 @@ class SnapshotTrendPoint(BaseModel):
         "verified_snapshot", "source_date_mismatch", "proxy_only", "incomplete", "unverified"
     ]
     previous_snapshot_as_of: str | None
-    previous_evidence_status: Literal[
-        "verified_snapshot", "source_date_mismatch", "proxy_only", "incomplete", "unverified"
-    ] | None
+    previous_evidence_status: (
+        Literal[
+            "verified_snapshot", "source_date_mismatch", "proxy_only", "incomplete", "unverified"
+        ]
+        | None
+    )
     added_members: int | None
     removed_members: int | None
     change_status: Literal["first_observed", "verified_pair", "indicative_pair"]
@@ -332,8 +335,11 @@ def get_snapshot_trend(
     """Historical source snapshots only; never invent intermediate index membership."""
     try:
         return constituent_snapshot_trend(
-            code, from_as_of=from_as_of.isoformat(),
-            to_as_of=to_as_of.isoformat(), limit=limit, offset=offset,
+            code,
+            from_as_of=from_as_of.isoformat(),
+            to_as_of=to_as_of.isoformat(),
+            limit=limit,
+            offset=offset,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
