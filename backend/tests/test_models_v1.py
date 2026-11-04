@@ -137,9 +137,10 @@ def test_changed_revision_and_quality_policy_fail_closed(tmp_path):
     _seed(db)
     original = _evaluate(db)
     expected = original["lineage"]["source_snapshot_sha256"]
-    assert _evaluate(db, expected_snapshot_sha256=expected)["output_sha256"] == original[
-        "output_sha256"
-    ]
+    assert (
+        _evaluate(db, expected_snapshot_sha256=expected)["output_sha256"]
+        == original["output_sha256"]
+    )
     with sqlite3.connect(db) as conn:
         conn.execute(
             "UPDATE index_daily_closes SET close='120', "
