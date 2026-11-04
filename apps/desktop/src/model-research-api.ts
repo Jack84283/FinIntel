@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { type IndexCode } from "./index-history-api";
 import { type QualityPolicy } from "./index-intelligence-api";
+import { canonicalModelSha256, verifyIndicatorAverages } from "./model-research-integrity";
 
 export const BUILTIN_MODEL_ID = "builtin.sma_crossover";
 export const BUILTIN_MODEL_VERSION = "1.0.0";
@@ -99,7 +100,7 @@ export function validateModelResearchQuery(query: ModelResearchQuery): void {
     throw new Error("Invalid local model parameters or source selection.");
   }
 }
-export function parseModelResearchResult(payload: unknown, query: ModelResearchQuery): ModelResearchResult {
+export async function parseModelResearchResult(payload: unknown, query: ModelResearchQuery): Promise<ModelResearchResult> {
   const value = record(payload), lineage = record(value.lineage);
   const identity = record(lineage.source_identity), params = record(lineage.parameters);
   if (value.execution_contract !== "model-research-evaluation-v1" ||
@@ -163,6 +164,18 @@ export function parseModelResearchResult(payload: unknown, query: ModelResearchQ
   if (rows[0].session_date !== lineage.first_observed_session ||
     rows[rows.length - 1].session_date !== lineage.last_observed_session) {
     throw new Error("Model coverage does not match source lineage.");
+  }
+  // The backend-provided hashes are claims, not evidence until recomputed.
+  // Independently check every SMA against actual trailing closes *before* display,
+  // using Python's decimal.Context(prec=28) rounding semantics.
+  verifyIndicatorAverages(rows, query.fastWindow, query.slowWindow);
+  const [calculatedLineage, calculatedOutput] = await Promise.all([
+    canonicalModelSha256(lineage),
+    canonicalModelSha256(rows),
+  ]);
+  if (value.reproducibility_sha256 !== calculatedLineage ||
+      value.output_sha256 !== calculatedOutput) {
+    throw new Error("Local model result SHA-256 verification failed.");
   }
   return payload as ModelResearchResult;
 }
