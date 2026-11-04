@@ -137,6 +137,7 @@ def constituent_snapshot_trend(
                 "member_count": record["total"],
                 "evidence_status": status,
                 "previous_snapshot_as_of": previous["as_of"] if previous else None,
+                "previous_evidence_status": _evidence_status(previous) if previous else None,
                 "added_members": added,
                 "removed_members": removed,
                 "change_status": change_status,
