@@ -42,3 +42,46 @@ Use immutable decimal input and decimal simple returns at price boundaries; conv
 `backend/tests/test_analytics.py` uses offline synthetic independent numerical reference fixtures for returns, log, drawdowns, moving averages, RSI, rolling covariance/beta/tracking error, missing sessions, VIX semantics, snapshot revision invalidation, quality scan gate and read-only API. Existing CI runs Ruff, full backend pytest, frontend typecheck/Vitest and macOS/Windows/Linux native builds.
 
 **Next scope:** Issue #30 still needs broader financial semantics (adjusted and total-return sources once validated), cross-market calendar alignment and additional scale testing. Issue #31 will render the Index Intelligence UI using these contract and provenance fields. PR #45 is an intentionally focused foundation; do **not** close Issue #30 or #29 solely from green synthetic CI. The manual Issue #29 acceptance gates remain explicitly outstanding after PR #44.
+
+
+## Recovery episodes (Issue #30 follow-up, calculation v2)
+
+The v1 analytics contract reported only maximum drawdown and the longest observed
+underwater run. Version `index-analytics-v2` adds **read-only recovery episodes**
+without changing source observations, standard return formulas, provider choice,
+or existing response fields.
+
+- A peak is the most recent observed high-water mark. Equal closes at the high
+  complete any existing drawdown and can become the next peak.
+- An episode begins when an observation falls **strictly below** that peak. Its
+  trough is the first observed lowest close within the episode.
+- **Recovered:** the first actually observed close at/above the prior peak.
+  `peak_to_recovery_observed_sessions` counts observation intervals after the
+  peak, **including the recovery observation**, while
+  `underwater_observed_sessions` excludes the recovery observation.
+  `trough_to_recovery_observed_sessions` counts intervals from the actual
+  trough to recovery. These are not calendar days.
+- **Ongoing / right-censored:** if the requested end date arrives while prices
+  remain below the earlier peak, the recovery date and both recovery durations
+  are **null**, not zero and never projected from later sessions.
+  `ongoing_drawdown_observed_sessions` reports only known underwater samples
+  through the last observed row.
+- `longest_completed_recovery_observed_sessions` is the maximum **completed**
+  peak-to-recovery duration among episodes within the selected input range.
+  It is null when none complete, even if an episode remains underwater.
+- Calculations are **relative to the requested range**: the initial observation
+  establishes the first peak. History before the selected start cannot be
+  inferred. Holidays, gaps, non-trading days and missing vendors are not filled.
+- Default VIX volatility-level metrics continue to exclude drawdown/recovery
+  unless returns are explicitly enabled; no other asset/return semantics are
+  promoted.
+- Every episode includes actual peak/trough/recovery dates and Decimal-based
+  trough drawdown; the desktop receives typed source-backed values, validates
+  observed-session duration arithmetic, and displays completed and ongoing
+  durations separately, with English/Simplified Chinese explanations.
+
+Offline regression tests exercise multiple episodes, weekend/date gaps, tied
+highs, unresolved tails, no history and VIX gating. They do **not** establish
+historical provider accuracy, unrestricted index-level return comparability or
+production-scale UI latency. Issue #30 remains open for expanded semantics,
+market calendars and scale/manual acceptance.
