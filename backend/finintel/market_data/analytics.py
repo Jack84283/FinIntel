@@ -118,7 +118,9 @@ def _period_returns(points: list[Observation], period: str) -> list[dict]:
     ]
 
 
-def _drawdown_recovery(observations: list[Observation]) -> tuple[list[dict], int | None, int | None]:
+def _drawdown_recovery(
+    observations: list[Observation],
+) -> tuple[list[dict], int | None, int | None]:
     """Peak/trough/recovery from observed sessions only, with censored open episodes.
 
     The first observed close at or above a prior peak completes recovery.
