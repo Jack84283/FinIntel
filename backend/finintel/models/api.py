@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/v1/models", tags=["local-research-models"])
 
 
 class ModelRunInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="forbid")
 
     model_id: Literal["builtin.sma_crossover"] = MODEL_ID
     model_version: Literal["1.0.0"] = MODEL_VERSION
