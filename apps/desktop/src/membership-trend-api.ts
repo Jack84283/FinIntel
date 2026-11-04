@@ -75,7 +75,7 @@ export function parseTrendResult(payload: unknown, query: TrendQuery): TrendResu
   for (let i = 0; i < response.snapshots.length; i++) {
     const p = item(response.snapshots[i]);
     if (typeof p.snapshot_as_of !== "string" || !validOverlapDate(p.snapshot_as_of) ||
-      p.snapshot_as_of < query.fromAsOf || p.snapshot_as_of > query.toAsOf ||
+      (p.snapshot_as_of as string) < query.fromAsOf || (p.snapshot_as_of as string) > query.toAsOf ||
       (prior !== null && (p.snapshot_as_of as string) <= (prior.snapshot_as_of as string)) ||
       typeof p.source !== "string" || !p.source.trim() ||
       !isDateOrNull(p.source_as_of) ||
