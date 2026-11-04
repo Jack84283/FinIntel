@@ -26,6 +26,16 @@ export type AnalyticsPoint = {
   momentum: string | null;
   rsi: string | null;
 };
+export type DrawdownEpisode = {
+  status: "recovered" | "ongoing";
+  peak_session_date: string;
+  trough_session_date: string;
+  recovery_session_date: string | null;
+  trough_drawdown: string;
+  underwater_observed_sessions: number;
+  peak_to_recovery_observed_sessions: number | null;
+  trough_to_recovery_observed_sessions: number | null;
+};
 export type ComparisonPoint = {
   session_date: string;
   left_normalized_100: string;
@@ -57,6 +67,9 @@ export type AnalyticsResult = {
   metrics_enabled: boolean;
   max_drawdown: string | null;
   longest_underwater_observed_sessions: number | null;
+  longest_completed_recovery_observed_sessions: number | null;
+  ongoing_drawdown_observed_sessions: number | null;
+  drawdown_episodes: DrawdownEpisode[];
   period_returns: Record<string, { session_date: string; return: string; period: string }[]>;
   points: AnalyticsPoint[];
   request: { start: string; end: string };
