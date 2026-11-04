@@ -130,6 +130,70 @@ function validPoints(points: unknown, code: string, comparison = false): boolean
   }
   return !!code;
 }
+/** Verify recovery durations from observed rows, never implied calendar sessions. */
+export function validRecoveryEpisodes(
+  payload: unknown, rawPoints: unknown, metricsEnabled: boolean,
+): boolean {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
+      !Array.isArray(rawPoints)) return false;
+  const data = payload as Record<string, unknown>;
+  if (!Array.isArray(data.drawdown_episodes) || data.drawdown_episodes.length > rawPoints.length ||
+      ![null, ...Array.from({ length: rawPoints.length + 1 }, (_, n) => n)].includes(
+        data.longest_completed_recovery_observed_sessions as number | null
+      ) || ![null, ...Array.from({ length: rawPoints.length + 1 }, (_, n) => n)].includes(
+        data.ongoing_drawdown_observed_sessions as number | null
+      )) return false;
+  if (!metricsEnabled) {
+    return data.drawdown_episodes.length === 0 &&
+      data.longest_completed_recovery_observed_sessions === null &&
+      data.ongoing_drawdown_observed_sessions === null;
+  }
+  const points = rawPoints.map(record);
+  const dateIndex = new Map(points.map((p, i) => [p.session_date, i]));
+  let lastEnd = -1;
+  let longest: number | null = null;
+  let ongoing: number | null = null;
+  for (let i = 0; i < data.drawdown_episodes.length; i++) {
+    const episode = record(data.drawdown_episodes[i]);
+    const peak = dateIndex.get(episode.peak_session_date);
+    const trough = dateIndex.get(episode.trough_session_date);
+    const status = episode.status;
+    const recovered = episode.recovery_session_date === null
+      ? null : dateIndex.get(episode.recovery_session_date);
+    if (typeof peak !== "number" || typeof trough !== "number" ||
+        trough <= peak || peak < lastEnd ||
+        !numeric(episode.trough_drawdown) ||
+        typeof episode.trough_drawdown !== "string" ||
+        Number(episode.trough_drawdown) >= 0 ||
+        (status !== "recovered" && status !== "ongoing")) return false;
+    const peakValue = Number(points[peak].close);
+    const troughValue = Number(points[trough].close);
+    if (!Number.isFinite(peakValue) || peakValue <= 0 ||
+        !Number.isFinite(troughValue) || troughValue <= 0 ||
+        Math.abs(Number(episode.trough_drawdown) - (troughValue / peakValue - 1)) > 1e-10) return false;
+    if (status === "recovered") {
+      if (typeof recovered !== "number" || recovered <= trough ||
+          Number(points[recovered].close) < peakValue ||
+          episode.underwater_observed_sessions !== recovered - peak - 1 ||
+          episode.peak_to_recovery_observed_sessions !== recovered - peak ||
+          episode.trough_to_recovery_observed_sessions !== recovered - trough ||
+          points.slice(peak + 1, recovered).some(p => Number(p.close) >= peakValue)) return false;
+      longest = Math.max(longest ?? 0, recovered - peak);
+      lastEnd = recovered;
+    } else {
+      if (i !== data.drawdown_episodes.length - 1 || episode.recovery_session_date !== null ||
+          episode.peak_to_recovery_observed_sessions !== null ||
+          episode.trough_to_recovery_observed_sessions !== null ||
+          episode.underwater_observed_sessions !== points.length - peak - 1 ||
+          points.slice(peak + 1).some(p => Number(p.close) >= peakValue)) return false;
+      ongoing = points.length - peak - 1;
+      lastEnd = points.length - 1;
+    }
+  }
+  return data.longest_completed_recovery_observed_sessions === longest &&
+    data.ongoing_drawdown_observed_sessions === ongoing;
+}
+
 /** Validate provenance, point chronology and semantic identity before any visualization. */
 export function parseAnalyticsResult(value: unknown, query: AnalyticsQuery): AnalyticsResult {
   const v = record(value), identity = record(v.identity), source = record(v.source);
@@ -139,6 +203,8 @@ export function parseAnalyticsResult(value: unknown, query: AnalyticsQuery): Ana
     typeof v.calculation_version !== "string" || !/^index-analytics-v\d+$/.test(v.calculation_version) ||
     !Number.isSafeInteger(v.observations) || (v.observations as number) > 10000 ||
     !Array.isArray(v.points) || v.observations !== v.points.length || !validPoints(v.points, query.code) ||
+    typeof v.metrics_enabled !== "boolean" ||
+    !validRecoveryEpisodes(v, v.points, v.metrics_enabled as boolean) ||
     !scalar(v.first_session) || !scalar(v.last_session) ||
     typeof source.snapshot_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(source.snapshot_sha256) ||
     typeof quality.quality_verified !== "boolean" || typeof quality.status !== "string" ||
