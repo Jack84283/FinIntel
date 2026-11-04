@@ -296,6 +296,9 @@ class SnapshotTrendPoint(BaseModel):
         "verified_snapshot", "source_date_mismatch", "proxy_only", "incomplete", "unverified"
     ]
     previous_snapshot_as_of: str | None
+    previous_evidence_status: Literal[
+        "verified_snapshot", "source_date_mismatch", "proxy_only", "incomplete", "unverified"
+    ] | None
     added_members: int | None
     removed_members: int | None
     change_status: Literal["first_observed", "verified_pair", "indicative_pair"]
