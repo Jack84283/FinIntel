@@ -27,7 +27,10 @@ def _read_series(
     provider: str,
     start: date,
     end: date,
+    max_observations: int = MAX_OBSERVATIONS,
 ) -> tuple[SeriesIdentity, list[tuple[str, str]], dict]:
+    if not 1 <= max_observations <= MAX_OBSERVATIONS:
+        raise AnalyticsError("Invalid analytical source observation limit")
     if kind == "index":
         if code not in INDEX_SERIES or provider != "fred":
             raise AnalyticsError("Unsupported stored index source")
@@ -47,7 +50,7 @@ def _read_series(
             "WHERE index_code=? AND provider=? AND session_date>=? AND session_date<=? "
             "ORDER BY session_date LIMIT ?"
         )
-        args = (code, provider, start.isoformat(), end.isoformat(), MAX_OBSERVATIONS + 1)
+        args = (code, provider, start.isoformat(), end.isoformat(), max_observations + 1)
         provenance = {
             "source_url": row["source_url"],
             "coverage_updated_at": row["coverage_updated_at"],
@@ -76,13 +79,15 @@ def _read_series(
             "WHERE series_id=? AND session_date>=? AND session_date<=? "
             "ORDER BY session_date LIMIT ?"
         )
-        args = (row["id"], start.isoformat(), end.isoformat(), MAX_OBSERVATIONS + 1)
+        args = (row["id"], start.isoformat(), end.isoformat(), max_observations + 1)
         provenance = {"source_url": None, "coverage_updated_at": None}
     else:
         raise AnalyticsError("Only index or equity source observations are supported")
     records = conn.execute(sql, args).fetchall()
-    if len(records) > MAX_OBSERVATIONS:
-        raise AnalyticsError("Window exceeds 10,000 observations; choose a shorter date range")
+    if len(records) > max_observations:
+        raise AnalyticsError(
+            f"Window exceeds {max_observations:,} observations; choose a shorter date range"
+        )
     rows = [(record["session_date"], record["close"]) for record in records]
     hasher = hashlib.sha256()
     # Hash the exact semantic identity and source snapshot, not private URLs or credentials.
@@ -155,6 +160,7 @@ def run_analytics(
     missing_policy: str = "intersection",
     quality_policy: str = "require_complete",
     allow_volatility_returns: bool = False,
+    max_observations: int = MAX_OBSERVATIONS,
     db: Path | None = None,
 ) -> dict:
     """No writes, migrations, network fetches, provider fallback or silent truncation."""
@@ -162,13 +168,21 @@ def run_analytics(
         raise AnalyticsError("Invalid or future analytical date range")
     if quality_policy not in {"require_complete", "allow_unverified"}:
         raise AnalyticsError("Unsupported quality policy")
+    if not 1 <= max_observations <= MAX_OBSERVATIONS:
+        raise AnalyticsError("Invalid analytical source observation limit")
     path = db if db is not None else database_path()
     conn = _read_connection(path)
     if conn is None:
         raise AnalyticsError("No local stored observations are available")
     try:
         identity, rows, provenance = _read_series(
-            conn, kind=kind, code=code, provider=provider, start=start, end=end
+            conn,
+            kind=kind,
+            code=code,
+            provider=provider,
+            start=start,
+            end=end,
+            max_observations=max_observations,
         )
         comparison = None
         other_rows = []
@@ -182,6 +196,7 @@ def run_analytics(
                 provider=comparison_provider,
                 start=start,
                 end=end,
+                max_observations=max_observations,
             )
             codes.append(comparison_code)
         quality = _quality_status(conn, codes)

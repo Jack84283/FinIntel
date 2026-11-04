@@ -16,6 +16,7 @@ from finintel.market_data.index_history_api import router as index_history_route
 from finintel.market_data.membership_api import router as membership_router
 from finintel.market_data.quality_api import router as quality_router
 from finintel.market_data.validation_api import router as validation_router
+from finintel.models.api import router as models_router
 from finintel.settings.api import router as settings_router
 from finintel.storage.api import router as market_data_router
 
@@ -54,6 +55,7 @@ def health() -> HealthResponse:
 
 app.include_router(market_data_router)
 app.include_router(analytics_router)
+app.include_router(models_router)
 app.include_router(validation_router)
 app.include_router(quality_router)
 app.include_router(membership_router)

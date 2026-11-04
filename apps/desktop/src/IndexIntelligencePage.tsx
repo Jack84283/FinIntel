@@ -15,6 +15,7 @@ import { IndexMetricChart, metricCell, metricRows, type ChartMetric } from "./In
 import { IndexBasketPanel } from "./IndexBasketPanel";
 import { ConstituentOverlapPanel } from "./ConstituentOverlapPanel";
 import { ConstituentTrendPanel } from "./ConstituentTrendPanel";
+import { ModelResearchPanel } from "./ModelResearchPanel";
 
 const STORAGE_KEY = "finintel.index-intelligence.v1";
 type Preset = "1Y" | "5Y" | "ALL" | "custom";
@@ -343,6 +344,7 @@ export function IndexIntelligencePage() {
       <IndexBasketPanel catalog={catalog} catalogError={catalogError} />
       <ConstituentOverlapPanel primaryIndex={code} analysisEnd={end} />
       <ConstituentTrendPanel primaryIndex={code} analysisStart={start} analysisEnd={end} />
+      <ModelResearchPanel code={code} start={start} end={end} qualityPolicy={qualityPolicy} />
       <p className="text-xs text-muted-foreground">
         <BarChart3 aria-hidden="true" className="mr-1 inline size-3" />
         {t("Analysis configurations are saved on this device only. No acquisition or corrections are triggered.")}
