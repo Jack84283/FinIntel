@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from finintel.main import app
 from finintel.market_data.membership import load_membership
 from finintel.market_data.membership_trend import constituent_snapshot_trend
+from finintel.storage.db import StorageError
 
 
 def _seed(db):
@@ -140,6 +141,20 @@ def test_source_date_mismatch_is_not_verified(tmp_path):
     assert result["snapshots"][1]["source_as_of"] == "2026-09-30"
     assert result["snapshots"][1]["evidence_status"] == "source_date_mismatch"
     assert result["snapshots"][1]["change_status"] == "indicative_pair"
+
+
+def test_rejects_source_evidence_postdating_claimed_snapshot(tmp_path):
+    db = tmp_path / "trend.sqlite"
+    _seed(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "UPDATE index_membership_snapshots SET source_as_of='2026-10-11' "
+            "WHERE index_code='SP500' AND as_of='2026-10-10'"
+        )
+    with pytest.raises(StorageError, match="postdates"):
+        constituent_snapshot_trend(
+            "SP500", from_as_of="2026-10-01", to_as_of="2026-10-20", db=db
+        )
 
 
 @pytest.mark.parametrize(
