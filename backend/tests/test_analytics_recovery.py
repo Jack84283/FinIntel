@@ -1,6 +1,10 @@
 """Point-in-time recovery-duration reference fixtures for Issue #30."""
 
-from finintel.market_data.analytics import SeriesIdentity, compute_series, validated_observations
+from finintel.market_data.analytics import (
+    SeriesIdentity,
+    compute_series,
+    validated_observations,
+)
 
 
 IDENTITY = SeriesIdentity(
