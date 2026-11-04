@@ -27,7 +27,8 @@ function sample(comparison = false): AnalyticsResult {
   const result: AnalyticsResult = {
     calculation_version: "index-analytics-v2",
     identity, settings: { window_sessions: 20, annualization_sessions: 252,
-      missing_data_policy: "observed_sessions_only", numeric_boundary: "decimal" },
+      missing_data_policy: "observed_sessions_only", numeric_boundary: "decimal",
+      volatility_returns_explicit: false },
     observations: 3, first_session: "2026-10-20", last_session: "2026-10-22",
     metrics_enabled: true, max_drawdown: "-0.1", longest_underwater_observed_sessions: 1,
     longest_completed_recovery_observed_sessions: null,
@@ -79,6 +80,29 @@ function sample(comparison = false): AnalyticsResult {
   }
   return result;
 }
+/** A volatility-level source provides observed levels but no financial returns by default. */
+function vixSample(): AnalyticsResult {
+  const result = sample();
+  result.identity = {
+    ...result.identity, code: "VIX",
+    adjustment: "volatility_index", return_semantics: "volatility_index",
+  };
+  result.source.source_url = "https://fred.stlouisfed.org/series/VIXCLS";
+  result.metrics_enabled = false;
+  result.max_drawdown = null;
+  result.longest_underwater_observed_sessions = null;
+  result.longest_completed_recovery_observed_sessions = null;
+  result.ongoing_drawdown_observed_sessions = null;
+  result.drawdown_episodes = [];
+  result.period_returns = { week: [], month: [], year: [] };
+  result.points = result.points.map(point => ({
+    ...point,
+    simple_return: null, log_return: null, cumulative_return: null, drawdown: null,
+    rolling_volatility_annualized: null, momentum: null, rsi: null,
+  }));
+  return result;
+}
+
 /** Source-price fixtures keep actual trading-session dates within the selected query. */
 function sampleFromPrices(closes: string[]): { result: AnalyticsResult; selection: AnalyticsQuery } {
   const dates = [
@@ -257,6 +281,66 @@ describe("Index Intelligence local analytics API", () => {
     precise.ongoing_drawdown_observed_sessions = null;
     precise.longest_underwater_observed_sessions = 1;
     expect(parseAnalyticsResult(precise, preciseQuery).drawdown_episodes).toHaveLength(1);
+  });
+
+  it("accepts levels but not financial return metrics for default VIX queries", () => {
+    const selection: AnalyticsQuery = { ...query, code: "VIX" };
+    const valid = vixSample();
+    expect(parseAnalyticsResult(valid, selection)).toEqual(valid);
+    // The volatility level can still be normalized and have a moving average.
+    expect(valid.points[1].normalized_100).toBe("110");
+    const withMovingAverage = vixSample();
+    withMovingAverage.points[2].moving_average = "103";
+    expect(parseAnalyticsResult(withMovingAverage, selection)).toEqual(withMovingAverage);
+  });
+
+  it("rejects disabled VIX responses carrying summary, per-session or period returns", () => {
+    const selection: AnalyticsQuery = { ...query, code: "VIX" };
+    const falseDrawdown = vixSample();
+    falseDrawdown.max_drawdown = "-0.5";
+    expect(() => parseAnalyticsResult(falseDrawdown, selection)).toThrow();
+
+    const underwater = vixSample();
+    underwater.longest_underwater_observed_sessions = 1;
+    expect(() => parseAnalyticsResult(underwater, selection)).toThrow();
+
+    for (const field of [
+      "simple_return", "log_return", "cumulative_return", "drawdown",
+      "rolling_volatility_annualized", "momentum", "rsi",
+    ] as const) {
+      const forged = vixSample();
+      forged.points[2][field] = "-0.1";
+      expect(() => parseAnalyticsResult(forged, selection)).toThrow();
+    }
+
+    const periods = vixSample();
+    periods.period_returns.week = [{ session_date: "2026-10-22", return: "-0.1", period: "week" }];
+    expect(() => parseAnalyticsResult(periods, selection)).toThrow();
+  });
+
+  it("rejects unrequested VIX return enablement and inconsistent index identity", () => {
+    const selection: AnalyticsQuery = { ...query, code: "VIX" };
+    const unauthorized = sample();
+    unauthorized.identity = { ...vixSample().identity };
+    // The completed/ongoing episodes are internally consistent, but the desktop
+    // never requested the backend's explicit volatility-return opt-in.
+    expect(() => parseAnalyticsResult(unauthorized, selection)).toThrow();
+
+    const explicitFlag = vixSample();
+    explicitFlag.settings.volatility_returns_explicit = true;
+    expect(() => parseAnalyticsResult(explicitFlag, selection)).toThrow();
+
+    const wrongSemantics = vixSample();
+    wrongSemantics.identity.return_semantics = "price_index";
+    expect(() => parseAnalyticsResult(wrongSemantics, selection)).toThrow();
+
+    const wrongAdjustment = vixSample();
+    wrongAdjustment.identity.adjustment = "price_index";
+    expect(() => parseAnalyticsResult(wrongAdjustment, selection)).toThrow();
+
+    const disabledPriceIndex = vixSample();
+    disabledPriceIndex.identity = { ...sample().identity };
+    expect(() => parseAnalyticsResult(disabledPriceIndex, query)).toThrow();
   });
 
   it("rejects wrong provider, mismatched dates and unsourced/malformed numbers", () => {
