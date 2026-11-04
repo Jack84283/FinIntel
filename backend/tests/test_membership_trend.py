@@ -12,24 +12,40 @@ from finintel.market_data.membership_trend import constituent_snapshot_trend
 
 def _seed(db):
     load_membership(
-        "SP500", "2026-10-01", "verified-oct01",
-        ["AAPL", "MSFT", "NVDA"], expected_count=3,
-        source_kind="verified_public", db=db,
+        "SP500",
+        "2026-10-01",
+        "verified-oct01",
+        ["AAPL", "MSFT", "NVDA"],
+        expected_count=3,
+        source_kind="verified_public",
+        db=db,
     )
     load_membership(
-        "SP500", "2026-10-06", "verified-oct06",
-        ["AAPL", "GOOG", "NVDA"], expected_count=3,
-        source_kind="verified_public", db=db,
+        "SP500",
+        "2026-10-06",
+        "verified-oct06",
+        ["AAPL", "GOOG", "NVDA"],
+        expected_count=3,
+        source_kind="verified_public",
+        db=db,
     )
     load_membership(
-        "SP500", "2026-10-10", "etf-holdings-proxy",
-        ["AAPL", "GOOG"], expected_count=2,
-        source_kind="fund_derived_proxy", db=db,
+        "SP500",
+        "2026-10-10",
+        "etf-holdings-proxy",
+        ["AAPL", "GOOG"],
+        expected_count=2,
+        source_kind="fund_derived_proxy",
+        db=db,
     )
     load_membership(
-        "SP500", "2026-10-20", "incomplete-oct20",
-        ["AAPL"], source_expected_count=3,
-        source_kind="verified_public", db=db,
+        "SP500",
+        "2026-10-20",
+        "incomplete-oct20",
+        ["AAPL"],
+        source_expected_count=3,
+        source_kind="verified_public",
+        db=db,
     )
 
 
@@ -45,7 +61,10 @@ def test_observed_dates_counts_and_sourced_confidence_no_interpolation(tmp_path)
     assert actual["read_only"]
     points = actual["snapshots"]
     assert [p["snapshot_as_of"] for p in points] == [
-        "2026-10-01", "2026-10-06", "2026-10-10", "2026-10-20"
+        "2026-10-01",
+        "2026-10-06",
+        "2026-10-10",
+        "2026-10-20",
     ]
     assert [p["member_count"] for p in points] == [3, 3, 2, 1]
     assert points[0]["added_members"] is None and points[0]["removed_members"] is None
@@ -66,8 +85,12 @@ def test_selection_range_and_paging_use_adjacent_stored_snapshot_not_future(tmp_
     db = tmp_path / "trend.sqlite"
     _seed(db)
     first = constituent_snapshot_trend(
-        "SP500", from_as_of="2026-10-06", to_as_of="2026-10-20",
-        limit=1, offset=0, db=db,
+        "SP500",
+        from_as_of="2026-10-06",
+        to_as_of="2026-10-20",
+        limit=1,
+        offset=0,
+        db=db,
     )
     assert first["total_snapshots"] == 3
     assert first["snapshots"][0]["snapshot_as_of"] == "2026-10-06"
@@ -75,21 +98,32 @@ def test_selection_range_and_paging_use_adjacent_stored_snapshot_not_future(tmp_
     assert first["snapshots"][0]["added_members"] is None
 
     second = constituent_snapshot_trend(
-        "SP500", from_as_of="2026-10-06", to_as_of="2026-10-20",
-        limit=1, offset=1, db=db,
+        "SP500",
+        from_as_of="2026-10-06",
+        to_as_of="2026-10-20",
+        limit=1,
+        offset=1,
+        db=db,
     )
     assert second["snapshots"][0]["previous_snapshot_as_of"] == "2026-10-06"
     assert second["snapshots"][0]["snapshot_as_of"] == "2026-10-10"
-    assert (second["snapshots"][0]["added_members"], second["snapshots"][0]["removed_members"]) == (0, 1)
-    before_future = constituent_snapshot_trend(
-        "SP500", from_as_of="2026-10-01", to_as_of="2026-10-08", db=db,
+    assert (second["snapshots"][0]["added_members"], second["snapshots"][0]["removed_members"]) == (
+        0,
+        1,
     )
-    assert [r["snapshot_as_of"] for r in before_future["snapshots"]] == [
-        "2026-10-01", "2026-10-06"
-    ]
-    assert constituent_snapshot_trend(
-        "SP500", from_as_of="2026-09-01", to_as_of="2026-09-30", db=db
-    )["snapshots"] == []
+    before_future = constituent_snapshot_trend(
+        "SP500",
+        from_as_of="2026-10-01",
+        to_as_of="2026-10-08",
+        db=db,
+    )
+    assert [r["snapshot_as_of"] for r in before_future["snapshots"]] == ["2026-10-01", "2026-10-06"]
+    assert (
+        constituent_snapshot_trend("SP500", from_as_of="2026-09-01", to_as_of="2026-09-30", db=db)[
+            "snapshots"
+        ]
+        == []
+    )
 
 
 def test_source_date_mismatch_is_not_verified(tmp_path):
@@ -108,13 +142,16 @@ def test_source_date_mismatch_is_not_verified(tmp_path):
     assert result["snapshots"][1]["change_status"] == "indicative_pair"
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"code": "VIX", "from_as_of": "2026-10-01", "to_as_of": "2026-10-20"},
-    {"code": "SP500", "from_as_of": "2026-10-21", "to_as_of": "2026-10-20"},
-    {"code": "SP500", "from_as_of": "2026-10-01", "to_as_of": "2026-12-01"},
-    {"code": "SP500", "from_as_of": "2026-10-01", "to_as_of": "2026-10-20", "limit": 101},
-    {"code": "SP500", "from_as_of": "2026-10-01", "to_as_of": "2026-10-20", "offset": -1},
-])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"code": "VIX", "from_as_of": "2026-10-01", "to_as_of": "2026-10-20"},
+        {"code": "SP500", "from_as_of": "2026-10-21", "to_as_of": "2026-10-20"},
+        {"code": "SP500", "from_as_of": "2026-10-01", "to_as_of": "2026-12-01"},
+        {"code": "SP500", "from_as_of": "2026-10-01", "to_as_of": "2026-10-20", "limit": 101},
+        {"code": "SP500", "from_as_of": "2026-10-01", "to_as_of": "2026-10-20", "offset": -1},
+    ],
+)
 def test_invalid_dates_codes_and_bounds_fail_closed(tmp_path, kwargs):
     db = tmp_path / "absent.sqlite"
     with pytest.raises(ValueError):
@@ -127,8 +164,11 @@ def test_api_does_not_create_absent_db_and_rejects_invalid_queries(tmp_path, mon
     _seed(db)
     monkeypatch.setenv("FININTEL_DB_PATH", str(db))
     params = {
-        "code": "SP500", "from_as_of": "2026-10-01",
-        "to_as_of": "2026-10-20", "limit": 2, "offset": 1,
+        "code": "SP500",
+        "from_as_of": "2026-10-01",
+        "to_as_of": "2026-10-20",
+        "limit": 2,
+        "offset": 1,
     }
     with TestClient(app) as client:
         response = client.get("/api/v1/market-data/indexes/snapshot-trend", params=params)
