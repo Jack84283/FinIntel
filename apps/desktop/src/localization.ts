@@ -108,6 +108,11 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Longest completed recovery": "最长已完成回升时间",
+  "Open drawdown duration": "未恢复回撤持续时间",
+  "Observed session intervals": "已观测交易日间隔",
+  "Unrecovered observed sessions": "尚未恢复的已观测交易日",
+  "Recovery is the first observed close at or above its prior peak. Open drawdowns have no known recovery date; durations exclude non-observed days.": "回升指收盘价首次达到或超过此前峰值；尚未恢复的回撤没有已知回升日期，持续时间不包含未观测日期。",
   "Underlying source as-of date": "底层来源数据截至日期",
   "Select constituent index": "请选择成分股指数",
   "Select a constituent index to begin the overlap comparison.": "请选择一个成分股指数以开始重叠比较。",

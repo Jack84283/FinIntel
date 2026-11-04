@@ -54,6 +54,18 @@ class ComparedPoint(BaseModel):
     rolling_tracking_error_annualized: str | None
 
 
+class DrawdownEpisode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["recovered", "ongoing"]
+    peak_session_date: str
+    trough_session_date: str
+    recovery_session_date: str | None
+    trough_drawdown: str
+    underwater_observed_sessions: int
+    peak_to_recovery_observed_sessions: int | None
+    trough_to_recovery_observed_sessions: int | None
+
+
 class PeriodReturn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_date: str
@@ -90,6 +102,9 @@ class AnalyticsResponse(BaseModel):
     metrics_enabled: bool
     max_drawdown: str | None
     longest_underwater_observed_sessions: int | None
+    longest_completed_recovery_observed_sessions: int | None
+    ongoing_drawdown_observed_sessions: int | None
+    drawdown_episodes: list[DrawdownEpisode]
     period_returns: dict[str, list[PeriodReturn]]
     points: list[AnalyticsPoint]
     request: dict[str, str]

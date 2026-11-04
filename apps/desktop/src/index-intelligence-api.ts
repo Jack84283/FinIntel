@@ -26,6 +26,16 @@ export type AnalyticsPoint = {
   momentum: string | null;
   rsi: string | null;
 };
+export type DrawdownEpisode = {
+  status: "recovered" | "ongoing";
+  peak_session_date: string;
+  trough_session_date: string;
+  recovery_session_date: string | null;
+  trough_drawdown: string;
+  underwater_observed_sessions: number;
+  peak_to_recovery_observed_sessions: number | null;
+  trough_to_recovery_observed_sessions: number | null;
+};
 export type ComparisonPoint = {
   session_date: string;
   left_normalized_100: string;
@@ -50,13 +60,17 @@ export type AnalyticsIdentity = {
 export type AnalyticsResult = {
   calculation_version: string;
   identity: AnalyticsIdentity;
-  settings: { window_sessions: number; annualization_sessions: number; missing_data_policy: string; numeric_boundary: string };
+  settings: { window_sessions: number; annualization_sessions: number; missing_data_policy: string;
+    numeric_boundary: string; volatility_returns_explicit: boolean };
   observations: number;
   first_session: string | null;
   last_session: string | null;
   metrics_enabled: boolean;
   max_drawdown: string | null;
   longest_underwater_observed_sessions: number | null;
+  longest_completed_recovery_observed_sessions: number | null;
+  ongoing_drawdown_observed_sessions: number | null;
+  drawdown_episodes: DrawdownEpisode[];
   period_returns: Record<string, { session_date: string; return: string; period: string }[]>;
   points: AnalyticsPoint[];
   request: { start: string; end: string };
@@ -117,15 +131,119 @@ function validPoints(points: unknown, code: string, comparison = false): boolean
   }
   return !!code;
 }
+/** Compare exact, positive Decimal close strings before any binary64 conversion.
+ * Backend prices are formatted as plain decimals; using Number comparisons here
+ * would collapse distinct high-precision peaks/troughs into the same float.
+ */
+function decimalClose(value: unknown): [string, string] | null {
+  if (typeof value !== "string" || !/^\d+(?:\.\d+)?$/.test(value) ||
+      !Number.isFinite(Number(value)) || Number(value) <= 0) return null;
+  const [whole, fraction = ""] = value.split(".");
+  return [whole.replace(/^0+(?=\d)/, ""), fraction.replace(/0+$/, "")];
+}
+function compareDecimalCloses(left: [string, string], right: [string, string]): number {
+  if (left[0].length !== right[0].length) return left[0].length > right[0].length ? 1 : -1;
+  if (left[0] !== right[0]) return left[0] > right[0] ? 1 : -1;
+  const digits = Math.max(left[1].length, right[1].length);
+  const a = left[1].padEnd(digits, "0"), b = right[1].padEnd(digits, "0");
+  return a === b ? 0 : a > b ? 1 : -1;
+}
+
+/** Independently reconstruct every episode, including omitted or ongoing drawdowns. */
+export function validRecoveryEpisodes(
+  payload: unknown, rawPoints: unknown, metricsEnabled: boolean,
+): boolean {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
+      !Array.isArray(rawPoints)) return false;
+  const data = payload as Record<string, unknown>;
+  if (!Array.isArray(data.drawdown_episodes) ||
+      data.drawdown_episodes.length > rawPoints.length) return false;
+  if (!metricsEnabled) {
+    // A disabled volatility-level series may still expose closes, normalization
+    // and moving averages, but it must never carry financial return metrics.
+    const periods = data.period_returns;
+    const returnOnlyFields = [
+      "simple_return", "log_return", "cumulative_return", "drawdown",
+      "rolling_volatility_annualized", "momentum", "rsi",
+    ];
+    return data.drawdown_episodes.length === 0 &&
+      data.max_drawdown === null &&
+      data.longest_underwater_observed_sessions === null &&
+      data.longest_completed_recovery_observed_sessions === null &&
+      data.ongoing_drawdown_observed_sessions === null &&
+      !!periods && typeof periods === "object" && !Array.isArray(periods) &&
+      ["week", "month", "year"].every(period =>
+        Array.isArray((periods as Record<string, unknown>)[period]) &&
+        ((periods as Record<string, unknown>)[period] as unknown[]).length === 0
+      ) &&
+      Object.keys(periods).every(period => ["week", "month", "year"].includes(period)) &&
+      rawPoints.every(point => returnOnlyFields.every(field => record(point)[field] === null));
+  }
+  const points = rawPoints.map(record);
+  const closes = points.map(p => decimalClose(p.close));
+  if (closes.some(close => close === null)) return false;
+  const windows: { peak: number; trough: number; recovery: number | null }[] = [];
+  let peak = 0, trough = 0;
+  for (let index = 1; index < closes.length; index++) {
+    if (compareDecimalCloses(closes[index]!, closes[peak]!) >= 0) {
+      if (trough > peak) windows.push({ peak, trough, recovery: index });
+      peak = trough = index;
+    } else if (trough === peak || compareDecimalCloses(closes[index]!, closes[trough]!) < 0) {
+      trough = index;
+    }
+  }
+  if (trough > peak) windows.push({ peak, trough, recovery: null });
+  if (windows.length !== data.drawdown_episodes.length) return false;
+
+  let longestCompleted: number | null = null;
+  let ongoing: number | null = null;
+  let longestUnderwater = 0;
+  for (let i = 0; i < windows.length; i++) {
+    const expected = windows[i];
+    const episode = record(data.drawdown_episodes[i]);
+    const { peak: high, trough: low, recovery } = expected;
+    if (episode.status !== (recovery === null ? "ongoing" : "recovered") ||
+        episode.peak_session_date !== points[high].session_date ||
+        episode.trough_session_date !== points[low].session_date ||
+        episode.recovery_session_date !== (recovery === null ? null : points[recovery].session_date) ||
+        typeof episode.trough_drawdown !== "string" || !numeric(episode.trough_drawdown) ||
+        Number(episode.trough_drawdown) >= 0 ||
+        Math.abs(Number(episode.trough_drawdown) -
+          (Number(points[low].close) / Number(points[high].close) - 1)) > 1e-10) return false;
+    const underwater = (recovery ?? points.length) - high - 1;
+    if (episode.underwater_observed_sessions !== underwater) return false;
+    longestUnderwater = Math.max(longestUnderwater, underwater);
+    if (recovery === null) {
+      if (episode.peak_to_recovery_observed_sessions !== null ||
+          episode.trough_to_recovery_observed_sessions !== null) return false;
+      ongoing = underwater;
+    } else {
+      const duration = recovery - high;
+      if (episode.peak_to_recovery_observed_sessions !== duration ||
+          episode.trough_to_recovery_observed_sessions !== recovery - low) return false;
+      longestCompleted = Math.max(longestCompleted ?? 0, duration);
+    }
+  }
+  return data.longest_completed_recovery_observed_sessions === longestCompleted &&
+    data.ongoing_drawdown_observed_sessions === ongoing &&
+    data.longest_underwater_observed_sessions === (points.length ? longestUnderwater : null);
+}
+
 /** Validate provenance, point chronology and semantic identity before any visualization. */
 export function parseAnalyticsResult(value: unknown, query: AnalyticsQuery): AnalyticsResult {
   const v = record(value), identity = record(v.identity), source = record(v.source);
   const quality = record(v.quality), settings = record(v.settings);
   if (identity.code !== query.code || identity.instrument_kind !== "index" || identity.provider !== "fred" ||
-    identity.units !== "index_points" || !["price_index", "volatility_index"].includes(String(identity.return_semantics)) ||
+    identity.units !== "index_points" ||
+    identity.adjustment !== (query.code === "VIX" ? "volatility_index" : "price_index") ||
+    identity.return_semantics !== (query.code === "VIX" ? "volatility_index" : "price_index") ||
     typeof v.calculation_version !== "string" || !/^index-analytics-v\d+$/.test(v.calculation_version) ||
     !Number.isSafeInteger(v.observations) || (v.observations as number) > 10000 ||
     !Array.isArray(v.points) || v.observations !== v.points.length || !validPoints(v.points, query.code) ||
+    typeof v.metrics_enabled !== "boolean" ||
+    v.metrics_enabled !== (query.code !== "VIX") ||
+    settings.volatility_returns_explicit !== false ||
+    !validRecoveryEpisodes(v, v.points, v.metrics_enabled as boolean) ||
     !scalar(v.first_session) || !scalar(v.last_session) ||
     typeof source.snapshot_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(source.snapshot_sha256) ||
     typeof quality.quality_verified !== "boolean" || typeof quality.status !== "string" ||

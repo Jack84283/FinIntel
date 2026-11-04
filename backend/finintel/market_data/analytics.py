@@ -13,7 +13,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation, localcontext
 from statistics import mean, stdev
 
-CALCULATION_VERSION = "index-analytics-v1"
+CALCULATION_VERSION = "index-analytics-v2"
 MAX_OBSERVATIONS = 10_000
 ALLOWED_WINDOWS = (5, 10, 14, 20, 21, 50, 63, 126, 200, 252)
 ANNUAL_SESSIONS = 252
@@ -118,6 +118,63 @@ def _period_returns(points: list[Observation], period: str) -> list[dict]:
     ]
 
 
+def _drawdown_recovery(
+    observations: list[Observation],
+) -> tuple[list[dict], int | None, int | None]:
+    """Peak/trough/recovery from observed sessions only, with censored open episodes.
+
+    The first observed close at or above a prior peak completes recovery.
+    Right-censored episodes do not fabricate a future recovery duration.
+    """
+    if len(observations) < 2:
+        return [], None, None
+    episodes: list[dict] = []
+    peak_index = trough_index = 0
+    longest_completed: int | None = None
+    for index in range(1, len(observations)):
+        level = observations[index].close
+        peak = observations[peak_index].close
+        if level >= peak:
+            if trough_index > peak_index:
+                duration = index - peak_index
+                episodes.append(
+                    {
+                        "status": "recovered",
+                        "peak_session_date": observations[peak_index].session_date.isoformat(),
+                        "trough_session_date": observations[trough_index].session_date.isoformat(),
+                        "recovery_session_date": observations[index].session_date.isoformat(),
+                        "trough_drawdown": _decimal(
+                            _simple(peak, observations[trough_index].close)
+                        ),
+                        "underwater_observed_sessions": duration - 1,
+                        "peak_to_recovery_observed_sessions": duration,
+                        "trough_to_recovery_observed_sessions": index - trough_index,
+                    }
+                )
+                longest_completed = max(longest_completed or 0, duration)
+            peak_index = trough_index = index
+        elif trough_index == peak_index or level < observations[trough_index].close:
+            trough_index = index
+    ongoing: int | None = None
+    if trough_index > peak_index:
+        ongoing = len(observations) - 1 - peak_index
+        episodes.append(
+            {
+                "status": "ongoing",
+                "peak_session_date": observations[peak_index].session_date.isoformat(),
+                "trough_session_date": observations[trough_index].session_date.isoformat(),
+                "recovery_session_date": None,
+                "trough_drawdown": _decimal(
+                    _simple(observations[peak_index].close, observations[trough_index].close)
+                ),
+                "underwater_observed_sessions": ongoing,
+                "peak_to_recovery_observed_sessions": None,
+                "trough_to_recovery_observed_sessions": None,
+            }
+        )
+    return episodes, longest_completed, ongoing
+
+
 def compute_series(
     identity: SeriesIdentity,
     observations: list[Observation],
@@ -199,6 +256,9 @@ def compute_series(
         if allowed
         else {"week": [], "month": [], "year": []}
     )
+    episodes, longest_recovery, ongoing_duration = (
+        _drawdown_recovery(observations) if allowed else ([], None, None)
+    )
     return {
         "calculation_version": CALCULATION_VERSION,
         "identity": identity.__dict__,
@@ -216,6 +276,9 @@ def compute_series(
         "metrics_enabled": allowed,
         "max_drawdown": _decimal(worst) if allowed and points else None,
         "longest_underwater_observed_sessions": longest_unrecovered if allowed and points else None,
+        "longest_completed_recovery_observed_sessions": longest_recovery,
+        "ongoing_drawdown_observed_sessions": ongoing_duration,
+        "drawdown_episodes": episodes,
         "period_returns": period,
         "points": points,
     }

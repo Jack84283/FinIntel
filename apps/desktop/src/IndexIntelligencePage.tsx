@@ -258,14 +258,27 @@ export function IndexIntelligencePage() {
         {result.unverified_data && <p role="status" className="text-sm text-muted-foreground">
           {t("Unverified observations are displayed for research only. Candidate findings are not confirmed defects.")}
         </p>}
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
           <Card><CardHeader className="pb-1"><CardDescription>{t("Observations")}</CardDescription>
             <CardTitle className="text-xl tabular-nums">{counts.toLocaleString(language)}</CardTitle></CardHeader></Card>
           <Card><CardHeader className="pb-1"><CardDescription>{t("Last observed session")}</CardDescription>
             <CardTitle className="text-base tabular-nums">{result.last_session ?? "—"}</CardTitle></CardHeader></Card>
           <Card><CardHeader className="pb-1"><CardDescription>{t("Maximum drawdown")}</CardDescription>
             <CardTitle className="text-xl tabular-nums">{result.max_drawdown === null ? "—" : formatValue(String(Number(result.max_drawdown) * 100)) + "%"}</CardTitle></CardHeader></Card>
+          <Card><CardHeader className="pb-1"><CardDescription>{t("Longest completed recovery")}</CardDescription>
+            <CardTitle className="text-xl tabular-nums">{result.longest_completed_recovery_observed_sessions === null
+              ? "—" : result.longest_completed_recovery_observed_sessions.toLocaleString(language)}</CardTitle>
+            <p className="text-xs text-muted-foreground">{t("Observed session intervals")}</p>
+          </CardHeader></Card>
+          <Card><CardHeader className="pb-1"><CardDescription>{t("Open drawdown duration")}</CardDescription>
+            <CardTitle className="text-xl tabular-nums">{result.ongoing_drawdown_observed_sessions === null
+              ? "—" : result.ongoing_drawdown_observed_sessions.toLocaleString(language)}</CardTitle>
+            <p className="text-xs text-muted-foreground">{t("Unrecovered observed sessions")}</p>
+          </CardHeader></Card>
         </div>
+        {result.metrics_enabled && <p className="text-xs text-muted-foreground">
+          {t("Recovery is the first observed close at or above its prior peak. Open drawdowns have no known recovery date; durations exclude non-observed days.")}
+        </p>}
         <Card>
           <CardHeader className="pb-1"><CardTitle>{t("Historical comparison")}</CardTitle>
             <CardDescription>{t("Charts use returned calculations, with no synthetic, interpolated or merged observations.")}</CardDescription></CardHeader>
