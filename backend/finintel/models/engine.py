@@ -99,7 +99,9 @@ def evaluate_builtin_indicator(
     if len(rows) > MAX_MODEL_OBSERVATIONS:
         raise AnalyticsError("Model limit exceeds 2,000 observations; narrow the date range")
     if len(rows) < params.slow_window + 1:
-        raise AnalyticsError("Insufficient observed sessions for slow window plus signal evaluation")
+        raise AnalyticsError(
+            "Insufficient observed sessions for slow window plus signal evaluation"
+        )
 
     levels = [Decimal(row["close"]) for row in rows]
     output = []
@@ -107,8 +109,10 @@ def evaluate_builtin_indicator(
         fast = _sma(levels, index, params.fast_window) if index + 1 >= params.fast_window else None
         slow = _sma(levels, index, params.slow_window) if index + 1 >= params.slow_window else None
         signal = (
-            "long" if Decimal(fast) > Decimal(slow) else "flat"
-        ) if fast is not None and slow is not None else None
+            ("long" if Decimal(fast) > Decimal(slow) else "flat")
+            if fast is not None and slow is not None
+            else None
+        )
         output.append(
             {
                 "session_date": row["session_date"],
@@ -148,8 +152,9 @@ def evaluate_builtin_indicator(
         "observations": len(rows),
         "points": output,
         "quality_warning": (
-            None if source["quality"]["quality_verified"] else
-            "Unverified data: research-only results, not verified for backtesting"
+            None
+            if source["quality"]["quality_verified"]
+            else "Unverified data: research-only results, not verified for backtesting"
         ),
         "read_only": True,
         "no_network": True,
