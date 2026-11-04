@@ -6,7 +6,6 @@ from finintel.market_data.analytics import (
     validated_observations,
 )
 
-
 IDENTITY = SeriesIdentity(
     "index", "SP500", "fred", "price_index", "price_index", "daily", "index_points"
 )
