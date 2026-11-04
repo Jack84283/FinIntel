@@ -18,12 +18,11 @@ from finintel.models.registry import (
     IMPLEMENTATION_REVISION,
     MAX_MODEL_OBSERVATIONS,
     MODEL_ID,
-    model_registry,
     MODEL_VERSION,
     ModelParameters,
+    model_registry,
 )
 from finintel.storage.db import _write_connection
-
 
 START = date(2026, 9, 1)
 
