@@ -135,10 +135,10 @@ function validPoints(points: unknown, code: string, comparison = false): boolean
  * would collapse distinct high-precision peaks/troughs into the same float.
  */
 function decimalClose(value: unknown): [string, string] | null {
-  if (typeof value !== "string" || !/^\\d+(?:\\.\\d+)?$/.test(value) ||
+  if (typeof value !== "string" || !/^\d+(?:\.\d+)?$/.test(value) ||
       !Number.isFinite(Number(value)) || Number(value) <= 0) return null;
   const [whole, fraction = ""] = value.split(".");
-  return [whole.replace(/^0+(?=\\d)/, ""), fraction.replace(/0+$/, "")];
+  return [whole.replace(/^0+(?=\d)/, ""), fraction.replace(/0+$/, "")];
 }
 function compareDecimalCloses(left: [string, string], right: [string, string]): number {
   if (left[0].length !== right[0].length) return left[0].length > right[0].length ? 1 : -1;
