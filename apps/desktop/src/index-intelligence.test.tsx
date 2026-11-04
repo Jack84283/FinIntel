@@ -79,6 +79,23 @@ function sample(comparison = false): AnalyticsResult {
   }
   return result;
 }
+/** Source-price fixtures keep actual trading-session dates within the selected query. */
+function sampleFromPrices(closes: string[]): { result: AnalyticsResult; selection: AnalyticsQuery } {
+  const dates = [
+    "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15",
+    "2026-10-16", "2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22",
+  ].slice(-closes.length);
+  const result = sample();
+  result.points = closes.map((close, index) => ({
+    ...result.points[0], session_date: dates[index], close,
+  }));
+  result.observations = closes.length;
+  result.first_session = dates[0];
+  result.last_session = dates[dates.length - 1];
+  result.request = { start: dates[0], end: dates[dates.length - 1] };
+  return { result, selection: { ...query, ...result.request } };
+}
+
 beforeEach(() => {
   native.enabled = false;
   native.invoke.mockReset();
@@ -150,6 +167,96 @@ describe("Index Intelligence local analytics API", () => {
     invalidOverall.longest_completed_recovery_observed_sessions = 3;
     expect(() => parseAnalyticsResult(invalidOverall, query)).toThrow();
     expect(parseAnalyticsResult(sample(), query).ongoing_drawdown_observed_sessions).toBe(1);
+  });
+
+  it("rejects omitted open or completed recovery episodes even with consistent null summaries", () => {
+    const missingOpen = sample();
+    missingOpen.drawdown_episodes = [];
+    missingOpen.longest_completed_recovery_observed_sessions = null;
+    missingOpen.ongoing_drawdown_observed_sessions = null;
+    expect(() => parseAnalyticsResult(missingOpen, query)).toThrow();
+
+    const { result: missingCompleted, selection } = sampleFromPrices(["100", "120", "110", "120"]);
+    missingCompleted.drawdown_episodes = [];
+    missingCompleted.longest_completed_recovery_observed_sessions = null;
+    missingCompleted.ongoing_drawdown_observed_sessions = null;
+    expect(() => parseAnalyticsResult(missingCompleted, selection)).toThrow();
+  });
+
+  it("rejects fabricated local highs and shifted trough dates despite plausible durations", () => {
+    const { result: forged, selection } = sampleFromPrices(
+      ["100", "120", "110", "113", "100", "105", "115"]
+    );
+    const d = forged.points.map(p => p.session_date);
+    // The earlier high is 120 and is never recovered, but a false 113 high
+    // produces a self-consistent 100 -> 115 'completed recovery'.
+    forged.drawdown_episodes = [{
+      status: "recovered",
+      peak_session_date: d[3], trough_session_date: d[4], recovery_session_date: d[6],
+      trough_drawdown: String(100 / 113 - 1),
+      underwater_observed_sessions: 2,
+      peak_to_recovery_observed_sessions: 3,
+      trough_to_recovery_observed_sessions: 2,
+    }];
+    forged.longest_completed_recovery_observed_sessions = 3;
+    forged.ongoing_drawdown_observed_sessions = null;
+    forged.longest_underwater_observed_sessions = 2;
+    expect(() => parseAnalyticsResult(forged, selection)).toThrow();
+
+    const { result: shifted, selection: shiftedQuery } = sampleFromPrices(
+      ["100", "120", "110", "108", "115", "120"]
+    );
+    const days = shifted.points.map(p => p.session_date);
+    shifted.drawdown_episodes = [{
+      status: "recovered",
+      peak_session_date: days[1], trough_session_date: days[2],
+      recovery_session_date: days[5], trough_drawdown: String(110 / 120 - 1),
+      underwater_observed_sessions: 3, peak_to_recovery_observed_sessions: 4,
+      trough_to_recovery_observed_sessions: 3,
+    }];
+    shifted.longest_completed_recovery_observed_sessions = 4;
+    shifted.ongoing_drawdown_observed_sessions = null;
+    shifted.longest_underwater_observed_sessions = 3;
+    expect(() => parseAnalyticsResult(shifted, shiftedQuery)).toThrow();
+  });
+
+  it("accepts complete tied-peak episodes and sub-float-precision Decimal drawdowns", () => {
+    const { result: complete, selection } = sampleFromPrices(["100", "120", "110", "120", "118"]);
+    const days = complete.points.map(p => p.session_date);
+    complete.drawdown_episodes = [
+      {
+        status: "recovered", peak_session_date: days[1], trough_session_date: days[2],
+        recovery_session_date: days[3], trough_drawdown: String(110 / 120 - 1),
+        underwater_observed_sessions: 1, peak_to_recovery_observed_sessions: 2,
+        trough_to_recovery_observed_sessions: 1,
+      },
+      {
+        status: "ongoing", peak_session_date: days[3], trough_session_date: days[4],
+        recovery_session_date: null, trough_drawdown: String(118 / 120 - 1),
+        underwater_observed_sessions: 1, peak_to_recovery_observed_sessions: null,
+        trough_to_recovery_observed_sessions: null,
+      },
+    ];
+    complete.longest_completed_recovery_observed_sessions = 2;
+    complete.ongoing_drawdown_observed_sessions = 1;
+    complete.longest_underwater_observed_sessions = 1;
+    expect(parseAnalyticsResult(complete, selection).drawdown_episodes).toHaveLength(2);
+
+    const high = "100.0000000000000000000001";
+    const { result: precise, selection: preciseQuery } = sampleFromPrices([high, "100", high]);
+    const actualDates = precise.points.map(p => p.session_date);
+    // All three closes round to 100 as a JS Number, but differ as Decimal.
+    precise.drawdown_episodes = [{
+      status: "recovered", peak_session_date: actualDates[0],
+      trough_session_date: actualDates[1], recovery_session_date: actualDates[2],
+      trough_drawdown: "-0.000000000000000000000001",
+      underwater_observed_sessions: 1, peak_to_recovery_observed_sessions: 2,
+      trough_to_recovery_observed_sessions: 1,
+    }];
+    precise.longest_completed_recovery_observed_sessions = 2;
+    precise.ongoing_drawdown_observed_sessions = null;
+    precise.longest_underwater_observed_sessions = 1;
+    expect(parseAnalyticsResult(precise, preciseQuery).drawdown_episodes).toHaveLength(1);
   });
 
   it("rejects wrong provider, mismatched dates and unsourced/malformed numbers", () => {
