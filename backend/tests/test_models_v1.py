@@ -216,9 +216,10 @@ def test_exactly_2000_observations_allowed_without_truncation(tmp_path):
         end=origin + timedelta(days=MAX_MODEL_OBSERVATIONS - 1),
     )
     assert result["observations"] == MAX_MODEL_OBSERVATIONS
-    assert result["points"][-1]["session_date"] == (
-        origin + timedelta(days=MAX_MODEL_OBSERVATIONS - 1)
-    ).isoformat()
+    assert (
+        result["points"][-1]["session_date"]
+        == (origin + timedelta(days=MAX_MODEL_OBSERVATIONS - 1)).isoformat()
+    )
 
 
 def test_managed_desktop_api_validation_and_response_contract(tmp_path, monkeypatch):
