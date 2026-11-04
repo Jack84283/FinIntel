@@ -18,9 +18,9 @@ from finintel.models.registry import (
     IMPLEMENTATION_REVISION,
     MAX_MODEL_OBSERVATIONS,
     MODEL_ID,
+    model_registry,
     MODEL_VERSION,
     ModelParameters,
-    model_registry,
 )
 from finintel.storage.db import _write_connection
 
@@ -130,7 +130,7 @@ def test_prefix_invariance_next_session_only_and_exact_decimal_values(tmp_path):
             "WHERE index_code='SP500' AND session_date='2026-09-01'"
         )
     precision = _evaluate(db, count=6, parameters=params)
-    assert Decimal(precision["points"][2]["slow_sma"]) > Decimal("102")
+    assert Decimal(precision["points"][2]["slow_sma"]) > Decimal(102)
 
 
 def test_changed_revision_and_quality_policy_fail_closed(tmp_path):
