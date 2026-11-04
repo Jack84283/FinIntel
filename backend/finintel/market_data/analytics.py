@@ -13,7 +13,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation, localcontext
 from statistics import mean, stdev
 
-CALCULATION_VERSION = "index-analytics-v1"
+CALCULATION_VERSION = "index-analytics-v2"
 MAX_OBSERVATIONS = 10_000
 ALLOWED_WINDOWS = (5, 10, 14, 20, 21, 50, 63, 126, 200, 252)
 ANNUAL_SESSIONS = 252
