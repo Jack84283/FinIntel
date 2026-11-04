@@ -17,7 +17,7 @@ model: `builtin.sma_crossover` version `1.0.0`, implementation revision
   sources, and historical constituent assumptions are not promoted to valid
   financial returns. Member history is not used.
 - At least `slow_window + 1` actual observations and at most 2,000
-  observations per evaluation. No silent truncation.
+  observations per evaluation, enforced at the SQL source-query boundary before any\n  general analytics computation. No silent truncation.
 - A `long` / `flat` *research signal* is calculated after each observed
   close where a complete trailing slow SMA exists. A signal cannot be used as
   an order filled at that same close. Nothing forecasts future prices.
@@ -53,6 +53,15 @@ Results capture:
   `output_sha256` over all chronologically ordered signals. The separate
   `evaluated_at_utc` audit timestamp is intentionally excluded from both
   hashes, so an identical source/version/parameter request is reproducible.
+
+The desktop independently recomputes each reported trailing SMA with
+28-significant-digit decimal, ties-to-even rounding and rejects discrepancies.
+Before displaying results it recomputes SHA-256 from Python-compatible sorted,
+compact canonical JSON for the complete output array and complete lineage.
+A malformed, mismatched or unverifiable digest fails closed. The source
+snapshot hash itself contains provider retrieval/revision metadata not exposed
+to the UI and is therefore a *server-supplied lineage identity*, not a
+client-reconstructed source-file checksum.
 
 The desktop shows an expandable local research panel, parameter selectors,
 read-only latest-25 signal grid and source hashes. It uses explicit button
