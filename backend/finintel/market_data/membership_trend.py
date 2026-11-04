@@ -112,6 +112,8 @@ def constituent_snapshot_trend(
             record = _latest(conn, code, day)
             if record is None or record["as_of"] != day:
                 raise StorageError("Dated membership snapshot became unavailable")
+            if record["source_as_of"] is not None and record["source_as_of"] > day:
+                raise StorageError("Source evidence postdates claimed membership snapshot")
             status = _evidence_status(record)
             added: int | None = None
             removed: int | None = None
