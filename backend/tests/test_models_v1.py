@@ -192,7 +192,7 @@ def test_over_limit_rejected_before_analytics_computation(tmp_path, monkeypatch)
     db = tmp_path / "cap.sqlite"
     origin = date(2020, 1, 1)
     _seed(db, count=MAX_MODEL_OBSERVATIONS + 1, step=0, first_date=origin)
-    import finintel.market_data.analytics_store as analytics_store
+    from finintel.market_data import analytics_store
 
     def must_not_compute(*_args, **_kwargs):
         pytest.fail("Expensive general-series analytics ran before source cap validation")
