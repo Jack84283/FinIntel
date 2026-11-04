@@ -25,7 +25,7 @@ function sample(comparison = false): AnalyticsResult {
     adjustment: "price_index", return_semantics: "price_index", frequency: "daily", units: "index_points",
   };
   const result: AnalyticsResult = {
-    calculation_version: "index-analytics-v1",
+    calculation_version: "index-analytics-v2",
     identity, settings: { window_sessions: 20, annualization_sessions: 252,
       missing_data_policy: "observed_sessions_only", numeric_boundary: "decimal" },
     observations: 3, first_session: "2026-10-20", last_session: "2026-10-22",
@@ -173,6 +173,8 @@ describe("Index Intelligence UI and exact chart/grid values", () => {
     expect(markup).not.toContain("Stock or ETF symbol");
     expect(translate("zh-CN", "Index Intelligence")).not.toBe("Index Intelligence");
     expect(translate("zh-CN", "Quality verified")).not.toBe("Quality verified");
+    expect(translate("zh-CN", "Longest completed recovery")).not.toBe("Longest completed recovery");
+    expect(translate("zh-CN", "Open drawdown duration")).not.toBe("Open drawdown duration");
   });
 
   it("uses identical backend cells in the comparison chart and historical grid", () => {
