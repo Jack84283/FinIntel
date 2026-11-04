@@ -79,6 +79,7 @@ export function parseTrendResult(payload: unknown, query: TrendQuery): TrendResu
       (prior !== null && (p.snapshot_as_of as string) <= (prior.snapshot_as_of as string)) ||
       typeof p.source !== "string" || !p.source.trim() ||
       !isDateOrNull(p.source_as_of) ||
+      (p.source_as_of !== null && (p.source_as_of as string) > (p.snapshot_as_of as string)) ||
       !["official_licensed", "verified_public", "fund_derived_proxy", "unknown"].includes(String(p.source_kind)) ||
       !["complete", "incomplete", "unknown"].includes(String(p.validation_status)) ||
       !["available", "incomplete", "proxy_only", "unverified", "not_imported"].includes(String(p.availability_status)) ||
