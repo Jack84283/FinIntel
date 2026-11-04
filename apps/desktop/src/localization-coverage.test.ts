@@ -7,7 +7,7 @@ const screens = [
   "App.tsx", "AcquisitionCard.tsx", "ActionHistoryPage.tsx", "DataAcquisitionPage.tsx", "DailyAcquisitionPanel.tsx",
   "DatabaseBackupCard.tsx",
   "TechnicalIndicatorsCard.tsx", "IndexHistoryCard.tsx",
-  "DataValidationPage.tsx", "DataQualityPage.tsx", "IndexMembershipPage.tsx", "IndexIntelligencePage.tsx", "IndexIntelligenceChart.tsx", "IndexBasketPanel.tsx", "ConstituentOverlapPanel.tsx", "ConstituentTrendPanel.tsx", "MarketExplorer.tsx",
+  "DataValidationPage.tsx", "DataQualityPage.tsx", "IndexMembershipPage.tsx", "IndexIntelligencePage.tsx", "IndexIntelligenceChart.tsx", "IndexBasketPanel.tsx", "ConstituentOverlapPanel.tsx", "ConstituentTrendPanel.tsx", "ModelResearchPanel.tsx", "MarketExplorer.tsx",
   "PreferencesPage.tsx", "ProviderCredentialsCard.tsx", "SymbolSelector.tsx",
   "components/MarketDatePicker.tsx",
 ];
