@@ -76,7 +76,7 @@ export function parseTrendResult(payload: unknown, query: TrendQuery): TrendResu
     const p = item(response.snapshots[i]);
     if (typeof p.snapshot_as_of !== "string" || !validOverlapDate(p.snapshot_as_of) ||
       p.snapshot_as_of < query.fromAsOf || p.snapshot_as_of > query.toAsOf ||
-      (prior !== null && p.snapshot_as_of <= prior.snapshot_as_of!) ||
+      (prior !== null && (p.snapshot_as_of as string) <= (prior.snapshot_as_of as string)) ||
       typeof p.source !== "string" || !p.source.trim() ||
       !isDateOrNull(p.source_as_of) ||
       !["official_licensed", "verified_public", "fund_derived_proxy", "unknown"].includes(String(p.source_kind)) ||
@@ -87,7 +87,7 @@ export function parseTrendResult(payload: unknown, query: TrendQuery): TrendResu
       !statuses.includes(p.evidence_status as TrendEvidence) ||
       p.evidence_status !== actualEvidence(p) ||
       !isDateOrNull(p.previous_snapshot_as_of) ||
-      (p.previous_snapshot_as_of !== null && p.previous_snapshot_as_of >= p.snapshot_as_of) ||
+      (p.previous_snapshot_as_of !== null && (p.previous_snapshot_as_of as string) >= (p.snapshot_as_of as string)) ||
       !(p.previous_evidence_status === null || statuses.includes(p.previous_evidence_status as TrendEvidence)) ||
       !nullableCount(p.added_members) || !nullableCount(p.removed_members) ||
       !["first_observed", "verified_pair", "indicative_pair"].includes(String(p.change_status))) {
@@ -107,7 +107,7 @@ export function parseTrendResult(payload: unknown, query: TrendQuery): TrendResu
           !count(p.added_members) || !count(p.removed_members) || p.change_status !== expectedStatus ||
           (prior !== null && (p.previous_snapshot_as_of !== prior.snapshot_as_of ||
             p.previous_evidence_status !== prior.evidence_status ||
-            p.member_count !== (prior.member_count as number) + p.added_members - p.removed_members))) {
+            p.member_count !== (prior.member_count as number) + (p.added_members as number) - (p.removed_members as number)))) {
         throw new Error("Inconsistent sourced membership changes.");
       }
     }
