@@ -148,8 +148,7 @@ def test_source_digests_are_stable_and_do_not_export_raw_rows(tmp_path, monkeypa
         copy, repeats=1, sample=10, quick_check=False, foreign_keys=False, source_digests=True
     )
     second = MODULE.inspect(
-        remapped, repeats=1, sample=10, quick_check=False, foreign_keys=False,
-        source_digests=True
+        remapped, repeats=1, sample=10, quick_check=False, foreign_keys=False, source_digests=True
     )
     # IDs differ after merge, but identical logical source observations hash identically.
     assert first["source_digests"] == second["source_digests"]
