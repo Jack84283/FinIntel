@@ -142,9 +142,7 @@ def test_v14_copy_reports_migration_required_without_mutation(tmp_path, monkeypa
     assert compatibility["actual_version"] == 14
     assert compatibility["expected_version"] == 15
     assert "quality_corrections" in compatibility["missing_tables"]
-    assert compatibility["missing_columns"] == {
-        "data_quality_findings": ["superseded_at"]
-    }
+    assert compatibility["missing_columns"] == {"data_quality_findings": ["superseded_at"]}
     assert "separate backup copy" in compatibility["guidance"]
     assert (
         next(
@@ -244,13 +242,9 @@ def test_v15_missing_required_finding_column_is_not_compatible(
     assert compatibility["status"] == "schema_incomplete"
     assert compatibility["actual_version"] == 15
     assert compatibility["missing_tables"] == []
-    assert compatibility["missing_columns"] == {
-        "data_quality_findings": [missing_column]
-    }
+    assert compatibility["missing_columns"] == {"data_quality_findings": [missing_column]}
     assert "tables or columns" in compatibility["guidance"]
-    local_checks = {
-        check["id"]: check for check in report["read_only_local_inspection"]["checks"]
-    }
+    local_checks = {check["id"]: check for check in report["read_only_local_inspection"]["checks"]}
     assert local_checks["local.read_only_schema"]["status"] == "fail"
     assert local_checks["local.read_only_schema"]["evidence"]["missing_columns"] == {
         "data_quality_findings": [missing_column]
@@ -259,6 +253,4 @@ def test_v15_missing_required_finding_column_is_not_compatible(
     assert local_checks["local.index_scoped_query"]["evidence"]["query_columns_present"] is False
     with sqlite3.connect(incomplete) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 15
-        assert db.execute("SELECT id FROM daily_prices").fetchone()[0] == (
-            "unchanged-test-row"
-        )
+        assert db.execute("SELECT id FROM daily_prices").fetchone()[0] == "unchanged-test-row"
