@@ -5,7 +5,7 @@ import {
   type OverlapQuery, type OverlapResult, type OverlapSource,
 } from "./membership-overlap-api";
 import {
-  ConstituentOverlapPanel, OverlapSourceDates, limitOverlapSearch, membershipIndexForMarket, overlapStatusDescription,
+  ConstituentOverlapPanel, OverlapSourceDates, limitOverlapSearch, membershipIndexForMarket, overlapAsOfDate, overlapStatusDescription,
 } from "./ConstituentOverlapPanel";
 import { translate } from "./localization";
 
@@ -183,6 +183,25 @@ describe("Dated membership overlap API", () => {
     zero.filtered_total = 0;
     zero.items = [];
     expect(parseOverlapResult(zero, query).common_members).toBe(0);
+  });
+});
+
+describe("Point-in-time membership date alignment", () => {
+  it("uses explicit date override, then analysis end, never today's date", () => {
+    expect(overlapAsOfDate("", "2026-10-20")).toBe("2026-10-20");
+    expect(overlapAsOfDate("2025-03-17", "2026-10-20")).toBe("2025-03-17");
+    expect(overlapAsOfDate("", "")).toBeNull();
+    expect(overlapAsOfDate("", "2026-02-30")).toBeNull();
+    // An invalid explicit override must not silently fall back to another date.
+    expect(overlapAsOfDate("2026-02-30", "2026-10-20")).toBeNull();
+    expect(overlapAsOfDate("2026-11-09", "")).toBe("2026-11-09");
+  });
+
+  it("uses localized guidance rather than claiming missing source dates are available", () => {
+    expect(translate("zh-CN", "Select a valid constituent snapshot date to compare."))
+      .toBe("请选择有效的成分股快照日期进行比较。");
+    expect(() => validateOverlapQuery({ ...query, asOf: "" })).toThrow();
+    expect(() => validateOverlapQuery({ ...query, asOf: "2026-02-30" })).toThrow();
   });
 });
 
