@@ -108,6 +108,18 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Historical Data": "历史数据",
+  "Daily & Incremental Data": "每日与增量数据",
+  "Fetch and store historical index, stock, and ETF observations in local SQLite.": "在本地 SQLite 中获取并保存指数、股票和 ETF 的历史观测数据。",
+  "Monitor scheduled daily updates and run incremental acquisition without downloading full history again.": "监控每日计划更新并执行增量采集，无需重新下载全部历史数据。",
+  "Daily and incremental job results are available in Action History. Scheduler changes remain local.": "每日与增量任务的结果可在操作记录中查看。计划任务设置仅保存在本地。",
+  "Table pagination": "表格分页",
+  "Go to page": "跳转页码",
+  "Go": "跳转",
+  "Filter table": "筛选表格",
+  "Search table values": "搜索表格内容",
+  "No rows match these filters.": "没有符合筛选条件的记录。",
+
   "Local model research": "本地模型研究",
   "Evaluate a versioned built-in indicator on stored index observations. No orders or backtests.": "对存储在本地的指数观测数据运行版本化内置指标，不下单也不进行回测。",
   "Close model research": "关闭模型研究",
