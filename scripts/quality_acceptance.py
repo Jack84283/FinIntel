@@ -35,6 +35,139 @@ MAX_SYNTHETIC_SESSIONS = 20_000
 DEFAULT_SESSIONS = 128
 PERFORMANCE_BOUND_SECONDS = 30.0
 
+# Columns present in the v15 market and Data Quality tables inspected here.
+# This verifies required structural contracts, not all database indexes/triggers.
+INSPECTION_REQUIRED_COLUMNS = {
+    "daily_prices": {
+        "series_id",
+        "session_date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "retrieved_at",
+        "ingestion_id",
+    },
+    "index_daily_closes": {
+        "index_code",
+        "provider",
+        "session_date",
+        "close",
+        "retrieved_at",
+        "source_url",
+    },
+    "data_quality_findings": {
+        "id",
+        "instrument_kind",
+        "code",
+        "series_id",
+        "provider",
+        "session_date",
+        "finding_type",
+        "severity",
+        "confidence",
+        "rule",
+        "evidence_json",
+        "fingerprint",
+        "review_state",
+        "resolution_note",
+        "superseded_at",
+        "supersession_reason",
+        "created_at",
+        "updated_at",
+    },
+    "data_quality_reviews": {
+        "id",
+        "finding_id",
+        "from_state",
+        "to_state",
+        "note",
+        "reviewed_at",
+    },
+    "corporate_action_evidence": {
+        "id",
+        "code",
+        "provider",
+        "session_date",
+        "kind",
+        "split_factor",
+        "cash_dividend",
+        "status",
+        "source_name",
+        "source_observed_at",
+        "evidence_json",
+        "recorded_at",
+    },
+    "quality_corrections": {
+        "id",
+        "instrument_kind",
+        "code",
+        "provider",
+        "adjustment",
+        "frequency",
+        "return_semantics",
+        "session_date",
+        "source_close",
+        "source_retrieved_at",
+        "proposed_close",
+        "finding_fingerprint",
+        "rationale",
+        "evidence_json",
+        "state",
+        "validated_at",
+        "created_at",
+        "updated_at",
+    },
+    "quality_correction_events": {
+        "id",
+        "correction_id",
+        "from_state",
+        "to_state",
+        "note",
+        "occurred_at",
+    },
+    "data_quality_scan_runs": {
+        "id",
+        "started_at",
+        "completed_at",
+        "max_findings",
+        "findings_examined",
+        "findings_stored",
+        "total_known_findings",
+        "persisted_findings_total",
+        "status",
+        "truncated",
+        "run_key",
+    },
+    "data_quality_scan_progress": {
+        "scan_key",
+        "source_identity",
+        "source_data_version_start",
+        "source_data_version_end",
+        "cursor_start",
+        "cursor_next",
+        "max_findings",
+        "findings_examined",
+        "findings_stored",
+        "total_known_findings",
+        "persisted_findings_total",
+        "status",
+        "stale",
+        "updated_at",
+        "last_run_key",
+        "cursor_phase",
+        "cursor_source_key",
+        "source_catalog_identity",
+        "validation_reference_date",
+        "candidate_fingerprints",
+    },
+    "data_quality_source_state": {
+        "id",
+        "source_version",
+    },
+}
+
 
 def _check(identifier: str, passed: bool, evidence: dict[str, object]) -> dict:
     return {
@@ -313,15 +446,52 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
             r[0]
             for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
-        required = {
-            "daily_prices",
-            "index_daily_closes",
-            "data_quality_findings",
-            "data_quality_reviews",
-            "quality_corrections",
-            "quality_correction_events",
-        }
-        has_required = required.issubset(tables)
+        required = set(INSPECTION_REQUIRED_COLUMNS)
+        missing_tables = sorted(required - tables)
+        has_required = not missing_tables
+        # Validate the required columns of every inspected table, not only the
+        # findings query. Missing correction/audit columns must not look compatible.
+        missing_columns = {}
+        finding_columns = set()
+        for table, expected_columns in INSPECTION_REQUIRED_COLUMNS.items():
+            if table not in tables:
+                continue
+            actual_columns = {
+                row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+            }
+            if table == "data_quality_findings":
+                finding_columns = actual_columns
+            missing = sorted(expected_columns - actual_columns)
+            if missing:
+                missing_columns[table] = missing
+        query_columns_present = {"id", "code", "superseded_at"}.issubset(
+            finding_columns
+        )
+        schema_ok = version == SCHEMA_VERSION and has_required and not missing_columns
+        if schema_ok:
+            compatibility = "compatible"
+        elif 1 <= version < SCHEMA_VERSION:
+            compatibility = "migration_required"
+        elif version == SCHEMA_VERSION:
+            compatibility = "schema_incomplete"
+        else:
+            compatibility = "unsupported_version"
+        guidance = {
+            "compatible": "No schema migration required.",
+            "migration_required": (
+                "Migrate a separate backup copy using FinIntel's built-in migration, "
+                "then rerun this read-only inspection. Do not migrate the original here."
+            ),
+            "schema_incomplete": (
+                "Current schema marker has missing required tables or columns; verify "
+                "a separate copy or restore from a known-good backup. "
+                "Never force the version marker."
+            ),
+            "unsupported_version": (
+                "Schema is unsupported; verify the database copy and compatible "
+                "FinIntel version before attempting migration."
+            ),
+        }[compatibility]
         counts = {}
         for table in (
             "daily_prices",
@@ -334,8 +504,9 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
                 counts[table] = conn.execute(
                     f"SELECT COUNT(*) FROM {table}"
                 ).fetchone()[0]
-        # This query is scoped to the index and bounded; no actual price row leaves SQLite.
-        if "data_quality_findings" in tables:
+        # Legacy/incomplete findings tables can lack scoped-query columns.
+        # This read-only query exports no actual market price rows.
+        if query_columns_present:
             count = conn.execute(
                 "SELECT COUNT(*) FROM data_quality_findings "
                 "WHERE code='SP500' AND superseded_at IS NULL"
@@ -348,25 +519,41 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
                 )
             ]
         else:
-            count, plan = 0, []
+            count, plan = None, []
     elapsed = round(time.monotonic() - start, 3)
     checks = [
         _check(
             "local.read_only_schema",
-            version == SCHEMA_VERSION and has_required,
+            schema_ok,
             {
                 "schema_version": version,
                 "expected": SCHEMA_VERSION,
                 "quality_tables_present": has_required,
+                "missing_tables": missing_tables,
+                "missing_columns": missing_columns,
+                "compatibility": compatibility,
             },
         ),
         _check(
             "local.index_scoped_query",
             bool(plan),
-            {"scope": "SP500", "active_findings": count, "elapsed_seconds": elapsed},
+            {
+                "scope": "SP500",
+                "active_findings": count,
+                "query_columns_present": query_columns_present,
+                "elapsed_seconds": elapsed,
+            },
         ),
     ]
     return checks, {
+        "schema_compatibility": {
+            "status": compatibility,
+            "actual_version": version,
+            "expected_version": SCHEMA_VERSION,
+            "missing_tables": missing_tables,
+            "missing_columns": missing_columns,
+            "guidance": guidance,
+        },
         "counts": counts,
         "elapsed_seconds": elapsed,
         "large_dataset_observed": counts.get("daily_prices", 0) >= 1_000_000,
@@ -375,8 +562,29 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
     }
 
 
-def _report(checks: list[dict], synthetic: dict, inspection: dict | None) -> dict:
-    synthetic_pass = all(item["status"] == "pass" for item in checks)
+def _report(
+    synthetic_checks: list[dict],
+    synthetic: dict,
+    local_checks: list[dict] | None = None,
+    inspection: dict | None = None,
+) -> dict:
+    """Keep synthetic and inspected-local evidence separate, including failures."""
+    local_checks = local_checks or []
+    synthetic_pass = all(item["status"] == "pass" for item in synthetic_checks)
+    local_status = (
+        "not_run"
+        if inspection is None
+        else "pass"
+        if local_checks and all(item["status"] == "pass" for item in local_checks)
+        else "fail"
+    )
+    verdict = (
+        "synthetic_failure"
+        if not synthetic_pass
+        else "local_inspection_failed"
+        if local_status == "fail"
+        else "synthetic_pass_production_unverified"
+    )
     manual = {
         name: {
             "status": "not_run",
@@ -386,8 +594,16 @@ def _report(checks: list[dict], synthetic: dict, inspection: dict | None) -> dic
     }
     return {
         "format": "finintel-issue-29-acceptance-v1",
-        "synthetic": {"status": "pass" if synthetic_pass else "fail", **synthetic},
-        "read_only_local_inspection": inspection or {"status": "not_run"},
+        "synthetic": {
+            "status": "pass" if synthetic_pass else "fail",
+            "checks": synthetic_checks,
+            **synthetic,
+        },
+        "read_only_local_inspection": (
+            {"status": local_status, "checks": local_checks, **inspection}
+            if inspection is not None
+            else {"status": "not_run", "checks": []}
+        ),
         "manual_desktop": manual,
         "optional_live_providers": {
             "status": "not_run",
@@ -399,12 +615,11 @@ def _report(checks: list[dict], synthetic: dict, inspection: dict | None) -> dic
             else "not_run",
             "note": "Read-only local metadata inspection is not a full production load test",
         },
-        "checks": checks,
-        "verdict": "synthetic_pass_production_unverified"
-        if synthetic_pass
-        else "synthetic_failure",
+        # Preserve the existing combined check list for older report consumers.
+        "checks": [*synthetic_checks, *local_checks],
+        "verdict": verdict,
         "notes": [
-            "Generated from fabricated synthetic market observations.",
+            "Synthetic checks and read-only local inspection are independent.",
             "No credentials, provider payloads, portfolios or price samples are in this report.",
             "A green CI check does not establish manual desktop or live provider acceptance.",
             "Never run a correction scan against a production database from this harness.",
@@ -443,22 +658,31 @@ def main(argv: list[str] | None = None) -> int:
         prefix="finintel-quality-acceptance-"
     ) as directory:
         root = Path(directory)
-        checks, synthetic = _synthetic(
+        synthetic_checks, synthetic = _synthetic(
             root / "synthetic.sqlite3", root / "destination.sqlite3", args.sessions
         )
+    local_checks = []
     inspection = None
     if args.inspect_db:
         local_checks, inspection = _inspect(user_db)
-        checks += local_checks
-    report = _report(checks, synthetic, inspection)
+    report = _report(synthetic_checks, synthetic, local_checks, inspection)
     # No user database is ever opened for writing. Output is a new local file.
     with output.open("x", encoding="utf-8") as stream:
         json.dump(report, stream, indent=2, sort_keys=True)
         stream.write("\n")
     print(
-        f"Issue #29 synthetic: {report['synthetic']['status']}; production: unverified"
+        f"Issue #29 synthetic: {report['synthetic']['status']}; "
+        f"local inspection: {report['read_only_local_inspection']['status']}; "
+        "production: unverified"
     )
-    return 0 if all(item["status"] == "pass" for item in checks) else 1
+    if inspection and inspection["schema_compatibility"]["status"] != "compatible":
+        print("Local schema: " + inspection["schema_compatibility"]["guidance"])
+    return (
+        0
+        if report["synthetic"]["status"] == "pass"
+        and (report["read_only_local_inspection"]["status"] in {"pass", "not_run"})
+        else 1
+    )
 
 
 if __name__ == "__main__":
