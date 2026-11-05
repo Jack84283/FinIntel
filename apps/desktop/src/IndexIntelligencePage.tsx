@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "./PageHeader";
+import { LocalDataTable } from "./components/TablePagination";
 import { MarketDatePicker } from "./components/MarketDatePicker";
 import { useLocale } from "./localization";
 import { INDEX_CODES, listIndexHistory, type IndexCode, type IndexCatalogRecord } from "./index-history-api";
@@ -162,7 +163,7 @@ export function IndexIntelligencePage() {
     ? ["normalized", "drawdown", "volatility", "relative", "correlation"]
     : ["normalized", "drawdown", "volatility"];
   const rows = result ? metricRows(result, metric) : [];
-  const shown = rows.slice(-25).reverse();
+  const shown = [...rows].reverse();
   const formatValue = (value: string | null) =>
     value === null ? "—" : new Intl.NumberFormat(language, { maximumFractionDigits: 5 }).format(Number(value));
   return (
@@ -295,8 +296,11 @@ export function IndexIntelligencePage() {
         </Card>
         <Card>
           <CardHeader className="pb-1"><CardTitle>{t("Historical analytics grid")}</CardTitle>
-            <CardDescription>{t("Latest 25 available rows for the selected chart metric; values match the plotted source calculations.")}</CardDescription></CardHeader>
+            <CardDescription>{t("Paginated locally available rows for the selected chart metric; values match the plotted source calculations.")}</CardDescription></CardHeader>
           <CardContent>
+            <LocalDataTable key={code + "|" + metric + "|" + start + "|" + end}
+              rows={shown} label={t("Historical analytics grid")}
+              searchable={row => [row.session_date, metricCell(result, metric, row), metricCell(result, metric, row, "benchmark")].join(" ")}>{visible =>
             <div className="max-h-[430px] overflow-auto rounded-md border border-border">
               <table className="w-full border-collapse text-left text-xs tabular-nums">
                 <thead className="sticky top-0 bg-muted text-muted-foreground">
@@ -306,7 +310,7 @@ export function IndexIntelligencePage() {
                       {t("Normalized performance")} · {result.comparison.right.code}</th>}</tr>
                 </thead>
                 <tbody>
-                  {shown.map(row => (
+                  {visible.map(row => (
                     <tr key={row.session_date} className="border-t border-border">
                       <th scope="row" className="p-2 font-normal">{row.session_date}</th>
                       <td className="p-2 text-right">{formatValue(metricCell(result, metric, row))}</td>
@@ -316,7 +320,7 @@ export function IndexIntelligencePage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </div>}</LocalDataTable>
             {!shown.length && <p className="py-4 text-sm text-muted-foreground">{t("No calculated values in the selected range.")}</p>}
           </CardContent>
         </Card>
