@@ -61,6 +61,7 @@ def test_readonly_opt_in_existing_database_remains_unchanged(tmp_path):
     assert report["synthetic"]["status"] == "pass"
     assert report["read_only_local_inspection"]["status"] == "pass"
     assert report["read_only_local_inspection"]["schema_compatibility"]["status"] == "compatible"
+    assert report["read_only_local_inspection"]["schema_compatibility"]["missing_columns"] == {}
     assert all(c["status"] == "pass" for c in report["read_only_local_inspection"]["checks"])
     assert report["read_only_local_inspection"]["inspection_only"] is True
     assert report["read_only_local_inspection"]["price_samples_exported"] is False
@@ -141,6 +142,9 @@ def test_v14_copy_reports_migration_required_without_mutation(tmp_path, monkeypa
     assert compatibility["actual_version"] == 14
     assert compatibility["expected_version"] == 15
     assert "quality_corrections" in compatibility["missing_tables"]
+    assert compatibility["missing_columns"] == {
+        "data_quality_findings": ["superseded_at"]
+    }
     assert "separate backup copy" in compatibility["guidance"]
     assert (
         next(
@@ -197,3 +201,64 @@ def test_synthetic_failure_keeps_passing_local_inspection_distinct():
     assert report["read_only_local_inspection"]["status"] == "pass"
     assert report["verdict"] == "synthetic_failure"
     assert len(report["checks"]) == 2
+
+
+@pytest.mark.parametrize("missing_column", ("id", "code", "superseded_at"))
+def test_v15_missing_required_finding_column_is_not_compatible(
+    tmp_path, monkeypatch, missing_column
+):
+    """A v15 marker and all table names do not imply a valid query schema."""
+    incomplete = tmp_path / f"v15-no-{missing_column}.sqlite3"
+    with sqlite3.connect(incomplete) as db:
+        db.execute("PRAGMA user_version = 15")
+        # Provide all required table names and keep the inspected snapshot
+        # intentionally incomplete in exactly one required finding column.
+        for table in (
+            "daily_prices",
+            "index_daily_closes",
+            "data_quality_reviews",
+            "corporate_action_evidence",
+            "quality_corrections",
+            "quality_correction_events",
+        ):
+            db.execute(f"CREATE TABLE {table} (id TEXT)")
+        columns = ("id", "code", "superseded_at")
+        present_columns = ", ".join(
+            f"{column} TEXT" for column in columns if column != missing_column
+        )
+        db.execute(f"CREATE TABLE data_quality_findings ({present_columns})")
+        db.execute("INSERT INTO daily_prices VALUES ('unchanged-test-row')")
+    monkeypatch.setattr(
+        MODULE,
+        "_synthetic",
+        lambda *_args: ([MODULE._check("synthetic.fixture", True, {})], {"sessions": 128}),
+    )
+    output = tmp_path / f"v15-no-{missing_column}.json"
+    assert MODULE.main(["--inspect-db", str(incomplete), "--output", str(output)]) == 1
+
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["synthetic"]["status"] == "pass"
+    assert report["read_only_local_inspection"]["status"] == "fail"
+    assert report["verdict"] == "local_inspection_failed"
+    compatibility = report["read_only_local_inspection"]["schema_compatibility"]
+    assert compatibility["status"] == "schema_incomplete"
+    assert compatibility["actual_version"] == 15
+    assert compatibility["missing_tables"] == []
+    assert compatibility["missing_columns"] == {
+        "data_quality_findings": [missing_column]
+    }
+    assert "tables or columns" in compatibility["guidance"]
+    local_checks = {
+        check["id"]: check for check in report["read_only_local_inspection"]["checks"]
+    }
+    assert local_checks["local.read_only_schema"]["status"] == "fail"
+    assert local_checks["local.read_only_schema"]["evidence"]["missing_columns"] == {
+        "data_quality_findings": [missing_column]
+    }
+    assert local_checks["local.index_scoped_query"]["status"] == "fail"
+    assert local_checks["local.index_scoped_query"]["evidence"]["query_columns_present"] is False
+    with sqlite3.connect(incomplete) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 15
+        assert db.execute("SELECT id FROM daily_prices").fetchone()[0] == (
+            "unchanged-test-row"
+        )
