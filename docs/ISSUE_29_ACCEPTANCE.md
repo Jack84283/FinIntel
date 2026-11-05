@@ -52,6 +52,8 @@ The script uses SQLite mode=ro and query_only=ON, checks schema and counts, perf
 
 Production performance acceptance requires independent measurements of per-index UI latency, scan/resume completion, CPU, peak memory, and peak disk on the actual private-data size. This metadata probe is *not* a substitute.
 
+For reproducible local-only measurements and an explicit closure checklist, see **docs/ISSUE_29_PRIVATE_ACCEPTANCE.md** and **docs/ISSUE_29_SIGNOFF_TEMPLATE.md**. The private evidence script never migrates or writes to the source DB; it cannot verify active installed desktop state or perform a full scanner benchmark.
+
 ## Manual acceptance — explicitly NOT RUN by this PR
 
 1. Packaged **macOS desktop**: cold start existing DB, S&P 500 default, index/equity filters, English/Chinese translations, keyboard and screen-reader behavior, dark/light layout; disconnect network and confirm offline read.
@@ -66,4 +68,4 @@ Production performance acceptance requires independent measurements of per-index
 
 For final review, record: merged baseline SHA; workflow URL and five green job conclusions; pytest/Vitest totals; synthetic artifact; any authorized local-inspection result; tested device and build IDs; source and historical coverage counts; provider entitlements; real performance timings; defects/waivers; and accept/reject decision.
 
-**Status at writing:** implementation and evidence pipeline are committed; CI results and manual acceptance are not claimed in advance. Keep PR #44 as a draft pending green checks and code review.
+**Status:** synthetic implementation PR #44 has merged. Real-data, manual desktop, provider, and sign-off gates remain unverified until completed on the owner's machine. Keep Issue #29 open.
