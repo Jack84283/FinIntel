@@ -338,7 +338,9 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
             if "data_quality_findings" in tables and missing_finding_columns
             else {}
         )
-        query_columns_present = "data_quality_findings" in tables and not missing_columns
+        query_columns_present = (
+            "data_quality_findings" in tables and not missing_columns
+        )
         schema_ok = version == SCHEMA_VERSION and has_required and query_columns_present
         if schema_ok:
             compatibility = "compatible"
