@@ -192,45 +192,64 @@ def inspect(
         digests = {"status": "not_run"}
         if source_digests:
             digests = {}
-            # Stream rows in stable primary-key order; report only SHA-256 digests.
-            digest_queries = {
-                "daily_prices": (
-                    (
-                        "series_id",
-                        "session_date",
-                        "open",
-                        "high",
-                        "low",
-                        "close",
-                        "volume",
-                        "retrieved_at",
-                        "ingestion_id",
-                    ),
-                    "series_id,session_date",
-                ),
-                "index_daily_closes": (
-                    (
-                        "index_code",
-                        "provider",
-                        "session_date",
-                        "close",
-                        "retrieved_at",
-                        "source_url",
-                    ),
-                    "index_code,provider,session_date",
-                ),
+            # Stable source identities, not local auto-increment IDs, determine
+            # the hash. Backups/merges may remap series_id and ingestion_id.
+            equity_required = {
+                "series": {"id", "symbol", "provider", "frequency", "adjustment", "data_kind"},
+                "daily_prices": {
+                    "series_id", "session_date", "open", "high", "low", "close",
+                    "volume", "retrieved_at"
+                },
             }
-            for table, (columns, order) in digest_queries.items():
-                if not set(columns).issubset(table_columns.get(table, set())):
-                    digests[table] = {
-                        "status": "not_run",
-                        "reason": "schema_columns_missing",
-                    }
-                    continue
+            if any(
+                not columns.issubset(table_columns.get(table, set()))
+                for table, columns in equity_required.items()
+            ):
+                digests["daily_prices"] = {
+                    "status": "not_run", "reason": "schema_columns_missing"
+                }
+            else:
                 digest = hashlib.sha256()
                 count = 0
-                # SQL identifiers are fixed literals in digest_queries.
-                sql = f"SELECT {','.join(columns)} FROM {table} ORDER BY {order}"
+                series_sql = (
+                    "SELECT id,symbol,provider,frequency,adjustment,data_kind "
+                    "FROM series ORDER BY symbol,provider,frequency,adjustment,data_kind"
+                )
+                prices_sql = (
+                    "SELECT session_date,open,high,low,close,volume,retrieved_at "
+                    "FROM daily_prices WHERE series_id=? ORDER BY session_date"
+                )
+                for series_id, symbol, provider, frequency, adjustment, kind in conn.execute(
+                    series_sql
+                ):
+                    identity = (symbol, provider, frequency, adjustment, kind)
+                    for row in conn.execute(prices_sql, (series_id,)):
+                        digest.update(
+                            json.dumps(
+                                (*identity, *row), separators=(",", ":"), ensure_ascii=False
+                            ).encode("utf-8")
+                        )
+                        digest.update(b"\n")
+                        count += 1
+                digests["daily_prices"] = {
+                    "status": "computed", "sha256": digest.hexdigest(), "rows_hashed": count
+                }
+
+            index_columns = {
+                "index_code", "provider", "session_date", "close",
+                "retrieved_at", "source_url"
+            }
+            if not index_columns.issubset(table_columns.get("index_daily_closes", set())):
+                digests["index_daily_closes"] = {
+                    "status": "not_run", "reason": "schema_columns_missing"
+                }
+            else:
+                digest = hashlib.sha256()
+                count = 0
+                sql = (
+                    "SELECT index_code,provider,session_date,close,retrieved_at,source_url "
+                    "FROM index_daily_closes ORDER BY index_code,provider,session_date"
+                )
                 for row in conn.execute(sql):
                     digest.update(
                         json.dumps(
@@ -239,10 +258,8 @@ def inspect(
                     )
                     digest.update(b"\n")
                     count += 1
-                digests[table] = {
-                    "status": "computed",
-                    "sha256": digest.hexdigest(),
-                    "rows_hashed": count,
+                digests["index_daily_closes"] = {
+                    "status": "computed", "sha256": digest.hexdigest(), "rows_hashed": count
                 }
         queries = [
             _measure(
