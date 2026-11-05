@@ -15,6 +15,7 @@ import sqlite3
 import statistics
 import sys
 import time
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -42,13 +43,17 @@ def _detached_copy(path: Path) -> Path:
         raise ValueError("Use an existing regular SQLite backup copy, not a symlink")
     actual = path.resolve()
     active = Path(os.environ.get("FININTEL_DB_PATH", "data/finintel.sqlite3"))
-    if actual in {active.expanduser().resolve(), Path("data/finintel.sqlite3").resolve()}:
+    if actual in {
+        active.expanduser().resolve(),
+        Path("data/finintel.sqlite3").resolve(),
+    }:
         raise ValueError("Refusing to inspect a configured or default active database")
     if any(
-        Path(str(actual) + suffix).exists()
-        for suffix in ("-wal", "-shm", "-journal")
+        Path(str(actual) + suffix).exists() for suffix in ("-wal", "-shm", "-journal")
     ):
-        raise ValueError("Backup has SQLite sidecars; first make a detached checkpointed backup")
+        raise ValueError(
+            "Backup has SQLite sidecars; first make a detached checkpointed backup"
+        )
     return actual
 
 
@@ -136,7 +141,7 @@ def inspect(
     initial = source.stat()
     starting = time.perf_counter()
     cpu_before = time.process_time()
-    with _read_db(source) as conn:
+    with closing(_read_db(source)) as conn:
         schema_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
         tables = {
             str(row[0])
@@ -279,7 +284,9 @@ def inspect(
         ]
     final = source.stat()
     if (initial.st_size, initial.st_mtime_ns) != (final.st_size, final.st_mtime_ns):
-        raise RuntimeError("Detached database changed during inspection; discard evidence")
+        raise RuntimeError(
+            "Detached database changed during inspection; discard evidence"
+        )
     observed = _resource_snapshot()
     observed["inspection_wall_seconds"] = round(time.perf_counter() - starting, 3)
     observed["inspection_cpu_seconds"] = round(time.process_time() - cpu_before, 3)
@@ -329,7 +336,9 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="Existing detached SQLite backup copy; never the active database",
     )
-    parser.add_argument("--output", type=Path, required=True, help="New private JSON filename")
+    parser.add_argument(
+        "--output", type=Path, required=True, help="New private JSON filename"
+    )
     parser.add_argument("--repeat", type=int, default=3)
     parser.add_argument("--sample", type=int, default=100)
     parser.add_argument(
@@ -378,7 +387,9 @@ def main(argv: list[str] | None = None) -> int:
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
         json.dump(report, stream, indent=2, sort_keys=True)
         stream.write("\n")
-    print("Issue #29 private inspection written. Production acceptance remains unverified.")
+    print(
+        "Issue #29 private inspection written. Production acceptance remains unverified."
+    )
     return 0
 
 
