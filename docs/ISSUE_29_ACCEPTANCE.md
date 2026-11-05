@@ -50,6 +50,17 @@ Prefer a separate backed-up **copy**, not the actively used database:
 
 The script uses SQLite mode=ro and query_only=ON, checks schema and counts, performs a scoped SP500 finding-query-plan probe, and records elapsed time. It does not migrate, correct, scan, download or export underlying market observations; never logs credentials. It refuses to overwrite an existing report, the inspected DB, or its SQLite journal/WAL/SHM sidecars.
 
+### Independent acceptance statuses and schema guidance
+
+The report intentionally keeps synthetic and inspected-local evidence separate:
+
+- `synthetic.status` and `synthetic.checks`: isolated, disposable-fixture checks.
+- `read_only_local_inspection.status` and `read_only_local_inspection.checks`: `pass`, `fail`, or `not_run`; these never change `synthetic.status`.
+- `read_only_local_inspection.schema_compatibility`: `actual_version`, `expected_version`, `missing_tables`, and actionable `guidance` without private source rows. `migration_required` means an older supported schema (for example v14 versus v15). `schema_incomplete` means the expected version marker exists but required tables are absent.
+- The existing top-level `checks` array remains the union of both check groups for backward compatibility. `verdict` distinguishes `synthetic_failure`, `local_inspection_failed`, and `synthetic_pass_production_unverified`. The command exits nonzero when either tested group fails.
+
+If a backed-up database copy has schema v14, **do not update `PRAGMA user_version` manually or run the acceptance script as a migration tool**. Use FinIntel's existing migration mechanism on another disposable backup copy, verify original OHLCV and index-row counts and SQLite integrity, then inspect the migrated copy with a new output filename. An upgraded *copy* does not demonstrate that the active database is upgraded, nor does a passing inspection constitute production acceptance.
+
 Production performance acceptance requires independent measurements of per-index UI latency, scan/resume completion, CPU, peak memory, and peak disk on the actual private-data size. This metadata probe is *not* a substitute.
 
 ## Manual acceptance — explicitly NOT RUN by this PR
