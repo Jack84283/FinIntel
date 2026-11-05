@@ -33,9 +33,9 @@ export function overlapStatusDescription(status: OverlapStatus): string {
   return statuses[status];
 }
 
-/** An explicit date or the analysis date is required; never silently use today's date. */
-export function overlapAsOfDate(overrideDate: string, analysisEnd: string): string | null {
-  const selected = overrideDate || analysisEnd;
+/** null inherits the analysis date; "" means explicitly cleared, never an implicit fallback. */
+export function overlapAsOfDate(overrideDate: string | null, analysisEnd: string): string | null {
+  const selected = overrideDate ?? analysisEnd;
   return validOverlapDate(selected) ? selected : null;
 }
 
@@ -61,7 +61,7 @@ export function ConstituentOverlapPanel({
   const [expanded, setExpanded] = useState(false);
   const [left, setLeft] = useState<IndexCode | null>(initialIndex);
   const [right, setRight] = useState<IndexCode>(initialIndex === "NDX" ? "SP500" : "NDX");
-  const [overrideDate, setOverrideDate] = useState("");
+  const [overrideDate, setOverrideDate] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
@@ -165,8 +165,8 @@ export function ConstituentOverlapPanel({
               onChange={selectedDate} />
           </div>
         </div>
-        {overrideDate && <Button size="sm" variant="ghost" type="button"
-          onClick={() => selectedDate("")}>{t("Use analysis end date")}</Button>}
+        {overrideDate !== null && <Button size="sm" variant="ghost" type="button"
+          onClick={() => { setOverrideDate(null); setOffset(0); }}>{t("Use analysis end date")}</Button>}
         <p className="text-xs text-muted-foreground">
           {t("Requested date")}: {asOf ?? t("Unavailable")}.{" "}
           {asOf && t("The latest available source snapshot on or before this date is compared. Older snapshots do not prove membership remained unchanged.")}
