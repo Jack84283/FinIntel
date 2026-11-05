@@ -35,6 +35,100 @@ MAX_SYNTHETIC_SESSIONS = 20_000
 DEFAULT_SESSIONS = 128
 PERFORMANCE_BOUND_SECONDS = 30.0
 
+# Columns present in the v15 market and Data Quality tables inspected here.
+# This verifies required structural contracts, not all database indexes/triggers.
+INSPECTION_REQUIRED_COLUMNS = {
+    "daily_prices": {
+        "series_id",
+        "session_date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "retrieved_at",
+        "ingestion_id",
+    },
+    "index_daily_closes": {
+        "index_code",
+        "provider",
+        "session_date",
+        "close",
+        "retrieved_at",
+        "source_url",
+    },
+    "data_quality_findings": {
+        "id",
+        "instrument_kind",
+        "code",
+        "series_id",
+        "provider",
+        "session_date",
+        "finding_type",
+        "severity",
+        "confidence",
+        "rule",
+        "evidence_json",
+        "fingerprint",
+        "review_state",
+        "resolution_note",
+        "superseded_at",
+        "supersession_reason",
+        "created_at",
+        "updated_at",
+    },
+    "data_quality_reviews": {
+        "id",
+        "finding_id",
+        "from_state",
+        "to_state",
+        "note",
+        "reviewed_at",
+    },
+    "corporate_action_evidence": {
+        "id",
+        "code",
+        "provider",
+        "session_date",
+        "kind",
+        "split_factor",
+        "cash_dividend",
+        "status",
+        "source_name",
+        "source_observed_at",
+        "evidence_json",
+        "recorded_at",
+    },
+    "quality_corrections": {
+        "id",
+        "instrument_kind",
+        "code",
+        "provider",
+        "adjustment",
+        "frequency",
+        "return_semantics",
+        "session_date",
+        "source_close",
+        "source_retrieved_at",
+        "proposed_close",
+        "finding_fingerprint",
+        "rationale",
+        "evidence_json",
+        "state",
+        "validated_at",
+        "created_at",
+        "updated_at",
+    },
+    "quality_correction_events": {
+        "id",
+        "correction_id",
+        "from_state",
+        "to_state",
+        "note",
+        "occurred_at",
+    },
+}
+
 
 def _check(identifier: str, passed: bool, evidence: dict[str, object]) -> dict:
     return {
@@ -313,35 +407,28 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
             r[0]
             for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
-        required = {
-            "daily_prices",
-            "index_daily_closes",
-            "data_quality_findings",
-            "data_quality_reviews",
-            "corporate_action_evidence",
-            "quality_corrections",
-            "quality_correction_events",
-        }
+        required = set(INSPECTION_REQUIRED_COLUMNS)
         missing_tables = sorted(required - tables)
         has_required = not missing_tables
-        # A v15 marker and the expected table names alone do not prove the
-        # inspected schema can run the scoped Data Quality query.
-        required_finding_columns = {"id", "code", "superseded_at"}
-        finding_columns = (
-            {row[1] for row in conn.execute("PRAGMA table_info(data_quality_findings)")}
-            if "data_quality_findings" in tables
-            else set()
+        # Validate the required columns of every inspected table, not only the
+        # findings query. Missing correction/audit columns must not look compatible.
+        missing_columns = {}
+        finding_columns = set()
+        for table, expected_columns in INSPECTION_REQUIRED_COLUMNS.items():
+            if table not in tables:
+                continue
+            actual_columns = {
+                row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+            }
+            if table == "data_quality_findings":
+                finding_columns = actual_columns
+            missing = sorted(expected_columns - actual_columns)
+            if missing:
+                missing_columns[table] = missing
+        query_columns_present = {"id", "code", "superseded_at"}.issubset(
+            finding_columns
         )
-        missing_finding_columns = sorted(required_finding_columns - finding_columns)
-        missing_columns = (
-            {"data_quality_findings": missing_finding_columns}
-            if "data_quality_findings" in tables and missing_finding_columns
-            else {}
-        )
-        query_columns_present = (
-            "data_quality_findings" in tables and not missing_columns
-        )
-        schema_ok = version == SCHEMA_VERSION and has_required and query_columns_present
+        schema_ok = version == SCHEMA_VERSION and has_required and not missing_columns
         if schema_ok:
             compatibility = "compatible"
         elif 1 <= version < SCHEMA_VERSION:
@@ -378,9 +465,8 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
                 counts[table] = conn.execute(
                     f"SELECT COUNT(*) FROM {table}"
                 ).fetchone()[0]
-        # Legacy/incomplete tables can lack scoped-query columns. Do not crash
-        # or silently migrate the read-only inspected database.
-        # This query is scoped to the index and bounded; no actual price row leaves SQLite.
+        # Legacy/incomplete findings tables can lack scoped-query columns.
+        # This read-only query exports no actual market price rows.
         if query_columns_present:
             count = conn.execute(
                 "SELECT COUNT(*) FROM data_quality_findings "
