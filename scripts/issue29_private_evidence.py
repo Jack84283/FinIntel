@@ -195,10 +195,23 @@ def inspect(
             # Stable source identities, not local auto-increment IDs, determine
             # the hash. Backups/merges may remap series_id and ingestion_id.
             equity_required = {
-                "series": {"id", "symbol", "provider", "frequency", "adjustment", "data_kind"},
+                "series": {
+                    "id",
+                    "symbol",
+                    "provider",
+                    "frequency",
+                    "adjustment",
+                    "data_kind",
+                },
                 "daily_prices": {
-                    "series_id", "session_date", "open", "high", "low", "close",
-                    "volume", "retrieved_at"
+                    "series_id",
+                    "session_date",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "volume",
+                    "retrieved_at",
                 },
             }
             if any(
@@ -206,7 +219,8 @@ def inspect(
                 for table, columns in equity_required.items()
             ):
                 digests["daily_prices"] = {
-                    "status": "not_run", "reason": "schema_columns_missing"
+                    "status": "not_run",
+                    "reason": "schema_columns_missing",
                 }
             else:
                 digest = hashlib.sha256()
@@ -219,29 +233,45 @@ def inspect(
                     "SELECT session_date,open,high,low,close,volume,retrieved_at "
                     "FROM daily_prices WHERE series_id=? ORDER BY session_date"
                 )
-                for series_id, symbol, provider, frequency, adjustment, kind in conn.execute(
-                    series_sql
-                ):
+                for (
+                    series_id,
+                    symbol,
+                    provider,
+                    frequency,
+                    adjustment,
+                    kind,
+                ) in conn.execute(series_sql):
                     identity = (symbol, provider, frequency, adjustment, kind)
                     for row in conn.execute(prices_sql, (series_id,)):
                         digest.update(
                             json.dumps(
-                                (*identity, *row), separators=(",", ":"), ensure_ascii=False
+                                (*identity, *row),
+                                separators=(",", ":"),
+                                ensure_ascii=False,
                             ).encode("utf-8")
                         )
                         digest.update(b"\n")
                         count += 1
                 digests["daily_prices"] = {
-                    "status": "computed", "sha256": digest.hexdigest(), "rows_hashed": count
+                    "status": "computed",
+                    "sha256": digest.hexdigest(),
+                    "rows_hashed": count,
                 }
 
             index_columns = {
-                "index_code", "provider", "session_date", "close",
-                "retrieved_at", "source_url"
+                "index_code",
+                "provider",
+                "session_date",
+                "close",
+                "retrieved_at",
+                "source_url",
             }
-            if not index_columns.issubset(table_columns.get("index_daily_closes", set())):
+            if not index_columns.issubset(
+                table_columns.get("index_daily_closes", set())
+            ):
                 digests["index_daily_closes"] = {
-                    "status": "not_run", "reason": "schema_columns_missing"
+                    "status": "not_run",
+                    "reason": "schema_columns_missing",
                 }
             else:
                 digest = hashlib.sha256()
@@ -259,7 +289,9 @@ def inspect(
                     digest.update(b"\n")
                     count += 1
                 digests["index_daily_closes"] = {
-                    "status": "computed", "sha256": digest.hexdigest(), "rows_hashed": count
+                    "status": "computed",
+                    "sha256": digest.hexdigest(),
+                    "rows_hashed": count,
                 }
         queries = [
             _measure(
