@@ -227,6 +227,9 @@ def _create_v15_inspection_fixture(path, *, missing_table, missing_column):
         ("data_quality_reviews", "finding_id"),
         ("daily_prices", "volume"),
         ("index_daily_closes", "source_url"),
+        ("data_quality_scan_runs", "run_key"),
+        ("data_quality_scan_progress", "cursor_next"),
+        ("data_quality_source_state", "source_version"),
     ),
 )
 def test_v15_missing_required_column_is_not_compatible(
@@ -269,3 +272,38 @@ def test_v15_missing_required_column_is_not_compatible(
     with sqlite3.connect(incomplete) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 15
         assert db.execute("SELECT close FROM daily_prices").fetchone()[0] == "unchanged-test-row"
+
+
+@pytest.mark.parametrize(
+    "missing_table",
+    ("data_quality_scan_runs", "data_quality_scan_progress", "data_quality_source_state"),
+)
+def test_v15_missing_quality_scan_table_is_incompatible(tmp_path, monkeypatch, missing_table):
+    """A migrated v15 copy needs scan, resume and source-revision metadata."""
+    existing = tmp_path / "missing-scan-table.sqlite3"
+    MODULE._seed(existing, MODULE._sessions(40))
+    with sqlite3.connect(existing) as db:
+        db.execute(f"DROP TABLE {missing_table}")
+    monkeypatch.setattr(
+        MODULE,
+        "_synthetic",
+        lambda *_args: ([MODULE._check("synthetic.fixture", True, {})], {"sessions": 128}),
+    )
+    output = tmp_path / "missing-scan-table.json"
+    assert MODULE.main(["--inspect-db", str(existing), "--output", str(output)]) == 1
+
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["synthetic"]["status"] == "pass"
+    assert report["read_only_local_inspection"]["status"] == "fail"
+    assert report["verdict"] == "local_inspection_failed"
+    compatibility = report["read_only_local_inspection"]["schema_compatibility"]
+    assert compatibility["status"] == "schema_incomplete"
+    assert compatibility["actual_version"] == 15
+    assert compatibility["missing_tables"] == [missing_table]
+    assert compatibility["missing_columns"] == {}
+    with sqlite3.connect(existing) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 15
+        assert db.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 80
+        assert missing_table not in {
+            row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
