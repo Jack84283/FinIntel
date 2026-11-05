@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -131,13 +132,26 @@ def test_source_digests_are_stable_and_do_not_export_raw_rows(tmp_path, monkeypa
             db.execute(f"ALTER TABLE daily_prices ADD COLUMN {column} TEXT")
         for column in ("close", "retrieved_at", "source_url"):
             db.execute(f"ALTER TABLE index_daily_closes ADD COLUMN {column} TEXT")
+        for column in ("symbol", "frequency", "adjustment", "data_kind"):
+            db.execute(f"ALTER TABLE series ADD COLUMN {column} TEXT")
+        db.execute(
+            "UPDATE series SET symbol='AAPL',frequency='1d',"
+            "adjustment='raw_unadjusted',data_kind='historical_eod'"
+        )
+    remapped = tmp_path / "remapped.sqlite3"
+    shutil.copyfile(copy, remapped)
+    with sqlite3.connect(remapped) as db:
+        db.execute("UPDATE series SET id=42")
+        db.execute("UPDATE daily_prices SET series_id=42,ingestion_id='changed-local-id'")
     monkeypatch.setenv("FININTEL_DB_PATH", str(tmp_path / "live.sqlite3"))
     first = MODULE.inspect(
         copy, repeats=1, sample=10, quick_check=False, foreign_keys=False, source_digests=True
     )
     second = MODULE.inspect(
-        copy, repeats=1, sample=10, quick_check=False, foreign_keys=False, source_digests=True
+        remapped, repeats=1, sample=10, quick_check=False, foreign_keys=False,
+        source_digests=True
     )
+    # IDs differ after merge, but identical logical source observations hash identically.
     assert first["source_digests"] == second["source_digests"]
     assert first["source_digests"]["daily_prices"]["rows_hashed"] == 1
     assert first["source_digests"]["index_daily_closes"]["rows_hashed"] == 1
