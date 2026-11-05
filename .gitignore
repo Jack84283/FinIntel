@@ -24,6 +24,8 @@ apps/desktop/tsconfig.tsbuildinfo
 data/raw/
 data/cache/
 data/private/
+# Private acceptance evidence and detached copies (not source artifacts)
+artifacts/
 data/backups/
 data/checkpoints/
 data/*.json
