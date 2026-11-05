@@ -363,14 +363,13 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
         # Legacy v14 tables can lack superseded_at: report incompatibility,
         # do not crash or silently migrate the read-only inspected database.
         finding_columns = (
-            {
-                row[1]
-                for row in conn.execute("PRAGMA table_info(data_quality_findings)")
-            }
+            {row[1] for row in conn.execute("PRAGMA table_info(data_quality_findings)")}
             if "data_quality_findings" in tables
             else set()
         )
-        query_columns_present = {"id", "code", "superseded_at"}.issubset(finding_columns)
+        query_columns_present = {"id", "code", "superseded_at"}.issubset(
+            finding_columns
+        )
         # This query is scoped to the index and bounded; no actual price row leaves SQLite.
         if query_columns_present:
             count = conn.execute(
@@ -490,6 +489,7 @@ def _report(
         ],
     }
 
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -540,9 +540,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     if inspection and inspection["schema_compatibility"]["status"] != "compatible":
         print("Local schema: " + inspection["schema_compatibility"]["guidance"])
-    return 0 if report["synthetic"]["status"] == "pass" and (
-        report["read_only_local_inspection"]["status"] in {"pass", "not_run"}
-    ) else 1
+    return (
+        0
+        if report["synthetic"]["status"] == "pass"
+        and (report["read_only_local_inspection"]["status"] in {"pass", "not_run"})
+        else 1
+    )
 
 
 if __name__ == "__main__":
