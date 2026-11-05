@@ -1,4 +1,5 @@
 import { PageHeader } from "./PageHeader";
+import { LocalDataTable } from "./components/TablePagination";
 import { useLocale } from "./localization";
 import { useNotify } from "./notifications";
 import { useEffect, useState } from "react";
@@ -72,12 +73,14 @@ export function DataValidationPage() {
     const items = rows(section, field);
     return <details className="rounded-md border border-border p-3">
       <summary className="cursor-pointer text-sm font-medium">{t(heading)} ({items.length} {t("examples")})</summary>
-      {items.length ? <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-xs">
+      {items.length ? <LocalDataTable rows={items} label={t(heading)}
+        searchable={row => columns.map(column => display(row[column])).join(" ")}>{visible =>
+        <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-xs">
         <thead><tr>{columns.map((column) => <th className="border-b border-border p-2" key={column}>{t(column.replaceAll("_", " "))}</th>)}</tr></thead>
-        <tbody>{items.map((item, index) => <tr key={index} className="border-b border-border/50">
+        <tbody>{visible.map((item, index) => <tr key={index} className="border-b border-border/50">
           {columns.map((column) => <td key={column} className="p-2">{display(item[column])}</td>)}
         </tr>)}</tbody>
-      </table></div> : <p className="mt-2 text-xs text-muted-foreground">{t("No examples reported.")}</p>}
+      </table></div>}</LocalDataTable> : <p className="mt-2 text-xs text-muted-foreground">{t("No examples reported.")}</p>}
     </details>;
   };
   return (
