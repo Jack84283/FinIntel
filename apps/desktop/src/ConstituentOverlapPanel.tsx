@@ -39,6 +39,15 @@ export function overlapAsOfDate(overrideDate: string | null, analysisEnd: string
   return validOverlapDate(selected) ? selected : null;
 }
 
+/** The component cannot dispatch a membership request without a valid selected date. */
+export function overlapQueryForSelection(
+  expanded: boolean, left: IndexCode | null, right: IndexCode, asOf: string | null,
+  search: string, offset: number,
+): OverlapQuery | null {
+  if (!expanded || !left || !asOf) return null;
+  return { left, right, asOf, q: search, limit: PAGE_SIZE, offset };
+}
+
 /** Show both the imported snapshot date and the underlying evidence's effective date. */
 export function OverlapSourceDates({ source }: { source: OverlapSource }) {
   const { t } = useLocale();
@@ -84,8 +93,8 @@ export function ConstituentOverlapPanel({
     const id = ++generation.current;
     setResult(null);
     setError("");
-    if (!expanded || !left || !asOf) { setBusy(false); return; }
-    const query: OverlapQuery = { left, right, asOf, q: search, limit: PAGE_SIZE, offset };
+    const query = overlapQueryForSelection(expanded, left, right, asOf, search, offset);
+    if (!query) { setBusy(false); return; }
     setBusy(true);
     fetchMembershipOverlap(query).then(value => {
       if (id === generation.current) {
