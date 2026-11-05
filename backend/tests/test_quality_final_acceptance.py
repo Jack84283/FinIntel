@@ -142,7 +142,7 @@ def test_v14_copy_reports_migration_required_without_mutation(tmp_path, monkeypa
     assert compatibility["actual_version"] == 14
     assert compatibility["expected_version"] == 15
     assert "quality_corrections" in compatibility["missing_tables"]
-    assert compatibility["missing_columns"] == {"data_quality_findings": ["superseded_at"]}
+    assert "superseded_at" in compatibility["missing_columns"]["data_quality_findings"]
     assert "separate backup copy" in compatibility["guidance"]
     assert (
         next(
@@ -201,37 +201,46 @@ def test_synthetic_failure_keeps_passing_local_inspection_distinct():
     assert len(report["checks"]) == 2
 
 
-@pytest.mark.parametrize("missing_column", ("id", "code", "superseded_at"))
-def test_v15_missing_required_finding_column_is_not_compatible(
-    tmp_path, monkeypatch, missing_column
-):
-    """A v15 marker and all table names do not imply a valid query schema."""
-    incomplete = tmp_path / f"v15-no-{missing_column}.sqlite3"
-    with sqlite3.connect(incomplete) as db:
+def _create_v15_inspection_fixture(path, *, missing_table, missing_column):
+    """Create a disposable structural fixture, intentionally missing one column."""
+    with sqlite3.connect(path) as db:
         db.execute("PRAGMA user_version = 15")
-        # Provide all required table names and keep the inspected snapshot
-        # intentionally incomplete in exactly one required finding column.
-        for table in (
-            "daily_prices",
-            "index_daily_closes",
-            "data_quality_reviews",
-            "corporate_action_evidence",
-            "quality_corrections",
-            "quality_correction_events",
-        ):
-            db.execute(f"CREATE TABLE {table} (id TEXT)")
-        columns = ("id", "code", "superseded_at")
-        present_columns = ", ".join(
-            f"{column} TEXT" for column in columns if column != missing_column
-        )
-        db.execute(f"CREATE TABLE data_quality_findings ({present_columns})")
-        db.execute("INSERT INTO daily_prices VALUES ('unchanged-test-row')")
+        for table, columns in MODULE.INSPECTION_REQUIRED_COLUMNS.items():
+            # This test checks acceptance diagnostics, not price validation or DDL constraints.
+            fields = sorted(columns - {missing_column}) if table == missing_table else sorted(columns)
+            schema = ", ".join(f"{column} TEXT" for column in fields)
+            db.execute(f"CREATE TABLE {table} ({schema})")
+        db.execute("INSERT INTO daily_prices (close) VALUES ('unchanged-test-row')")
+
+
+@pytest.mark.parametrize(
+    ("missing_table", "missing_column"),
+    (
+        ("data_quality_findings", "id"),
+        ("data_quality_findings", "code"),
+        ("data_quality_findings", "superseded_at"),
+        ("quality_corrections", "state"),
+        ("quality_correction_events", "to_state"),
+        ("corporate_action_evidence", "status"),
+        ("data_quality_reviews", "finding_id"),
+        ("daily_prices", "volume"),
+        ("index_daily_closes", "source_url"),
+    ),
+)
+def test_v15_missing_required_column_is_not_compatible(
+    tmp_path, monkeypatch, missing_table, missing_column
+):
+    """A v15 marker and present table names must not hide broken data contracts."""
+    incomplete = tmp_path / f"v15-no-{missing_table}-{missing_column}.sqlite3"
+    _create_v15_inspection_fixture(
+        incomplete, missing_table=missing_table, missing_column=missing_column
+    )
     monkeypatch.setattr(
         MODULE,
         "_synthetic",
         lambda *_args: ([MODULE._check("synthetic.fixture", True, {})], {"sessions": 128}),
     )
-    output = tmp_path / f"v15-no-{missing_column}.json"
+    output = tmp_path / "incomplete-columns.json"
     assert MODULE.main(["--inspect-db", str(incomplete), "--output", str(output)]) == 1
 
     report = json.loads(output.read_text(encoding="utf-8"))
@@ -242,15 +251,19 @@ def test_v15_missing_required_finding_column_is_not_compatible(
     assert compatibility["status"] == "schema_incomplete"
     assert compatibility["actual_version"] == 15
     assert compatibility["missing_tables"] == []
-    assert compatibility["missing_columns"] == {"data_quality_findings": [missing_column]}
+    assert compatibility["missing_columns"] == {missing_table: [missing_column]}
     assert "tables or columns" in compatibility["guidance"]
-    local_checks = {check["id"]: check for check in report["read_only_local_inspection"]["checks"]}
-    assert local_checks["local.read_only_schema"]["status"] == "fail"
-    assert local_checks["local.read_only_schema"]["evidence"]["missing_columns"] == {
-        "data_quality_findings": [missing_column]
+    checks = {check["id"]: check for check in report["read_only_local_inspection"]["checks"]}
+    assert checks["local.read_only_schema"]["status"] == "fail"
+    assert checks["local.read_only_schema"]["evidence"]["missing_columns"] == {
+        missing_table: [missing_column]
     }
-    assert local_checks["local.index_scoped_query"]["status"] == "fail"
-    assert local_checks["local.index_scoped_query"]["evidence"]["query_columns_present"] is False
+    if missing_table == "data_quality_findings":
+        assert checks["local.index_scoped_query"]["status"] == "fail"
+        assert checks["local.index_scoped_query"]["evidence"]["query_columns_present"] is False
+    else:
+        assert checks["local.index_scoped_query"]["status"] == "pass"
+        assert checks["local.index_scoped_query"]["evidence"]["query_columns_present"] is True
     with sqlite3.connect(incomplete) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 15
-        assert db.execute("SELECT id FROM daily_prices").fetchone()[0] == "unchanged-test-row"
+        assert db.execute("SELECT close FROM daily_prices").fetchone()[0] == "unchanged-test-row"
