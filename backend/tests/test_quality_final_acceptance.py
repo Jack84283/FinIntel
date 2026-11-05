@@ -207,7 +207,9 @@ def _create_v15_inspection_fixture(path, *, missing_table, missing_column):
         db.execute("PRAGMA user_version = 15")
         for table, columns in MODULE.INSPECTION_REQUIRED_COLUMNS.items():
             # This test checks acceptance diagnostics, not price validation or DDL constraints.
-            fields = sorted(columns - {missing_column}) if table == missing_table else sorted(columns)
+            fields = (
+                sorted(columns - {missing_column}) if table == missing_table else sorted(columns)
+            )
             schema = ", ".join(f"{column} TEXT" for column in fields)
             db.execute(f"CREATE TABLE {table} ({schema})")
         db.execute("INSERT INTO daily_prices (close) VALUES ('unchanged-test-row')")
