@@ -23,7 +23,9 @@ def test_disposable_synthetic_acceptance_never_opens_configured_user_db(tmp_path
     assert not production.exists()
     assert report["verdict"] == "synthetic_pass_production_unverified"
     assert report["synthetic"]["status"] == "pass"
+    assert all(c["status"] == "pass" for c in report["synthetic"]["checks"])
     assert report["read_only_local_inspection"]["status"] == "not_run"
+    assert report["read_only_local_inspection"]["checks"] == []
     assert report["optional_live_providers"]["status"] == "not_run"
     assert all(item["status"] == "not_run" for item in report["manual_desktop"].values())
     assert all(item["status"] == "pass" for item in report["checks"])
@@ -56,6 +58,10 @@ def test_readonly_opt_in_existing_database_remains_unchanged(tmp_path):
     output = tmp_path / "inspect.json"
     assert MODULE.main(["--output", str(output), "--inspect-db", str(existing)]) == 0
     report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["synthetic"]["status"] == "pass"
+    assert report["read_only_local_inspection"]["status"] == "pass"
+    assert report["read_only_local_inspection"]["schema_compatibility"]["status"] == "compatible"
+    assert all(c["status"] == "pass" for c in report["read_only_local_inspection"]["checks"])
     assert report["read_only_local_inspection"]["inspection_only"] is True
     assert report["read_only_local_inspection"]["price_samples_exported"] is False
     assert report["read_only_local_inspection"]["counts"]["daily_prices"] == 80
@@ -106,3 +112,86 @@ def test_synthetic_failure_must_not_be_reported_as_production_success():
     assert report["synthetic"]["status"] == "fail"
     assert report["verdict"] == "synthetic_failure"
     assert report["manual_desktop"]["macos"]["status"] == "not_run"
+
+
+def test_v14_copy_reports_migration_required_without_mutation(tmp_path, monkeypatch, capsys):
+    """Legacy quality tables can lack superseded_at; inspection must not crash or migrate."""
+    legacy = tmp_path / "legacy-v14.sqlite3"
+    with sqlite3.connect(legacy) as db:
+        db.execute("PRAGMA user_version = 14")
+        db.execute("CREATE TABLE daily_prices (session_date TEXT, close TEXT)")
+        db.execute("CREATE TABLE index_daily_closes (session_date TEXT, close TEXT)")
+        db.execute(
+            "CREATE TABLE data_quality_findings (id TEXT PRIMARY KEY, code TEXT)"
+        )
+        db.execute("CREATE TABLE data_quality_reviews (id TEXT PRIMARY KEY)")
+        db.execute("INSERT INTO daily_prices VALUES ('2025-01-02', '100')")
+    monkeypatch.setattr(
+        MODULE,
+        "_synthetic",
+        lambda *_args: ([MODULE._check("synthetic.fixture", True, {})], {"sessions": 128}),
+    )
+    report_path = tmp_path / "v14-inspection.json"
+    assert MODULE.main(["--inspect-db", str(legacy), "--output", str(report_path)]) == 1
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["synthetic"]["status"] == "pass"
+    assert report["read_only_local_inspection"]["status"] == "fail"
+    assert report["verdict"] == "local_inspection_failed"
+    compatibility = report["read_only_local_inspection"]["schema_compatibility"]
+    assert compatibility["status"] == "migration_required"
+    assert compatibility["actual_version"] == 14
+    assert compatibility["expected_version"] == 15
+    assert "quality_corrections" in compatibility["missing_tables"]
+    assert "separate backup copy" in compatibility["guidance"]
+    assert next(
+        c for c in report["read_only_local_inspection"]["checks"]
+        if c["id"] == "local.index_scoped_query"
+    )["status"] == "fail"
+    assert "local inspection: fail" in capsys.readouterr().out
+    with sqlite3.connect(legacy) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert db.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 1
+        assert "quality_corrections" not in {
+            row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+
+
+def test_v15_missing_correction_table_is_local_failure_not_synthetic(tmp_path, monkeypatch):
+    incomplete = tmp_path / "incomplete-v15.sqlite3"
+    MODULE._seed(incomplete, MODULE._sessions(40))
+    with sqlite3.connect(incomplete) as db:
+        db.execute("DROP TABLE quality_correction_events")
+    monkeypatch.setattr(
+        MODULE,
+        "_synthetic",
+        lambda *_args: ([MODULE._check("synthetic.fixture", True, {})], {"sessions": 128}),
+    )
+    report_path = tmp_path / "incomplete-inspection.json"
+    assert MODULE.main(["--inspect-db", str(incomplete), "--output", str(report_path)]) == 1
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["synthetic"]["status"] == "pass"
+    assert report["read_only_local_inspection"]["status"] == "fail"
+    assert report["verdict"] == "local_inspection_failed"
+    compatibility = report["read_only_local_inspection"]["schema_compatibility"]
+    assert compatibility["status"] == "schema_incomplete"
+    assert compatibility["actual_version"] == 15
+    assert "quality_correction_events" in compatibility["missing_tables"]
+    assert "Never force the version marker" in compatibility["guidance"]
+    with sqlite3.connect(incomplete) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 15
+        assert db.execute("SELECT COUNT(*) FROM daily_prices").fetchone()[0] == 80
+
+
+def test_synthetic_failure_keeps_passing_local_inspection_distinct():
+    report = MODULE._report(
+        [MODULE._check("synthetic.issue", False, {})],
+        {"sessions": 128},
+        [MODULE._check("local.read_only_schema", True, {})],
+        {"large_dataset_observed": False, "inspection_only": True},
+    )
+    assert report["synthetic"]["status"] == "fail"
+    assert report["read_only_local_inspection"]["status"] == "pass"
+    assert report["verdict"] == "synthetic_failure"
+    assert len(report["checks"]) == 2
