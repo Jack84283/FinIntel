@@ -5,7 +5,7 @@ import {
   type OverlapQuery, type OverlapResult, type OverlapSource,
 } from "./membership-overlap-api";
 import {
-  ConstituentOverlapPanel, OverlapSourceDates, limitOverlapSearch, membershipIndexForMarket, overlapStatusDescription,
+  ConstituentOverlapPanel, OverlapSourceDates, limitOverlapSearch, membershipIndexForMarket, overlapAsOfDate, overlapQueryForSelection, overlapStatusDescription,
 } from "./ConstituentOverlapPanel";
 import { translate } from "./localization";
 
@@ -183,6 +183,57 @@ describe("Dated membership overlap API", () => {
     zero.filtered_total = 0;
     zero.items = [];
     expect(parseOverlapResult(zero, query).common_members).toBe(0);
+  });
+});
+
+describe("Point-in-time membership date alignment", () => {
+  it("uses explicit date override, then analysis end, never today's date", () => {
+    expect(overlapAsOfDate(null, "2026-10-20")).toBe("2026-10-20");
+    expect(overlapAsOfDate("2025-03-17", "2026-10-20")).toBe("2025-03-17");
+    // The calendar's Clear date action sends "". It must not re-inherit the parent.
+    expect(overlapAsOfDate("", "2026-10-20")).toBeNull();
+    expect(overlapAsOfDate("", "2026-11-05")).toBeNull();
+    expect(overlapAsOfDate(null, "2026-11-05")).toBe("2026-11-05");
+    expect(overlapAsOfDate(null, "")).toBeNull();
+    expect(overlapAsOfDate(null, "2026-02-30")).toBeNull();
+    // An invalid explicit override must not silently fall back to another date.
+    expect(overlapAsOfDate("2026-02-30", "2026-10-20")).toBeNull();
+    expect(overlapAsOfDate("2026-11-09", "")).toBe("2026-11-09");
+  });
+
+  it("does not dispatch after Clear date; explicit reset restores the parent's date", async () => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => example() });
+    vi.stubGlobal("fetch", fetcher);
+    const selection = (overrideDate: string | null) =>
+      overlapQueryForSelection(
+        true, "SP500", "NDX", overlapAsOfDate(overrideDate, query.asOf), "", 0,
+      );
+    const initial = selection(null);
+    expect(initial).toEqual(query);
+    if (initial) await fetchMembershipOverlap(initial);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    // The date picker returns "", and there is no request to dispatch.
+    const cleared = selection("");
+    expect(cleared).toBeNull();
+    if (cleared) await fetchMembershipOverlap(cleared);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(selection("2026-02-30")).toBeNull();
+    expect(overlapQueryForSelection(false, "SP500", "NDX", query.asOf, "", 0)).toBeNull();
+    expect(overlapQueryForSelection(true, null, "NDX", query.asOf, "", 0)).toBeNull();
+
+    // The separate "Use analysis end date" action restores null/inheritance.
+    const restored = selection(null);
+    expect(restored).toEqual(query);
+    if (restored) await fetchMembershipOverlap(restored);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses localized guidance rather than claiming missing source dates are available", () => {
+    expect(translate("zh-CN", "Select a valid constituent snapshot date to compare."))
+      .toBe("请选择有效的成分股快照日期进行比较。");
+    expect(() => validateOverlapQuery({ ...query, asOf: "" })).toThrow();
+    expect(() => validateOverlapQuery({ ...query, asOf: "2026-02-30" })).toThrow();
   });
 });
 

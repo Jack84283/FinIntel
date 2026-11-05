@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { MarketDatePicker } from "./components/MarketDatePicker";
 import { INDEX_CODES, type IndexCode } from "./index-api";
 import {
-  fetchMembershipOverlap, type OverlapQuery, type OverlapResult, type OverlapSource, type OverlapStatus,
+  fetchMembershipOverlap, validOverlapDate, type OverlapQuery, type OverlapResult, type OverlapSource, type OverlapStatus,
 } from "./membership-overlap-api";
 import { useLocale } from "./localization";
 
@@ -33,6 +33,21 @@ export function overlapStatusDescription(status: OverlapStatus): string {
   return statuses[status];
 }
 
+/** null inherits the analysis date; "" means explicitly cleared, never an implicit fallback. */
+export function overlapAsOfDate(overrideDate: string | null, analysisEnd: string): string | null {
+  const selected = overrideDate ?? analysisEnd;
+  return validOverlapDate(selected) ? selected : null;
+}
+
+/** The component cannot dispatch a membership request without a valid selected date. */
+export function overlapQueryForSelection(
+  expanded: boolean, left: IndexCode | null, right: IndexCode, asOf: string | null,
+  search: string, offset: number,
+): OverlapQuery | null {
+  if (!expanded || !left || !asOf) return null;
+  return { left, right, asOf, q: search, limit: PAGE_SIZE, offset };
+}
+
 /** Show both the imported snapshot date and the underlying evidence's effective date. */
 export function OverlapSourceDates({ source }: { source: OverlapSource }) {
   const { t } = useLocale();
@@ -55,7 +70,7 @@ export function ConstituentOverlapPanel({
   const [expanded, setExpanded] = useState(false);
   const [left, setLeft] = useState<IndexCode | null>(initialIndex);
   const [right, setRight] = useState<IndexCode>(initialIndex === "NDX" ? "SP500" : "NDX");
-  const [overrideDate, setOverrideDate] = useState("");
+  const [overrideDate, setOverrideDate] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
@@ -64,7 +79,7 @@ export function ConstituentOverlapPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const generation = useRef(0);
-  const asOf = overrideDate || analysisEnd || new Date().toISOString().slice(0, 10);
+  const asOf = overlapAsOfDate(overrideDate, analysisEnd);
   const unsupportedAnalysisIndex = membershipIndexForMarket(primaryIndex) === null;
 
   useEffect(() => {
@@ -78,8 +93,8 @@ export function ConstituentOverlapPanel({
     const id = ++generation.current;
     setResult(null);
     setError("");
-    if (!expanded || !left) { setBusy(false); return; }
-    const query: OverlapQuery = { left, right, asOf, q: search, limit: PAGE_SIZE, offset };
+    const query = overlapQueryForSelection(expanded, left, right, asOf, search, offset);
+    if (!query) { setBusy(false); return; }
     setBusy(true);
     fetchMembershipOverlap(query).then(value => {
       if (id === generation.current) {
@@ -155,15 +170,15 @@ export function ConstituentOverlapPanel({
             </select>
           </label>
           <div className="max-w-[340px]">
-            <MarketDatePicker label={t("Constituent snapshot date")} value={asOf}
+            <MarketDatePicker label={t("Constituent snapshot date")} value={asOf ?? ""}
               onChange={selectedDate} />
           </div>
         </div>
-        {overrideDate && <Button size="sm" variant="ghost" type="button"
-          onClick={() => selectedDate("")}>{t("Use analysis end date")}</Button>}
+        {overrideDate !== null && <Button size="sm" variant="ghost" type="button"
+          onClick={() => { setOverrideDate(null); setOffset(0); }}>{t("Use analysis end date")}</Button>}
         <p className="text-xs text-muted-foreground">
-          {t("Requested date")}: {asOf}.{" "}
-          {t("The latest available source snapshot on or before this date is compared. Older snapshots do not prove membership remained unchanged.")}
+          {t("Requested date")}: {asOf ?? t("Unavailable")}.{" "}
+          {asOf && t("The latest available source snapshot on or before this date is compared. Older snapshots do not prove membership remained unchanged.")}
         </p>
         <form onSubmit={submitSearch} className="flex flex-wrap items-end gap-2">
           <label className="grid min-w-0 flex-1 gap-1 text-xs text-muted-foreground">
@@ -179,6 +194,9 @@ export function ConstituentOverlapPanel({
         </form>
         {!left && <p role="status" className="text-sm text-muted-foreground">
           {t("Select a constituent index to begin the overlap comparison.")}
+        </p>}
+        {!asOf && <p role="status" className="text-sm text-muted-foreground">
+          {t("Select a valid constituent snapshot date to compare.")}
         </p>}
         {busy && <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
           {t("Checking local membership snapshots…")}
