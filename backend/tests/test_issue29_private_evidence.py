@@ -22,14 +22,10 @@ def _fixture(path):
         db.execute(
             "CREATE TABLE index_daily_closes (index_code TEXT, provider TEXT, session_date TEXT)"
         )
-        db.execute(
-            "CREATE TABLE data_quality_findings (id INTEGER, code TEXT, superseded_at TEXT)"
-        )
+        db.execute("CREATE TABLE data_quality_findings (id INTEGER, code TEXT, superseded_at TEXT)")
         db.execute("INSERT INTO series VALUES (1,'alpaca_sip')")
         db.execute("INSERT INTO daily_prices VALUES (1,'2026-11-01','private-price-1234')")
-        db.execute(
-            "INSERT INTO index_daily_closes VALUES ('SP500','fred','2026-11-01')"
-        )
+        db.execute("INSERT INTO index_daily_closes VALUES ('SP500','fred','2026-11-01')")
         db.execute("INSERT INTO data_quality_findings VALUES (1,'SP500',NULL)")
 
 
@@ -39,10 +35,7 @@ def test_detached_evidence_no_prices_or_paths(tmp_path, monkeypatch):
     _fixture(copy)
     before = copy.read_bytes()
     monkeypatch.setenv("FININTEL_DB_PATH", str(tmp_path / "live.sqlite3"))
-    assert (
-        MODULE.main(["--inspect-db", str(copy), "--output", str(output), "--repeat", "2"])
-        == 0
-    )
+    assert MODULE.main(["--inspect-db", str(copy), "--output", str(output), "--repeat", "2"]) == 0
     assert copy.read_bytes() == before
     report = json.loads(output.read_text())
     assert report["production_acceptance"] == "unverified"
@@ -88,23 +81,17 @@ def test_active_db_and_sidecars_refused(tmp_path, monkeypatch):
     _fixture(copy)
     monkeypatch.setenv("FININTEL_DB_PATH", str(copy))
     with pytest.raises(ValueError, match="active"):
-        MODULE.inspect(
-            copy, repeats=1, sample=10, quick_check=False, foreign_keys=False
-        )
+        MODULE.inspect(copy, repeats=1, sample=10, quick_check=False, foreign_keys=False)
     monkeypatch.setenv("FININTEL_DB_PATH", str(tmp_path / "active.sqlite3"))
     sidecar = Path(str(copy) + "-wal")
     sidecar.write_bytes(b"uncheckpointed")
     with pytest.raises(ValueError, match="sidecars"):
-        MODULE.inspect(
-            copy, repeats=1, sample=10, quick_check=False, foreign_keys=False
-        )
+        MODULE.inspect(copy, repeats=1, sample=10, quick_check=False, foreign_keys=False)
     sidecar.unlink()
     link = tmp_path / "symlink.sqlite3"
     link.symlink_to(copy)
     with pytest.raises(ValueError, match="symlink"):
-        MODULE.inspect(
-            link, repeats=1, sample=10, quick_check=False, foreign_keys=False
-        )
+        MODULE.inspect(link, repeats=1, sample=10, quick_check=False, foreign_keys=False)
 
 
 def test_incomplete_legacy_copy_does_not_crash(tmp_path, monkeypatch):
@@ -113,9 +100,7 @@ def test_incomplete_legacy_copy_does_not_crash(tmp_path, monkeypatch):
         db.execute("PRAGMA user_version=14")
         db.execute("CREATE TABLE daily_prices (session_date TEXT)")
     monkeypatch.setenv("FININTEL_DB_PATH", str(tmp_path / "live.sqlite3"))
-    report = MODULE.inspect(
-        copy, repeats=2, sample=10, quick_check=False, foreign_keys=False
-    )
+    report = MODULE.inspect(copy, repeats=2, sample=10, quick_check=False, foreign_keys=False)
     assert report["database"]["schema_version_matches"] is False
     assert "index_daily_closes" in report["database"]["missing_core_tables"]
     assert all(q["status"] == "not_run" for q in report["bounded_queries"])
@@ -148,12 +133,10 @@ def test_source_digests_are_stable_and_do_not_export_raw_rows(tmp_path, monkeypa
             db.execute(f"ALTER TABLE index_daily_closes ADD COLUMN {column} TEXT")
     monkeypatch.setenv("FININTEL_DB_PATH", str(tmp_path / "live.sqlite3"))
     first = MODULE.inspect(
-        copy, repeats=1, sample=10, quick_check=False,
-        foreign_keys=False, source_digests=True
+        copy, repeats=1, sample=10, quick_check=False, foreign_keys=False, source_digests=True
     )
     second = MODULE.inspect(
-        copy, repeats=1, sample=10, quick_check=False,
-        foreign_keys=False, source_digests=True
+        copy, repeats=1, sample=10, quick_check=False, foreign_keys=False, source_digests=True
     )
     assert first["source_digests"] == second["source_digests"]
     assert first["source_digests"]["daily_prices"]["rows_hashed"] == 1
