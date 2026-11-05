@@ -121,9 +121,7 @@ def test_v14_copy_reports_migration_required_without_mutation(tmp_path, monkeypa
         db.execute("PRAGMA user_version = 14")
         db.execute("CREATE TABLE daily_prices (session_date TEXT, close TEXT)")
         db.execute("CREATE TABLE index_daily_closes (session_date TEXT, close TEXT)")
-        db.execute(
-            "CREATE TABLE data_quality_findings (id TEXT PRIMARY KEY, code TEXT)"
-        )
+        db.execute("CREATE TABLE data_quality_findings (id TEXT PRIMARY KEY, code TEXT)")
         db.execute("CREATE TABLE data_quality_reviews (id TEXT PRIMARY KEY)")
         db.execute("INSERT INTO daily_prices VALUES ('2025-01-02', '100')")
     monkeypatch.setattr(
@@ -144,10 +142,14 @@ def test_v14_copy_reports_migration_required_without_mutation(tmp_path, monkeypa
     assert compatibility["expected_version"] == 15
     assert "quality_corrections" in compatibility["missing_tables"]
     assert "separate backup copy" in compatibility["guidance"]
-    assert next(
-        c for c in report["read_only_local_inspection"]["checks"]
-        if c["id"] == "local.index_scoped_query"
-    )["status"] == "fail"
+    assert (
+        next(
+            c
+            for c in report["read_only_local_inspection"]["checks"]
+            if c["id"] == "local.index_scoped_query"
+        )["status"]
+        == "fail"
+    )
     assert "local inspection: fail" in capsys.readouterr().out
     with sqlite3.connect(legacy) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 14
