@@ -324,7 +324,22 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
         }
         missing_tables = sorted(required - tables)
         has_required = not missing_tables
-        schema_ok = version == SCHEMA_VERSION and has_required
+        # A v15 marker and the expected table names alone do not prove the
+        # inspected schema can run the scoped Data Quality query.
+        required_finding_columns = {"id", "code", "superseded_at"}
+        finding_columns = (
+            {row[1] for row in conn.execute("PRAGMA table_info(data_quality_findings)")}
+            if "data_quality_findings" in tables
+            else set()
+        )
+        missing_finding_columns = sorted(required_finding_columns - finding_columns)
+        missing_columns = (
+            {"data_quality_findings": missing_finding_columns}
+            if "data_quality_findings" in tables and missing_finding_columns
+            else {}
+        )
+        query_columns_present = "data_quality_findings" in tables and not missing_columns
+        schema_ok = version == SCHEMA_VERSION and has_required and query_columns_present
         if schema_ok:
             compatibility = "compatible"
         elif 1 <= version < SCHEMA_VERSION:
@@ -340,8 +355,9 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
                 "then rerun this read-only inspection. Do not migrate the original here."
             ),
             "schema_incomplete": (
-                "Current schema marker has missing required tables; verify a separate "
-                "copy or restore from a known-good backup. Never force the version marker."
+                "Current schema marker has missing required tables or columns; verify "
+                "a separate copy or restore from a known-good backup. "
+                "Never force the version marker."
             ),
             "unsupported_version": (
                 "Schema is unsupported; verify the database copy and compatible "
@@ -360,16 +376,8 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
                 counts[table] = conn.execute(
                     f"SELECT COUNT(*) FROM {table}"
                 ).fetchone()[0]
-        # Legacy v14 tables can lack superseded_at: report incompatibility,
-        # do not crash or silently migrate the read-only inspected database.
-        finding_columns = (
-            {row[1] for row in conn.execute("PRAGMA table_info(data_quality_findings)")}
-            if "data_quality_findings" in tables
-            else set()
-        )
-        query_columns_present = {"id", "code", "superseded_at"}.issubset(
-            finding_columns
-        )
+        # Legacy/incomplete tables can lack scoped-query columns. Do not crash
+        # or silently migrate the read-only inspected database.
         # This query is scoped to the index and bounded; no actual price row leaves SQLite.
         if query_columns_present:
             count = conn.execute(
@@ -395,6 +403,7 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
                 "expected": SCHEMA_VERSION,
                 "quality_tables_present": has_required,
                 "missing_tables": missing_tables,
+                "missing_columns": missing_columns,
                 "compatibility": compatibility,
             },
         ),
@@ -415,6 +424,7 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
             "actual_version": version,
             "expected_version": SCHEMA_VERSION,
             "missing_tables": missing_tables,
+            "missing_columns": missing_columns,
             "guidance": guidance,
         },
         "counts": counts,
