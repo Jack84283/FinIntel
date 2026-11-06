@@ -27,12 +27,17 @@ backtest, a cloud service, a proprietary-code loader, or a desktop job dashboard
   bound, 32 active-job limit, three-attempt limit and 4 MiB retained-result cap
   remain enforced. A worker receives a 90-second wall-clock limit; cancellation
   and shutdown terminate the child, then use a bounded hard kill fallback.
-- Linux additionally restricts the child to a 2 GiB virtual address-space
-  ceiling. Windows/macOS have a wall-clock and observation/result bound but
-  **not a reliable OS-level memory ceiling** in this phase; do not misinterpret
-  those bounds as comprehensive memory isolation.
+- Linux restricts child virtual address space to 2 GiB with RLIMIT_AS.
+  Windows assigns the process to an OS Job Object with a 2 GiB committed-memory
+  ceiling and kill-on-job-close, failing closed if assignment is unavailable.
+  macOS polls the child's resident footprint with /bin/ps once per second and
+  terminates it above 2 GiB or if monitoring fails. macOS polling is **not a
+  strict kernel-enforced limit**; short-lived spikes between polls are possible.
+  The 90-second timeout and 2,000-observation cap apply to all platforms.
 - No jobs execute until explicitly queued by an authenticated managed desktop.
-  Startup does not create the model-jobs SQLite database if none exists.
+  Startup creates neither the model-jobs SQLite database nor a supervisor lock
+  file until a persisted ledger actually exists (important for abrupt Windows
+  sidecar shutdown). A second supervisor waits to acquire ownership.
   In-progress jobs are marked interrupted/cancelled after a supervisor restart
   rather than silently resumed. Queued jobs persist.
 
@@ -53,7 +58,10 @@ the token or an arbitrary URL proxy.
 The corresponding Tauri commands are `model_jobs_create`,
 `model_jobs_list`, `model_jobs_get`, `model_jobs_cancel`, and
 `model_jobs_retry`. They validate date/index/window selections and job UUID
-before routing to fixed localhost endpoints. **No new UI is included**; the
+before routing to fixed localhost endpoints. Native responses are checked
+against deny-unknown-field job summaries, bounded result contracts, states,
+source identity and hashes before they reach the webview. Managed model-job
+request validation errors are redacted without echoing rejected private input. **No new UI is included**; the
 next Phase 2B2 adds bilingual history, filtering and 10-row page controls.
 
 ## Regression tests and acceptance
