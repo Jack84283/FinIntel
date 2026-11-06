@@ -33,6 +33,29 @@ describe("independent desktop navigation and page headers", () => {
     expect(app).toContain("[screen]");
   });
 
+  it("keeps desktop navigation compact without reducing readable labels", () => {
+    const source = readFileSync(join(import.meta.dirname, "App.tsx"), "utf8");
+    expect(source).toContain('bg-muted px-3 py-4 focus-visible');
+    expect(source).toContain('className="mx-3 mb-6 grid h-11');
+    expect(source).toContain('className="mb-3 flex flex-col gap-1"');
+    expect(source).toContain('className="mb-1 px-3 text-sm font-bold');
+    expect(source).toContain("rounded-md px-3 py-2 text-left");
+    expect(source).toContain('className="flex flex-col gap-1 text-sm"');
+    expect(source).toContain('lg:overflow-y-auto lg:overscroll-y-contain');
+  });
+
+  it("starts the sticky desktop page header flush against the scroll pane top", () => {
+    const source = readFileSync(join(import.meta.dirname, "App.tsx"), "utf8");
+    const main = source.match(/<main\\b[^>]*>/)?.[0] ?? "";
+    expect(main).toContain("py-4");
+    expect(main).toContain("lg:pt-0 lg:pb-5");
+    expect(main).not.toContain("lg:py-5");
+    const header = renderToStaticMarkup(
+      <PageHeader id="header-top" breadcrumb="FinIntel" title="Header" subtitle="Subtitle" />,
+    );
+    expect(header).toContain("sticky top-0");
+  });
+
   it("provides keyboard-focusable, visibly focused independent scroll regions and bilingual names", () => {
     const source = readFileSync(join(import.meta.dirname, "App.tsx"), "utf8");
     const sidebar = source.match(/<aside\b[^>]*>/)?.[0] ?? "";
