@@ -1,3 +1,5 @@
+mod model_jobs;
+
 use std::sync::{atomic::{AtomicBool, AtomicU16, Ordering}, Mutex, OnceLock};
 use std::time::Duration;
 use tauri::Manager;
@@ -1017,6 +1019,117 @@ async fn model_research_evaluate(
     Ok(payload)
 }
 
+/// Fixed managed-only routes for durable local model jobs. No URL or command string
+/// is accepted from the webview and no proprietary model source is executable.
+fn valid_model_job_id(value: &str) -> bool {
+    uuid::Uuid::parse_str(value)
+        .ok()
+        .is_some_and(|parsed| parsed.to_string() == value)
+}
+
+fn valid_model_job_hash(hash: &str) -> bool {
+    hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+async fn model_jobs_write(path: &str, body: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() {
+        return Err("Model jobs require the managed local desktop.".into());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(35))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize the local model-jobs client.".to_string())?;
+    let mut request = client.post(format!("{}{}", backend_base(), path))
+        .header("x-finintel-process-token", backend_token());
+    if let Some(ref value) = body { request = request.json(value); }
+    let response = request.send().await
+        .map_err(|_| "Local model-jobs backend is unavailable.".to_string())?;
+    let status = response.status();
+    let payload = response.json::<serde_json::Value>().await
+        .map_err(|_| "Model-jobs backend returned malformed JSON.".to_string())?;
+    if !status.is_success() {
+        let detail = payload.get("detail").and_then(serde_json::Value::as_str)
+            .filter(|value| value.len() <= 160)
+            .unwrap_or("Model job request was rejected.");
+        return Err(format!("HTTP {}: {}", status.as_u16(), detail));
+    }
+    Ok(payload)
+}
+
+#[tauri::command]
+async fn model_jobs_create(
+    code: String,
+    start: String,
+    end: String,
+    quality_policy: String,
+    fast_window: u16,
+    slow_window: u16,
+    expected_snapshot: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if !valid_index_history_code(&code) || code == "VIX"
+        || !valid_index_history_date(&start) || !valid_index_history_date(&end)
+        || start > end
+        || !matches!(quality_policy.as_str(), "require_complete" | "allow_unverified")
+        || !(2..=100).contains(&fast_window) || !(3..=252).contains(&slow_window)
+        || fast_window >= slow_window
+        || expected_snapshot.as_deref().is_some_and(|value| !valid_model_job_hash(value))
+    {
+        return Err("Invalid local model-job request.".into());
+    }
+    let payload = model_jobs_write("/api/v1/models/jobs", Some(serde_json::json!({
+        "model_id": "builtin.sma_crossover",
+        "model_version": "1.0.0",
+        "code": code,
+        "start": start,
+        "end": end,
+        "quality_policy": quality_policy,
+        "parameters": {"fast_window": fast_window, "slow_window": slow_window},
+        "expected_snapshot_sha256": expected_snapshot,
+    }))).await?;
+    model_jobs::validate_summary(payload)
+}
+
+#[tauri::command]
+async fn model_jobs_list(limit: u8, offset: u32) -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() || limit == 0 || limit > 100 || offset > 10_000 {
+        return Err("Invalid managed model-job pagination.".into());
+    }
+    let payload = read_backend("/api/v1/models/jobs", &[
+        ("limit", limit.to_string()), ("offset", offset.to_string()),
+    ]).await?;
+    model_jobs::validate_list(payload)
+}
+
+#[tauri::command]
+async fn model_jobs_get(job_id: String, include_result: bool) -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() || !valid_model_job_id(&job_id) {
+        return Err("Invalid managed model-job identifier.".into());
+    }
+    let payload = read_backend(&format!("/api/v1/models/jobs/{job_id}"), &[
+        ("include_result", include_result.to_string()),
+    ]).await?;
+    model_jobs::validate_detail(payload, include_result)
+}
+
+#[tauri::command]
+async fn model_jobs_cancel(job_id: String) -> Result<serde_json::Value, String> {
+    if !valid_model_job_id(&job_id) {
+        return Err("Invalid local model-job identifier.".into());
+    }
+    let payload = model_jobs_write(&format!("/api/v1/models/jobs/{job_id}/cancel"), None).await?;
+    model_jobs::validate_cancel(payload)
+}
+
+#[tauri::command]
+async fn model_jobs_retry(job_id: String) -> Result<serde_json::Value, String> {
+    if !valid_model_job_id(&job_id) {
+        return Err("Invalid local model-job identifier.".into());
+    }
+    let payload = model_jobs_write(&format!("/api/v1/models/jobs/{job_id}/retry"), None).await?;
+    model_jobs::validate_summary(payload)
+}
+
 /// Read-only, bounded multi-index query with fixed local FRED series.
 #[tauri::command]
 async fn analytics_basket(
@@ -1409,6 +1522,11 @@ fn main() {
             analytics_series,
             analytics_basket,
             model_research_evaluate,
+            model_jobs_create,
+            model_jobs_list,
+            model_jobs_get,
+            model_jobs_cancel,
+            model_jobs_retry,
             index_history_acquire,
             daily_acquisition_status,
             daily_acquisition_settings,
@@ -1445,7 +1563,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::wait_for_backend;
+    use super::{valid_model_job_hash, valid_model_job_id, wait_for_backend};
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -1475,6 +1593,18 @@ mod tests {
             }
         });
         (port, thread)
+    }
+
+    #[test]
+    fn model_job_native_bridge_rejects_noncanonical_ids_and_unpinned_revisions() {
+        assert!(valid_model_job_id("123e4567-e89b-12d3-a456-426614174000"));
+        assert!(!valid_model_job_id("../../local-db"));
+        assert!(!valid_model_job_id("123E4567-E89B-12D3-A456-426614174000"));
+        assert!(!valid_model_job_id("not-a-uuid"));
+        assert!(valid_model_job_hash(&"a".repeat(64)));
+        assert!(!valid_model_job_hash(&"A".repeat(64)));
+        assert!(!valid_model_job_hash(&"g".repeat(64)));
+        assert!(!valid_model_job_hash("token"));
     }
 
     #[test]
