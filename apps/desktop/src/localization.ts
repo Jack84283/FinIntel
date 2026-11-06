@@ -128,6 +128,7 @@ const additionalChinese: Readonly<Record<string, string>> = {
   "Filter correction proposals": "筛选全部修正建议",
   "Filter by evidence": "按证据状态筛选",
   "Matching source snapshots": "符合条件的来源快照",
+  "No snapshots match the selected evidence filter.": "没有符合所选证据状态的快照。",
 
   "Local model research": "本地模型研究",
   "Evaluate a versioned built-in indicator on stored index observations. No orders or backtests.": "对存储在本地的指数观测数据运行版本化内置指标，不下单也不进行回测。",
