@@ -28,10 +28,17 @@ MAX_ATTEMPTS = 3
 MAX_LIST_LIMIT = 100
 
 STATES = frozenset({"queued", "running", "completed", "failed", "cancelled"})
-ERROR_CODES = frozenset({
-    "interrupted", "invalid_input", "quality_blocked", "source_changed",
-    "storage_unavailable", "resource_limit", "worker_failure",
-})
+ERROR_CODES = frozenset(
+    {
+        "interrupted",
+        "invalid_input",
+        "quality_blocked",
+        "source_changed",
+        "storage_unavailable",
+        "resource_limit",
+        "worker_failure",
+    }
+)
 
 
 class ModelJobStoreError(ValueError):
@@ -70,8 +77,10 @@ def _now() -> str:
 def jobs_database_path() -> Path:
     """Keep job state separate from the (possibly huge) price-observation database."""
     override = os.environ.get("FININTEL_MODEL_JOBS_DB_PATH")
-    return Path(override).expanduser() if override else database_path().with_name(
-        "finintel-model-jobs.sqlite3"
+    return (
+        Path(override).expanduser()
+        if override
+        else database_path().with_name("finintel-model-jobs.sqlite3")
     )
 
 
@@ -152,9 +161,12 @@ class ModelJobLedger:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         if version == JOB_SCHEMA_VERSION:
             return
-        if version != 0 or conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-        ).fetchone():
+        if (
+            version != 0
+            or conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchone()
+        ):
             raise ModelJobStoreError("Unsupported model-job storage version")
         # executescript commits implicitly; creation happens only for a new empty database.
         conn.executescript("BEGIN IMMEDIATE;\n" + DDL + "\nPRAGMA user_version = 1;\nCOMMIT;")
@@ -162,11 +174,23 @@ class ModelJobLedger:
     @staticmethod
     def _summary(row: sqlite3.Row) -> dict:
         return {
-            key: row[key] for key in (
-                "id", "state", "model_id", "model_version", "request_sha256",
-                "attempts", "progress", "cancel_requested", "output_sha256",
-                "source_snapshot_sha256", "error_code", "created_at", "updated_at",
-                "started_at", "finished_at",
+            key: row[key]
+            for key in (
+                "id",
+                "state",
+                "model_id",
+                "model_version",
+                "request_sha256",
+                "attempts",
+                "progress",
+                "cancel_requested",
+                "output_sha256",
+                "source_snapshot_sha256",
+                "error_code",
+                "created_at",
+                "updated_at",
+                "started_at",
+                "finished_at",
             )
         }
 
@@ -320,26 +344,33 @@ class ModelJobLedger:
 
     def complete(self, identifier: str, result: dict) -> bool:
         """Retain a validated bounded built-in result; never accept arbitrary code."""
-        if not isinstance(result, dict) or result.get("execution_contract") != (
-            "model-research-evaluation-v1"
-        ) or result.get("status") != "completed" or result.get("backtest_validated") is not False:
+        if (
+            not isinstance(result, dict)
+            or result.get("execution_contract") != ("model-research-evaluation-v1")
+            or result.get("status") != "completed"
+            or result.get("backtest_validated") is not False
+        ):
             raise ModelJobStoreError("Invalid model-job output contract")
         lineage = result.get("lineage")
-        if not isinstance(lineage, dict) or lineage.get("model_id") != MODEL_ID or (
-            lineage.get("model_version") != MODEL_VERSION
+        if (
+            not isinstance(lineage, dict)
+            or lineage.get("model_id") != MODEL_ID
+            or (lineage.get("model_version") != MODEL_VERSION)
         ):
             raise ModelJobStoreError("Model-job output identity mismatch")
         source = lineage.get("source_snapshot_sha256")
         output = result.get("output_sha256")
         reproducibility = result.get("reproducibility_sha256")
-        if any(not isinstance(value, str) or len(value) != 64 or any(
-            char not in "0123456789abcdef" for char in value
-        ) for value in (source, output, reproducibility)):
+        if any(
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)
+            for value in (source, output, reproducibility)
+        ):
             raise ModelJobStoreError("Invalid model-job source/output hash")
         if not isinstance(result.get("points"), list) or (
             hashlib.sha256(_canonical(result["points"]).encode("utf-8")).hexdigest() != output
-            or hashlib.sha256(_canonical(lineage).encode("utf-8")).hexdigest()
-            != reproducibility
+            or hashlib.sha256(_canonical(lineage).encode("utf-8")).hexdigest() != reproducibility
         ):
             raise ModelJobStoreError("Inconsistent model-job output hashes")
         canonical = _canonical(result)
@@ -358,7 +389,8 @@ class ModelJobLedger:
                     return False
                 original = json.loads(row["request_json"])
                 source_identity = lineage.get("source_identity")
-                if (not isinstance(source_identity, dict)
+                if (
+                    not isinstance(source_identity, dict)
                     or source_identity.get("code") != original["code"]
                     or source_identity.get("provider") != "fred"
                     or source_identity.get("adjustment") != "price_index"
@@ -366,8 +398,11 @@ class ModelJobLedger:
                     or lineage.get("requested_end") != original["end"]
                     or lineage.get("parameters") != original["parameters"]
                     or lineage.get("quality_policy") != original["quality_policy"]
-                    or (original["expected_snapshot_sha256"] is not None
-                        and source != original["expected_snapshot_sha256"])):
+                    or (
+                        original["expected_snapshot_sha256"] is not None
+                        and source != original["expected_snapshot_sha256"]
+                    )
+                ):
                     raise ModelJobStoreError("Model-job result does not match queued request")
                 at = _now()
                 cursor = conn.execute(
