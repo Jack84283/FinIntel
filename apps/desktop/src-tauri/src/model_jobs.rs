@@ -11,6 +11,7 @@ const MAX_RESULT_POINTS: usize = 2_000;
 struct JobSummary {
     id: String,
     state: String,
+    status: String,
     model_id: String,
     model_version: String,
     request_sha256: String,
@@ -30,6 +31,11 @@ impl JobSummary {
     fn valid(&self) -> bool {
         uuid::Uuid::parse_str(&self.id).ok().is_some_and(|id| id.to_string() == self.id)
             && matches!(self.state.as_str(), "queued" | "running" | "completed" | "failed" | "cancelled")
+            && self.status == if self.state == "running" && self.cancel_requested == 1 {
+                "cancel_requested"
+            } else {
+                self.state.as_str()
+            }
             && self.model_id == "builtin.sma_crossover"
             && self.model_version == "1.0.0"
             && valid_hash(&self.request_sha256)
@@ -273,7 +279,8 @@ mod tests {
     fn summary() -> Value {
         json!({
             "id": "123e4567-e89b-12d3-a456-426614174000",
-            "state": "queued", "model_id": "builtin.sma_crossover",
+            "state": "queued", "status": "queued",
+            "model_id": "builtin.sma_crossover",
             "model_version": "1.0.0", "request_sha256": "a".repeat(64),
             "attempts": 0, "progress": 0, "cancel_requested": 0,
             "output_sha256": null, "source_snapshot_sha256": null,
@@ -306,6 +313,19 @@ mod tests {
         assert!(validate_detail(leaked, false).is_err());
         assert!(validate_list(json!({"total": 1, "items": [summary()]})).is_ok());
         assert!(validate_list(json!({"total": 0, "items": [summary()]})).is_err());
+    }
+
+    #[test]
+    fn require_explicit_pending_cancellation_status() {
+        let mut pending = summary();
+        pending["state"] = json!("running");
+        pending["cancel_requested"] = json!(1);
+        pending["status"] = json!("cancel_requested");
+        assert!(validate_summary(pending.clone()).is_ok());
+        assert!(validate_detail(pending.clone(), false).is_ok());
+        assert!(validate_list(json!({"total": 1, "items": [pending.clone()]})).is_ok());
+        pending["status"] = json!("running");
+        assert!(validate_summary(pending).is_err());
     }
 
     #[test]
