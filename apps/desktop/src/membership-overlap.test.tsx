@@ -202,14 +202,14 @@ describe("Point-in-time membership date alignment", () => {
   });
 
   it("does not dispatch after Clear date; explicit reset restores the parent's date", async () => {
-    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => example() });
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ...example(), limit: 10 }) });
     vi.stubGlobal("fetch", fetcher);
     const selection = (overrideDate: string | null) =>
       overlapQueryForSelection(
         true, "SP500", "NDX", overlapAsOfDate(overrideDate, query.asOf), "", 0,
       );
     const initial = selection(null);
-    expect(initial).toEqual(query);
+    expect(initial).toEqual({ ...query, limit: 10 });
     if (initial) await fetchMembershipOverlap(initial);
     expect(fetcher).toHaveBeenCalledTimes(1);
 
@@ -224,7 +224,7 @@ describe("Point-in-time membership date alignment", () => {
 
     // The separate "Use analysis end date" action restores null/inheritance.
     const restored = selection(null);
-    expect(restored).toEqual(query);
+    expect(restored).toEqual({ ...query, limit: 10 });
     if (restored) await fetchMembershipOverlap(restored);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
