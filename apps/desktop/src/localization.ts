@@ -119,6 +119,11 @@ const additionalChinese: Readonly<Record<string, string>> = {
   "Filter table": "筛选表格",
   "Search table values": "搜索表格内容",
   "No rows match these filters.": "没有符合筛选条件的记录。",
+  "Full local SQLite import-history search, 10 records per page. Only successful imports are recorded here.": "搜索本地 SQLite 导入记录，每页 10 条，仅包含成功的导入记录。",
+  "Paginated locally available rows for the selected chart metric; values match the plotted source calculations.": "按页展示本地选定图表指标的全部已加载行；数值与图表使用相同计算结果。",
+  "Paginated common-session rows, matching chart calculations": "按页展示共有交易日数据，与图表计算一致",
+  "Filter current page by evidence": "按来源证据筛选当前页",
+  "All evidence statuses": "全部证据状态",
 
   "Local model research": "本地模型研究",
   "Evaluate a versioned built-in indicator on stored index observations. No orders or backtests.": "对存储在本地的指数观测数据运行版本化内置指标，不下单也不进行回测。",
