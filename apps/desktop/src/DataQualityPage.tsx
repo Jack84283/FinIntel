@@ -35,6 +35,11 @@ function readableError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** A page change must discard approval state for the previous, now off-page proposal. */
+export function correctionPageTransition(nextPage: number) {
+  return { page: nextPage, selectedCorrection: null, preview: null, approvalChecked: false, correctionNote: "" } as const;
+}
+
 /** A dedicated, source-first investigation screen. No raw market data is edited here. */
 export function DataQualityPage() {
   const { t, language } = useLocale();
@@ -84,7 +89,8 @@ export function DataQualityPage() {
     };
     Promise.allSettled([
       fetchQualityOverview(code), fetchQualityFindings(filters),
-      fetchQualityCorrections(code, pageSize, correctionPage * pageSize), fetchCorporateActions(code), fetchReconciliation(code),
+      fetchQualityCorrections(code, pageSize, correctionPage * pageSize, correctionFilter),
+      fetchCorporateActions(code), fetchReconciliation(code),
     ]).then(results => {
       if (cancelled) return;
       const [summary, rows, proposals, actions, providers] = results;
@@ -97,7 +103,7 @@ export function DataQualityPage() {
       if (errors.length) setLoadError(errors.map(error => readableError(error.reason)).join(" · "));
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [code, typeFilter, providerFilter, reviewFilter, page, correctionPage, revision]);
+  }, [code, typeFilter, providerFilter, reviewFilter, page, correctionPage, correctionFilter, revision]);
 
   useEffect(() => {
     let active = true;
@@ -139,6 +145,18 @@ export function DataQualityPage() {
       setBusy("");
     }
   }
+  const changeCorrectionPage = (nextPage: number) => {
+    const reset = correctionPageTransition(nextPage);
+    setCorrectionPage(reset.page);
+    setSelectedCorrection(reset.selectedCorrection);
+    setPreview(reset.preview);
+    setApprovalChecked(reset.approvalChecked);
+    setCorrectionNote(reset.correctionNote);
+  };
+  const changeCorrectionFilter = (next: string) => {
+    setCorrectionFilter(next.slice(0, 80));
+    changeCorrectionPage(0);
+  };
   const changeScope = (next: "index" | "equity") => {
     setScope(next);
     setTypeFilter(""); setProviderFilter(""); setReviewFilter(""); setPage(0);
@@ -152,9 +170,6 @@ export function DataQualityPage() {
     setSelectedCorrection(null);
     setProposedProvider(finding.provider.split("|")[0]);
   };
-  const visibleCorrections = (corrections?.items ?? []).filter(item => !correctionFilter.trim() ||
-    [item.session_date, item.provider, item.state, item.source_close, item.proposed_close]
-      .some(value => String(value).toLowerCase().includes(correctionFilter.trim().toLowerCase())));
   const selected = history?.finding;
   const canPropose = selected?.review_state === "confirmed" && !selected.superseded;
   const scopeDescription = scope === "index"
@@ -404,9 +419,9 @@ export function DataQualityPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <label className="flex max-w-md flex-col gap-1 text-xs text-muted-foreground">
-            {t("Filter current correction page")}
-            <input type="search" value={correctionFilter} onChange={event => setCorrectionFilter(event.target.value)}
-              aria-label={t("Filter current correction page")} placeholder={t("Search table values")}
+            {t("Filter correction proposals")}
+            <input type="search" value={correctionFilter} onChange={event => changeCorrectionFilter(event.target.value)}
+              aria-label={t("Filter correction proposals")} maxLength={80} placeholder={t("Search table values")}
               className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground" />
           </label>
           {!corrections?.items.length ? <p className="text-sm text-muted-foreground">{t("No correction proposals for this instrument.")}</p> :
@@ -416,7 +431,7 @@ export function DataQualityPage() {
                   {["Session", "Provider", "Original close", "Proposed close", "State", "Details"].map(label =>
                     <th scope="col" className="px-2 py-2" key={label}>{t(label)}</th>)}
                 </tr></thead>
-                <tbody>{visibleCorrections.map(item => <tr key={item.id} className="border-t border-border">
+                <tbody>{corrections.items.map(item => <tr key={item.id} className="border-t border-border">
                   <td className="px-2 py-2">{item.session_date}</td>
                   <td className="px-2 py-2">{item.provider}</td>
                   <td className="px-2 py-2 tabular-nums">{item.source_close}</td>
@@ -427,7 +442,7 @@ export function DataQualityPage() {
               </table>
             </div>}
           <TablePager page={correctionPage} total={corrections?.total ?? 0}
-            onPageChange={setCorrectionPage} disabled={loading} />
+            onPageChange={changeCorrectionPage} disabled={loading} />
           {selectedCorrection && <>
             <div className="rounded-md border border-border p-3 text-xs">
               <h3 className="mb-2 text-sm font-semibold">{t("Correction preview")}</h3>
