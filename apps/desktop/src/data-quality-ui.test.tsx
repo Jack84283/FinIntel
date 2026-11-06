@@ -1,3 +1,4 @@
+import { correctionPageTransition } from "./DataQualityPage";
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DataQualityPage } from "./DataQualityPage";
@@ -27,5 +28,17 @@ describe("Data Quality workspace", () => {
     ]) {
       expect(translate("zh-CN", key), key).not.toBe(key);
     }
+  });
+});
+
+
+describe("Correction review state on page navigation", () => {
+  it("discards off-page correction IDs, previews and approval inputs", () => {
+    const state = correctionPageTransition(2);
+    expect(state).toEqual({
+      page: 2, selectedCorrection: null, preview: null,
+      approvalChecked: false, correctionNote: "",
+    });
+    expect(correctionPageTransition(0).page).toBe(0);
   });
 });
