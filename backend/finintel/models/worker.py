@@ -85,7 +85,10 @@ def _restrict_resources() -> None:
         kernel.CreateJobObjectW.restype = wintypes.HANDLE
         kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
         kernel.SetInformationJobObject.argtypes = [
-            wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD
+            wintypes.HANDLE,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            wintypes.DWORD,
         ]
         kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
         kernel.GetCurrentProcess.restype = wintypes.HANDLE
@@ -108,6 +111,7 @@ _windows_job_handles: list[object] = []
 
 def _disable_network() -> None:
     """Defense in depth: no socket connects/sends from built-in model execution."""
+
     def denied(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("Network access is disabled for local research jobs")
 
@@ -417,15 +421,22 @@ class ModelJobSupervisor:
                         if self.ledger.complete(identifier, attempt, response["result"]):
                             return
                     elif response.get("kind") == "error" and response.get("code") in {
-                        "source_changed", "quality_blocked", "invalid_input",
-                        "resource_limit", "storage_unavailable", "worker_failure"
+                        "source_changed",
+                        "quality_blocked",
+                        "invalid_input",
+                        "resource_limit",
+                        "storage_unavailable",
+                        "worker_failure",
                     }:
                         reason = response["code"]
                     break
                 except subprocess.TimeoutExpired:
                     first = False
                     continue
-            if self.ledger.get(identifier) and _active(self.ledger, identifier, attempt) == "cancelled":
+            if (
+                self.ledger.get(identifier)
+                and _active(self.ledger, identifier, attempt) == "cancelled"
+            ):
                 self.ledger.finish_cancelled(identifier, attempt)
             else:
                 self.ledger.fail(identifier, attempt, reason)
