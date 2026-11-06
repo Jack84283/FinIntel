@@ -258,7 +258,9 @@ def corrections(
     offset: int = Query(default=0, ge=0),
 ) -> dict:
     try:
-        return list_corrections(database_path(), code=code, state=state, q=q, limit=limit, offset=offset)
+        return list_corrections(
+            database_path(), code=code, state=state, q=q, limit=limit, offset=offset
+        )
     except (FileNotFoundError, ValueError) as exc:
         raise _correction_error(exc) from exc
 
