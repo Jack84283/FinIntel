@@ -73,7 +73,10 @@ export function ConstituentTrendPanel({
     setResult(null);
     setError("");
     if (!expanded || !code || invalidRange) { setBusy(false); return; }
-    const query: TrendQuery = { code, fromAsOf: start, toAsOf: end, limit: PAGE_SIZE, offset };
+    const query: TrendQuery = {
+      code, fromAsOf: start, toAsOf: end, limit: PAGE_SIZE, offset,
+      evidenceStatus: evidenceFilter ? evidenceFilter as TrendEvidence : undefined,
+    };
     setBusy(true);
     fetchMembershipTrend(query).then(value => {
       if (id === generation.current) setResult(value);
@@ -83,12 +86,10 @@ export function ConstituentTrendPanel({
       if (id === generation.current) setBusy(false);
     });
     return () => { generation.current++; };
-  }, [expanded, code, start, end, invalidRange, offset, revision]);
+  }, [expanded, code, start, end, invalidRange, offset, evidenceFilter, revision]);
 
   const snapshots = result?.snapshots ?? [];
-  // Evidence filtering is confined to the explicitly loaded page; pagination totals
-  // continue to reflect all stored source snapshots, never a fabricated count.
-  const visibleSnapshots = evidenceFilter ? snapshots.filter(item => item.evidence_status === evidenceFilter) : snapshots;
+  // Backend filters before LIMIT/OFFSET; total_snapshots is the real matched count.
   const maximum = Math.max(1, ...snapshots.map(p => p.member_count));
   const total = result?.total_snapshots ?? 0;
   const count = (value: number | null) =>
@@ -149,7 +150,7 @@ export function ConstituentTrendPanel({
         </p>}
         {!busy && !error && result && <>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant="outline">{t("Observed source snapshots")}: {count(total)}</Badge>
+            <Badge variant="outline">{t(evidenceFilter ? "Matching source snapshots" : "Observed source snapshots")}: {count(total)}</Badge>
             <Badge variant="outline">{t("Snapshot-only; no interpolation")}</Badge>
           </div>
           {total === 0 ? <p role="status" className="text-sm text-muted-foreground">
@@ -159,8 +160,9 @@ export function ConstituentTrendPanel({
               {t("At least two stored snapshots are needed to observe changes.")}
             </p>}
             <label className="flex max-w-xs flex-col gap-1 text-xs text-muted-foreground">
-              {t("Filter current page by evidence")}
-              <select className={selectClass} value={evidenceFilter} onChange={event => setEvidenceFilter(event.target.value)}>
+              {t("Filter by evidence")}
+              <select className={selectClass} value={evidenceFilter}
+                onChange={event => { setEvidenceFilter(event.target.value); setOffset(0); }}>
                 <option value="">{t("All evidence statuses")}</option>
                 {(Object.keys(evidenceDescriptions) as TrendEvidence[]).map(status =>
                   <option key={status} value={status}>{t(trendEvidenceDescription(status))}</option>)}
@@ -182,7 +184,7 @@ export function ConstituentTrendPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleSnapshots.map(point => <tr key={point.snapshot_as_of} className="border-t border-border align-top">
+                  {snapshots.map(point => <tr key={point.snapshot_as_of} className="border-t border-border align-top">
                     <th scope="row" className="p-2 font-medium">{point.snapshot_as_of}</th>
                     <td className="p-2">
                       <span>{count(point.member_count)}</span>
