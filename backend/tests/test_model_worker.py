@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import subprocess
@@ -15,7 +16,8 @@ from fastapi.testclient import TestClient
 from finintel import main as backend_main
 from finintel.market_data.analytics import AnalyticsError
 from finintel.models import job_api, job_worker
-from finintel.models.job_store import ModelJobLedger, ModelJobRequest
+from finintel.models.engine import evaluate_builtin_indicator
+from finintel.models.job_store import ModelJobLedger, ModelJobRequest, ModelJobStoreError
 from finintel.storage.db import _write_connection
 
 REAL_WINDOWS_JOB_LIMIT = job_worker._limit_windows_worker
@@ -489,6 +491,117 @@ def test_macos_worker_rss_limit_terminates_child(local_storage, monkeypatch):
     assert child.terminated
     assert ledger.get(identifier)["state"] == "failed"
     assert ledger.get(identifier)["error_code"] == "resource_limit"
+
+
+def test_worker_recovers_after_transient_claim_failure(local_storage, monkeypatch):
+    _, jobs_db = local_storage
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request("a" * 64))["id"]
+    original_claim = ledger.claim_next
+    calls = 0
+
+    def flaky_claim():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ModelJobStoreError("Temporary local model-job storage unavailable")
+        return original_claim()
+
+    monkeypatch.setattr(ledger, "claim_next", flaky_claim)
+    owner = job_worker.ModelJobSupervisor(ledger)
+    monkeypatch.setattr(
+        owner,
+        "_run_claim",
+        lambda job_id, _request, attempt: ledger.fail(job_id, attempt, "worker_failure"),
+    )
+    assert owner.start()
+    try:
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            if ledger.get(identifier)["state"] == "failed":
+                break
+            time.sleep(0.05)
+        result = ledger.get(identifier)
+        assert calls >= 2
+        assert result["state"] == "failed"
+        assert result["error_code"] == "worker_failure"
+        assert result["attempts"] == 1
+    finally:
+        owner.stop()
+
+
+def test_pending_cancellation_status_in_native_api_responses(local_storage):
+    _, jobs_db = local_storage
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request("a" * 64))["id"]
+    claim = ledger.claim_next()
+    assert claim is not None
+    assert ledger.cancel(identifier) == "cancel_requested"
+    detail = ledger.get(identifier)
+    assert detail["state"] == "running"
+    assert detail["cancel_requested"] == 1
+    assert detail["status"] == "cancel_requested"
+    assert ledger.list()["items"][0]["status"] == "cancel_requested"
+    headers = {"x-finintel-process-token": TOKEN}
+    with TestClient(backend_main.app) as client:
+        response = client.get(f"/api/v1/models/jobs/{identifier}", headers=headers)
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancel_requested"
+        response = client.get("/api/v1/models/jobs", headers=headers)
+        assert response.status_code == 200
+        assert response.json()["items"][0]["status"] == "cancel_requested"
+    assert ledger.finish_cancelled(identifier, claim[2])
+    assert ledger.get(identifier)["status"] == "cancelled"
+
+
+def test_persisted_result_hashes_are_verified_on_read(local_storage):
+    market_db, jobs_db = local_storage
+    seed_market(market_db)
+    snapshot = job_worker.source_snapshot_for_job(
+        code="SP500", start=START, end=END, quality_policy="allow_unverified"
+    )
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request(snapshot))["id"]
+    claim = ledger.claim_next()
+    assert claim is not None
+    evaluation = evaluate_builtin_indicator(
+        code="SP500",
+        start=START,
+        end=END,
+        parameters=claim[1].parameters,
+        quality_policy="allow_unverified",
+        expected_snapshot_sha256=snapshot,
+    )
+    assert ledger.complete(identifier, claim[2], evaluation)
+    original = ledger.get(identifier, include_result=True)["result"]
+    assert original["output_sha256"] == ledger.get(identifier)["output_sha256"]
+
+    with sqlite3.connect(jobs_db) as conn:
+        for tampered in ("points", "lineage"):
+            altered = json.loads(json.dumps(original))
+            if tampered == "points":
+                altered["points"][-1]["close"] = "9999"
+            else:
+                altered["lineage"]["quality_status"] = "forged"
+            conn.execute(
+                "UPDATE model_jobs SET result_json=? WHERE id=?",
+                (json.dumps(altered), identifier),
+            )
+            with pytest.raises(ModelJobStoreError, match="integrity"):
+                ledger.get(identifier, include_result=True)
+            with TestClient(backend_main.app) as client:
+                response = client.get(
+                    f"/api/v1/models/jobs/{identifier}?include_result=true",
+                    headers={"x-finintel-process-token": TOKEN},
+                )
+                assert response.status_code == 503
+                assert "9999" not in response.text
+                assert "forged" not in response.text
+        conn.execute(
+            "UPDATE model_jobs SET result_json=? WHERE id=?",
+            (json.dumps(original), identifier),
+        )
+    assert ledger.get(identifier, include_result=True)["result"] == original
 
 
 def test_safe_error_mapping_never_contains_exception_text():
