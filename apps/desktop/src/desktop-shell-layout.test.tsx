@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PageHeader } from "./PageHeader";
 import { DataAcquisitionPage } from "./DataAcquisitionPage";
+import { translate } from "./localization";
 
 describe("independent desktop navigation and page headers", () => {
   it("keeps the shared header visible above the page's scrolling content", () => {
@@ -30,6 +31,23 @@ describe("independent desktop navigation and page headers", () => {
     expect(app).toContain("lg:overflow-y-auto lg:overscroll-y-contain");
     expect(app).toContain("mainScrollRef.current.scrollTop = 0");
     expect(app).toContain("[screen]");
+  });
+
+  it("provides keyboard-focusable, visibly focused independent scroll regions and bilingual names", () => {
+    const source = readFileSync(join(import.meta.dirname, "App.tsx"), "utf8");
+    const sidebar = source.match(/<aside\\b[^>]*>/)?.[0] ?? "";
+    const content = source.match(/<main\\b[^>]*>/)?.[0] ?? "";
+    for (const scroller of [sidebar, content]) {
+      expect(scroller).toContain("tabIndex={0}");
+      expect(scroller).toContain("focus-visible:ring-2");
+      expect(scroller).toContain("focus-visible:ring-inset");
+      expect(scroller).toContain("focus-visible:ring-ring");
+    }
+    expect(sidebar).toContain('aria-label={t("Main navigation")}');
+    expect(content).toContain('aria-label={t("Main content")}');
+    expect(translate("en", "Main content")).toBe("Main content");
+    expect(translate("zh-CN", "Main content")).toBe("主要内容");
+    expect(translate("zh-CN", "Main navigation")).toBe("主导航");
   });
 
   it("keeps full-width Daily guidance when stacked and the historical wide-screen columns", () => {
