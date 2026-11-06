@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import subprocess
+import sys
 from datetime import date, timedelta
 
 import pytest
@@ -177,7 +180,18 @@ def test_child_completes_only_pinned_observations_and_returns_verified_result(
     identifier = ledger.enqueue(request(source))["id"]
     claim = ledger.claim_next()
     assert claim is not None and claim[0] == identifier
-    assert job_worker.run_child(identifier, claim[2]) == 0
+    # Exercise the real child interpreter and Linux RLIMIT, not a patched in-process mock.
+    completed = subprocess.run(
+        [sys.executable, "-m", "finintel.models.job_worker", "--child",
+         identifier, str(claim[2])],
+        env={**os.environ, "FININTEL_DB_PATH": str(market_db),
+             "FININTEL_MODEL_JOBS_DB_PATH": str(jobs_db)},
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=40,
+        check=False,
+    )
+    assert completed.returncode == 0, "Isolated model worker failed"
     finished = ledger.get(identifier, include_result=True)
     assert finished["state"] == "completed"
     assert finished["progress"] == 100
