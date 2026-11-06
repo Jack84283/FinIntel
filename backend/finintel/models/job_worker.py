@@ -26,8 +26,9 @@ from finintel.storage.db import StorageError
 POLL_SECONDS = 0.2
 MAX_RUNTIME_SECONDS = 90
 TERMINATE_GRACE_SECONDS = 2
-# Linux only: additional process virtual-memory ceiling, on top of the 2000-row cap.
-LINUX_MAX_ADDRESS_SPACE_BYTES = 2 * 1024 * 1024 * 1024
+# Additional worker memory guard: Linux address space, Windows job object,
+# and a macOS RSS watchdog. The latter is polling rather than a hard kernel cap.
+MAX_WORKER_MEMORY_BYTES = 2 * 1024 * 1024 * 1024
 
 # Do not inherit provider credentials, API keys, proxy endpoints or a Python import path.
 CHILD_ENV_KEYS = frozenset(
@@ -70,11 +71,118 @@ def _bound_child_memory() -> None:
     import resource  # Unix only; Linux address-space limit is a secondary guard.
 
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-    ceiling = LINUX_MAX_ADDRESS_SPACE_BYTES
+    ceiling = MAX_WORKER_MEMORY_BYTES
     if hard != resource.RLIM_INFINITY:
         ceiling = min(ceiling, hard)
     if soft == resource.RLIM_INFINITY or soft > ceiling:
         resource.setrlimit(resource.RLIMIT_AS, (ceiling, hard))
+
+
+def _limit_windows_worker(process: subprocess.Popen[bytes]) -> int | None:
+    """Assign a child to a bounded Windows Job Object, fail closed on errors."""
+    if os.name != "nt":
+        return None
+
+    import ctypes
+    from ctypes import wintypes
+
+    class IoCounters(ctypes.Structure):
+        _fields_ = [
+            (name, ctypes.c_uint64)
+            for name in (
+                "ReadOperationCount",
+                "WriteOperationCount",
+                "OtherOperationCount",
+                "ReadTransferCount",
+                "WriteTransferCount",
+                "OtherTransferCount",
+            )
+        ]
+
+    class BasicLimits(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class ExtendedLimits(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", BasicLimits),
+            ("IoInfo", IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel.CreateJobObjectW.restype = ctypes.c_void_p
+    kernel.SetInformationJobObject.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    kernel.SetInformationJobObject.restype = wintypes.BOOL
+    kernel.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel.CloseHandle.restype = wintypes.BOOL
+
+    handle = kernel.CreateJobObjectW(None, None)
+    if not handle:
+        raise OSError("Model-worker memory isolation unavailable")
+    try:
+        limits = ExtendedLimits()
+        # Terminate remaining members if supervision exits unexpectedly.
+        limits.BasicLimitInformation.LimitFlags = 0x100 | 0x2000
+        limits.ProcessMemoryLimit = MAX_WORKER_MEMORY_BYTES
+        if not kernel.SetInformationJobObject(
+            handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)
+        ):
+            raise OSError("Model-worker memory isolation unavailable")
+        if not kernel.AssignProcessToJobObject(handle, ctypes.c_void_p(process._handle)):
+            raise OSError("Model-worker memory isolation unavailable")
+        return int(handle)
+    except Exception:
+        kernel.CloseHandle(handle)
+        raise
+
+
+def _close_windows_job(handle: int | None) -> None:
+    if handle is not None and os.name == "nt":
+        import ctypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel.CloseHandle.restype = ctypes.c_int
+        kernel.CloseHandle(ctypes.c_void_p(handle))
+
+
+def _macos_rss_bytes(pid: int) -> int | None:
+    """Read the actual resident KiB with the system ps utility, not virtual size."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        output = subprocess.run(
+            ["/bin/ps", "-o", "rss=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        raw = output.stdout.strip()
+        return int(raw) * 1024 if output.returncode == 0 and raw.isdigit() else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
 
 
 def source_snapshot_for_job(
@@ -302,8 +410,9 @@ class ModelJobSupervisor:
     def start(self) -> bool:
         if self._thread is not None and self._thread.is_alive():
             return True
-        if not self._acquire_lock():
-            return False
+        # Start without opening the lock. An idle packaged sidecar must not leave
+        # a Windows-held lock file behind when a launcher terminates abruptly.
+        # _loop acquires ownership only once an actual ledger exists.
         self._stop.clear()
         self._thread = threading.Thread(
             target=self._loop, name="finintel-model-supervisor", daemon=True
@@ -325,19 +434,32 @@ class ModelJobSupervisor:
 
     def _loop(self) -> None:
         try:
-            # Avoid creating an empty ledger just by starting the sidecar.
-            if self.ledger.path.is_file():
-                self.ledger.reconcile_interrupted()
             while not self._stop.is_set():
-                if self.ledger.path.is_file():
-                    claim = self.ledger.claim_next()
-                    if claim is not None:
-                        self._run_claim(*claim)
+                if self._lock_fd is None:
+                    if not self.ledger.path.is_file():
+                        self._stop.wait(POLL_SECONDS)
                         continue
+                    # A competing sidecar may own the ledger; retry instead of
+                    # terminating this supervisor permanently after one miss.
+                    if not self._acquire_lock():
+                        self._stop.wait(POLL_SECONDS)
+                        continue
+                    try:
+                        self.ledger.reconcile_interrupted()
+                    except ModelJobStoreError:
+                        self._release_lock()
+                        self._stop.wait(POLL_SECONDS)
+                        continue
+                claim = self.ledger.claim_next()
+                if claim is not None:
+                    self._run_claim(*claim)
+                    continue
                 self._stop.wait(POLL_SECONDS)
         except (OSError, ModelJobStoreError):
             # Safe shutdown: no inputs, path details or private observations in logs.
             pass
+        finally:
+            self._release_lock()
 
     def _run_claim(self, job_id: str, request: object, attempt: int) -> None:
         del request  # Private input stays in the ledger; child reloads it by claim ID.
@@ -349,6 +471,7 @@ class ModelJobSupervisor:
         env["FININTEL_MODEL_JOBS_DB_PATH"] = str(self.ledger.path.resolve())
         env["FININTEL_WORKER_PARENT_PID"] = str(os.getpid())
         process: subprocess.Popen[bytes] | None = None
+        windows_job: int | None = None
         try:
             process = subprocess.Popen(
                 _worker_command(job_id, attempt),
@@ -359,8 +482,17 @@ class ModelJobSupervisor:
                 close_fds=True,
             )
             self._child = process
+            windows_job = _limit_windows_worker(process)
             deadline = time.monotonic() + MAX_RUNTIME_SECONDS
+            next_macos_check = 0.0
             while process.poll() is None:
+                if sys.platform == "darwin" and time.monotonic() >= next_macos_check:
+                    rss = _macos_rss_bytes(process.pid)
+                    if rss is None or rss > MAX_WORKER_MEMORY_BYTES:
+                        _stop_process(process)
+                        self.ledger.fail(job_id, attempt, "resource_limit")
+                        return
+                    next_macos_check = time.monotonic() + 1.0
                 if self._stop.is_set():
                     _stop_process(process)
                     self.ledger.fail(job_id, attempt, "interrupted")
@@ -390,6 +522,7 @@ class ModelJobSupervisor:
         finally:
             if process is not None:
                 _stop_process(process)
+            _close_windows_job(windows_job)
             self._child = None
 
 
