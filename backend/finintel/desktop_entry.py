@@ -1,13 +1,18 @@
 """Executable entry point for the packaged, local-only FinIntel Python sidecar."""
 
 import os
+import sys
 
 import uvicorn
 
 from finintel.main import app
+from finintel.models.worker import child_main
 
 
 def main() -> None:
+    if sys.argv[1:] == ["--model-worker"]:
+        child_main()
+        return
     port = int(os.environ["FININTEL_BACKEND_PORT"])
     if not 1024 <= port <= 65535:
         raise ValueError("Invalid desktop backend port")
