@@ -130,6 +130,7 @@ def run_child(job_id: str, attempt: int) -> int:
             return 2
     except (ValueError, AttributeError):
         return 2
+    _watch_supervisor_parent()
     _deny_outbound_network()
     _bound_child_memory()
     ledger = ModelJobLedger()
@@ -178,6 +179,40 @@ def run_child(job_id: str, attempt: int) -> int:
         ledger.fail(job_id, attempt, "worker_failure")
         ledger.finish_cancelled(job_id, attempt)
         return 3
+
+
+def _parent_alive(parent_pid: int) -> bool:
+    if os.name == "nt":
+        # A Windows subprocess is not necessarily killed when its launcher dies.
+        import ctypes
+
+        kernel = ctypes.windll.kernel32
+        handle = kernel.OpenProcess(0x00100000, False, parent_pid)  # SYNCHRONIZE
+        if not handle:
+            return False
+        try:
+            return kernel.WaitForSingleObject(handle, 0) == 0x00000102  # WAIT_TIMEOUT
+        finally:
+            kernel.CloseHandle(handle)
+    return os.getppid() == parent_pid
+
+
+def _watch_supervisor_parent() -> None:
+    """A watchdog prevents orphaned computation after an unexpected sidecar crash."""
+    raw = os.environ.get("FININTEL_WORKER_PARENT_PID", "")
+    if not raw.isascii() or not raw.isdigit():
+        return
+    parent_pid = int(raw)
+    if parent_pid <= 1:
+        return
+
+    def watch() -> None:
+        while _parent_alive(parent_pid):
+            time.sleep(POLL_SECONDS)
+        # Parent death: no private log, and new sidecar will reconcile this attempt.
+        os._exit(4)
+
+    threading.Thread(target=watch, name="finintel-model-parent-watch", daemon=True).start()
 
 
 def _worker_command(job_id: str, attempt: int) -> list[str]:
@@ -308,6 +343,7 @@ class ModelJobSupervisor:
 
         env["FININTEL_DB_PATH"] = str(database_path().resolve())
         env["FININTEL_MODEL_JOBS_DB_PATH"] = str(self.ledger.path.resolve())
+        env["FININTEL_WORKER_PARENT_PID"] = str(os.getpid())
         process: subprocess.Popen[bytes] | None = None
         try:
             process = subprocess.Popen(
@@ -365,8 +401,12 @@ def start_model_jobs() -> None:
     with _supervisor_lock:
         if _supervisor is None:
             candidate = ModelJobSupervisor()
-            if candidate.start():
-                _supervisor = candidate
+            try:
+                if candidate.start():
+                    _supervisor = candidate
+            except (OSError, ModelJobStoreError):
+                # Model-job availability must not take down unrelated market services.
+                return
 
 
 def stop_model_jobs() -> None:
