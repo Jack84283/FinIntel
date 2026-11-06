@@ -587,6 +587,7 @@ def test_persisted_result_hashes_are_verified_on_read(local_storage):
                 "UPDATE model_jobs SET result_json=? WHERE id=?",
                 (json.dumps(altered), identifier),
             )
+            conn.commit()
             with pytest.raises(ModelJobStoreError, match="integrity"):
                 ledger.get(identifier, include_result=True)
             with TestClient(backend_main.app) as client:
