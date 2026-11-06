@@ -35,8 +35,8 @@ describe("independent desktop navigation and page headers", () => {
 
   it("provides keyboard-focusable, visibly focused independent scroll regions and bilingual names", () => {
     const source = readFileSync(join(import.meta.dirname, "App.tsx"), "utf8");
-    const sidebar = source.match(/<aside\\b[^>]*>/)?.[0] ?? "";
-    const content = source.match(/<main\\b[^>]*>/)?.[0] ?? "";
+    const sidebar = source.match(/<aside\b[^>]*>/)?.[0] ?? "";
+    const content = source.match(/<main\b[^>]*>/)?.[0] ?? "";
     for (const scroller of [sidebar, content]) {
       expect(scroller).toContain("tabIndex={0}");
       expect(scroller).toContain("focus-visible:ring-2");
