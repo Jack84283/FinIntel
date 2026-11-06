@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import ValidationError
 
 from finintel.market_data.analytics import AnalyticsError
 from finintel.models.api import ModelRunInput
@@ -58,6 +59,8 @@ def enqueue_model_job(payload: ModelRunInput, request: Request) -> dict:
         return ModelJobLedger().enqueue(typed)
     except ModelJobStoreError as exc:
         raise _storage_failure(exc) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="Invalid local model-job request") from exc
 
 
 @router.get("")
