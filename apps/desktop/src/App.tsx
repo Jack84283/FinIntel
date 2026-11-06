@@ -52,6 +52,13 @@ export default function App() {
   const [marketSelection, setMarketSelection] = useState<MarketSelection | null>(null);
   const [connection, setConnection] = useState<HealthConnection>({ kind: "loading" });
   const poller = useRef<ReturnType<typeof createHealthPoller> | null>(null);
+  const mainScrollRef = useRef<HTMLElement | null>(null);
+
+  // The desktop content pane scrolls independently of navigation. When the
+  // selected page changes, start its content at the page header again.
+  useEffect(() => {
+    if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
+  }, [screen]);
 
   const openMarkets = (selection?: MarketSelection) => {
     setMarketSelection((current) => resolveMarketSelection(current, selection));
@@ -70,8 +77,8 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background text-foreground lg:grid lg:grid-cols-[208px_minmax(0,1fr)]">
-      <aside className="hidden min-h-screen flex-col border-r border-border bg-muted px-3 py-6 lg:flex" aria-label={t("Main navigation")}>
+    <div className="min-h-screen bg-background text-foreground lg:grid lg:h-dvh lg:min-h-0 lg:grid-cols-[256px_minmax(0,1fr)] lg:overflow-hidden">
+      <aside tabIndex={0} className="hidden min-h-0 flex-col overflow-y-auto overscroll-y-contain border-r border-border bg-muted px-3 py-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring lg:flex lg:h-dvh" aria-label={t("Main navigation")}>
         <div className="mx-3 mb-12 grid h-11 w-12 place-items-center rounded-lg border border-[#568ad1] text-xl font-extrabold tracking-tight" aria-hidden="true">FI</div>
         <nav aria-label={t("Sections")} className="flex flex-col gap-1 text-sm">
           {groups.map((group) => (
@@ -88,7 +95,7 @@ export default function App() {
         <p className="mt-auto px-2 pt-8 text-[10px] font-medium tracking-widest text-[#62758d]">{t("PRIVATE · LOCAL FIRST")}</p>
       </aside>
 
-      <main className="w-full min-w-0 px-3 py-4 sm:px-4 lg:py-5">
+      <main ref={mainScrollRef} tabIndex={0} aria-label={t("Main content")} className="w-full min-w-0 px-3 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-4 lg:h-dvh lg:min-h-0 lg:overflow-y-auto lg:overscroll-y-contain lg:py-5">
         <nav aria-label={t("Mobile sections")} className="mb-5 flex gap-2 overflow-x-auto pb-2 lg:hidden">
           {allSections.map(({ id, label, icon: Icon }) => (
             <Button key={id} type="button" className="shrink-0" variant={screen === id ? "secondary" : "ghost"} onClick={() => id === "market" ? openMarkets() : setScreen(id)} aria-current={screen === id ? "page" : undefined}>
