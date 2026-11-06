@@ -7,6 +7,7 @@ export type TrendEvidence =
 export type TrendChangeStatus = "first_observed" | "verified_pair" | "indicative_pair";
 export type TrendQuery = {
   code: IndexCode; fromAsOf: string; toAsOf: string; limit: number; offset: number;
+  evidenceStatus?: TrendEvidence;
 };
 export type TrendPoint = {
   snapshot_as_of: string; source: string; source_as_of: string | null;
@@ -47,7 +48,8 @@ export function validateTrendQuery(query: TrendQuery): void {
     !validOverlapDate(query.fromAsOf) || !validOverlapDate(query.toAsOf) ||
     query.fromAsOf > query.toAsOf ||
     !count(query.limit) || query.limit < 1 || query.limit > 100 ||
-    !count(query.offset) || query.offset > 1_000_000) {
+    !count(query.offset) || query.offset > 1_000_000 ||
+    (query.evidenceStatus !== undefined && !statuses.includes(query.evidenceStatus))) {
     throw new Error("Invalid constituent snapshot trend selection.");
   }
 }
@@ -87,6 +89,7 @@ export function parseTrendResult(payload: unknown, query: TrendQuery): TrendResu
       !nullableCount(p.expected_count) || !count(p.member_count) || p.member_count === 0 ||
       !statuses.includes(p.evidence_status as TrendEvidence) ||
       p.evidence_status !== actualEvidence(p) ||
+      (query.evidenceStatus !== undefined && p.evidence_status !== query.evidenceStatus) ||
       !isDateOrNull(p.previous_snapshot_as_of) ||
       (p.previous_snapshot_as_of !== null && (p.previous_snapshot_as_of as string) >= (p.snapshot_as_of as string)) ||
       !(p.previous_evidence_status === null || statuses.includes(p.previous_evidence_status as TrendEvidence)) ||
@@ -94,9 +97,11 @@ export function parseTrendResult(payload: unknown, query: TrendQuery): TrendResu
       !["first_observed", "verified_pair", "indicative_pair"].includes(String(p.change_status))) {
       throw new Error("Invalid dated membership trend evidence.");
     }
-    const isFirst = query.offset === 0 && i === 0;
-    if (isFirst) {
-      if (p.previous_snapshot_as_of !== null || p.previous_evidence_status !== null ||
+    // The first filtered hit can have an earlier *unfiltered* snapshot.
+    // Never reinterpret filtered neighbors as consecutive source snapshots.
+    const firstVisible = query.offset === 0 && i === 0;
+    if (p.previous_snapshot_as_of === null) {
+      if (!firstVisible || p.previous_evidence_status !== null ||
           p.added_members !== null || p.removed_members !== null || p.change_status !== "first_observed") {
         throw new Error("First snapshot cannot invent earlier changes.");
       }
@@ -104,11 +109,14 @@ export function parseTrendResult(payload: unknown, query: TrendQuery): TrendResu
       const expectedStatus: TrendChangeStatus =
         p.previous_evidence_status === "verified_snapshot" && p.evidence_status === "verified_snapshot"
           ? "verified_pair" : "indicative_pair";
-      if (p.previous_snapshot_as_of === null || p.previous_evidence_status === null ||
+      if ((!query.evidenceStatus && firstVisible) || p.previous_evidence_status === null ||
           !count(p.added_members) || !count(p.removed_members) || p.change_status !== expectedStatus ||
-          (prior !== null && (p.previous_snapshot_as_of !== prior.snapshot_as_of ||
-            p.previous_evidence_status !== prior.evidence_status ||
-            p.member_count !== (prior.member_count as number) + (p.added_members as number) - (p.removed_members as number)))) {
+          (prior !== null && (
+            (p.previous_snapshot_as_of as string) < (prior.snapshot_as_of as string) ||
+            (p.previous_snapshot_as_of === prior.snapshot_as_of &&
+              (p.previous_evidence_status !== prior.evidence_status ||
+               p.member_count !== (prior.member_count as number) + (p.added_members as number) - (p.removed_members as number))) ||
+            (!query.evidenceStatus && p.previous_snapshot_as_of !== prior.snapshot_as_of)))) {
         throw new Error("Inconsistent sourced membership changes.");
       }
     }
@@ -123,11 +131,13 @@ export async function fetchMembershipTrend(query: TrendQuery): Promise<TrendResu
     payload = await invoke("index_membership_trend", {
       code: query.code, fromAsOf: query.fromAsOf, toAsOf: query.toAsOf,
       limit: query.limit, offset: query.offset,
+      ...(query.evidenceStatus ? { evidenceStatus: query.evidenceStatus } : {}),
     });
   } else {
     const params = new URLSearchParams({
       code: query.code, from_as_of: query.fromAsOf, to_as_of: query.toAsOf,
       limit: String(query.limit), offset: String(query.offset),
+      ...(query.evidenceStatus ? { evidence_status: query.evidenceStatus } : {}),
     });
     const response = await fetch("/api/v1/market-data/indexes/snapshot-trend?" + params, {
       cache: "no-store",
