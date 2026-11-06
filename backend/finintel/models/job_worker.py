@@ -168,19 +168,41 @@ def _close_windows_job(handle: int | None) -> None:
 
 
 def _macos_rss_bytes(pid: int) -> int | None:
-    """Read the actual resident KiB with the system ps utility, not virtual size."""
+    """Sum resident KiB of the packaged launcher AND its Python descendants."""
     if sys.platform != "darwin":
         return None
     try:
         output = subprocess.run(
-            ["/bin/ps", "-o", "rss=", "-p", str(pid)],
+            ["/bin/ps", "-axo", "pid=,ppid=,rss="],
             capture_output=True,
             text=True,
             timeout=2,
             check=False,
         )
-        raw = output.stdout.strip()
-        return int(raw) * 1024 if output.returncode == 0 and raw.isdigit() else None
+        if output.returncode != 0:
+            return None
+        rss_by_pid: dict[int, int] = {}
+        children: dict[int, list[int]] = {}
+        for line in output.stdout.splitlines():
+            fields = line.split()
+            if len(fields) != 3 or not all(field.isdecimal() for field in fields):
+                continue
+            child_pid, parent_pid, rss_kib = map(int, fields)
+            rss_by_pid[child_pid] = rss_kib
+            children.setdefault(parent_pid, []).append(child_pid)
+        if pid not in rss_by_pid:
+            return None
+        total = 0
+        pending = [pid]
+        visited: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            total += rss_by_pid.get(current, 0)
+            pending.extend(children.get(current, []))
+        return total * 1024
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return None
 
