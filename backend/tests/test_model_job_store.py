@@ -90,7 +90,7 @@ def test_create_queue_claim_complete_and_read_only_history(tmp_path):
     claimed = ledger.claim_next()
     assert claimed is not None
     identifier, selected, attempt = claimed
-    assert identifier == created["id"] and selected == request()
+    assert identifier == created["id"] and selected == request() and attempt == 1
     assert ledger.set_progress(identifier, 1, 75)
     assert not ledger.set_progress(identifier, 1, 20)
     assert ledger.complete(identifier, 1, result())
