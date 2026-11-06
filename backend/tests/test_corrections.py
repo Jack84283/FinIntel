@@ -487,8 +487,11 @@ def test_global_correction_search_filters_before_paging(tmp_path, monkeypatch):
     finding_id, _ = seed(path)
     review_finding(path, finding_id, "confirmed", "Reviewed")
     original_id = propose_correction(
-        path, finding_id=finding_id, provider="alpaca_sip",
-        proposed_close="92", rationale="Correction search baseline",
+        path,
+        finding_id=finding_id,
+        provider="alpaca_sip",
+        proposed_close="92",
+        rationale="Correction search baseline",
     )["id"]
     with sqlite3.connect(path) as conn:
         columns = [row[1] for row in conn.execute("PRAGMA table_info(quality_corrections)")]
@@ -512,12 +515,13 @@ def test_global_correction_search_filters_before_paging(tmp_path, monkeypatch):
     matched = list_corrections(path, code="AAPL", q=target_provider, limit=10)
     assert matched["total"] == 1
     assert [row["provider"] for row in matched["items"]] == [target_provider]
-    assert list_corrections(path, code="AAPL", q="test-provider", limit=10, offset=10)[
-        "total"
-    ] == 15
-    assert len(
-        list_corrections(path, code="AAPL", q="test-provider", limit=10, offset=10)["items"]
-    ) == 5
+    assert (
+        list_corrections(path, code="AAPL", q="test-provider", limit=10, offset=10)["total"] == 15
+    )
+    assert (
+        len(list_corrections(path, code="AAPL", q="test-provider", limit=10, offset=10)["items"])
+        == 5
+    )
     assert list_corrections(path, code="AAPL", q="%", limit=10)["total"] == 0
     # Underscore is literal: only the original alpaca_sip provider matches.
     literal_underscore = list_corrections(path, code="AAPL", q="_", limit=10)
@@ -526,12 +530,22 @@ def test_global_correction_search_filters_before_paging(tmp_path, monkeypatch):
 
     monkeypatch.setenv("FININTEL_DB_PATH", str(path))
     with TestClient(app) as client:
-        result = client.get("/api/v1/quality/corrections", params={
-            "code": "AAPL", "q": target_provider, "limit": 10, "offset": 0,
-        })
-        invalid = client.get("/api/v1/quality/corrections", params={
-            "code": "AAPL", "q": "x" * 81,
-        })
+        result = client.get(
+            "/api/v1/quality/corrections",
+            params={
+                "code": "AAPL",
+                "q": target_provider,
+                "limit": 10,
+                "offset": 0,
+            },
+        )
+        invalid = client.get(
+            "/api/v1/quality/corrections",
+            params={
+                "code": "AAPL",
+                "q": "x" * 81,
+            },
+        )
     assert result.status_code == 200, result.text
     assert result.json()["total"] == 1
     assert result.json()["items"][0]["provider"] == target_provider
