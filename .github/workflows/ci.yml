@@ -89,6 +89,9 @@ jobs:
           python scripts/build_sidecar.py
       - name: Smoke test packaged local backend
         run: python scripts/smoke_sidecar.py
+      - name: Exercise platform-specific model-worker regression tests
+        if: runner.os != 'Linux'
+        run: python -m pytest backend/tests/test_model_worker.py -q
       - name: Install JavaScript dependencies
         run: npm ci --no-audit --no-fund
       - name: Build frontend assets
@@ -97,6 +100,8 @@ jobs:
         run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
       - name: Run native overlap Unicode unit tests
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel overlap_search_tests
+      - name: Run model-job native IPC contract tests
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel model_jobs
       - name: Package macOS app bundle
         if: runner.os == 'macOS'
         run: npm run tauri:build --workspace @finintel/desktop -- --bundles app
