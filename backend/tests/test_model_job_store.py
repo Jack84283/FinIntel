@@ -32,9 +32,13 @@ def result(source="a" * 64):
         "implementation_revision": "sma-crossover-observed-close-v1",
         "parameters": {"fast_window": 5, "slow_window": 20},
         "source_identity": {
-            "instrument_kind": "index", "code": "SP500", "provider": "fred",
-            "adjustment": "price_index", "return_semantics": "price_index",
-            "frequency": "daily", "units": "index_points",
+            "instrument_kind": "index",
+            "code": "SP500",
+            "provider": "fred",
+            "adjustment": "price_index",
+            "return_semantics": "price_index",
+            "frequency": "daily",
+            "units": "index_points",
         },
         "source_snapshot_sha256": source,
         "analysis_calculation_version": "index-analytics-v2",
@@ -51,15 +55,25 @@ def result(source="a" * 64):
     }
     points = [
         {
-            "session_date": f"2026-09-{i:02d}", "close": str(100+i),
-            "fast_sma": None, "slow_sma": None, "signal_after_close": None,
+            "session_date": f"2026-09-{i:02d}",
+            "close": str(100 + i),
+            "fast_sma": None,
+            "slow_sma": None,
+            "signal_after_close": None,
         }
         for i in range(1, 22)
     ]
+
     def digest(value):
-        return hashlib.sha256(json.dumps(
-            value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
-        ).encode("utf-8")).hexdigest()
+        return hashlib.sha256(
+            json.dumps(
+                value,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode("utf-8")
+        ).hexdigest()
+
     return {
         "execution_contract": "model-research-evaluation-v1",
         "status": "completed",
@@ -236,7 +250,6 @@ def test_result_cannot_bypass_expected_source_revision(tmp_path):
         ledger.complete(identifier, 1, result(source="a" * 64))
     assert ledger.get(identifier)["state"] == "running"
     assert ledger.fail(identifier, 1, "source_changed")
-
 
 
 def test_default_and_relative_job_paths_allow_read_only_queries(tmp_path, monkeypatch):
