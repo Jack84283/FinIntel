@@ -41,9 +41,7 @@ def _watch_frozen_launcher() -> None:
             time.sleep(0.2)
         os._exit(4)
 
-    threading.Thread(
-        target=watch, name="finintel-frozen-launcher-watch", daemon=True
-    ).start()
+    threading.Thread(target=watch, name="finintel-frozen-launcher-watch", daemon=True).start()
 
 
 def main() -> int:
