@@ -39,13 +39,13 @@ describe("navigation between research and data operations", () => {
       <DataAcquisitionPage mode="daily" onViewMarket={() => undefined} />,
     );
     expect(historical).toContain("Historical Data");
-    expect(historical).toContain("Index History");
+    expect(historical).toContain("Index history acquisition");
     expect(historical).toContain("Fetch &amp; store");
     expect(historical).not.toContain("Daily acquisition");
     expect(daily).toContain("Daily &amp; Incremental Data");
-    expect(daily).toContain("Daily acquisition");
+    expect(daily).toContain("Daily Acquisition");
     expect(daily).not.toContain("Fetch &amp; store");
-    expect(daily).not.toContain("Index History");
+    expect(daily).not.toContain("Index history acquisition");
     const app = readFileSync(join(import.meta.dirname, "App.tsx"), "utf8");
     expect(app).toContain('id: "daily-acquisition"');
     expect(app).toContain('mode="history"');
