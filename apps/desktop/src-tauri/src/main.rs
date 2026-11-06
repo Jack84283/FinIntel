@@ -1017,6 +1017,231 @@ async fn model_research_evaluate(
     Ok(payload)
 }
 
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ModelJobSummary {
+    id: String,
+    state: String,
+    model_id: String,
+    model_version: String,
+    request_sha256: String,
+    attempts: u8,
+    progress: u8,
+    cancel_requested: u8,
+    output_sha256: Option<String>,
+    source_snapshot_sha256: Option<String>,
+    error_code: Option<String>,
+    created_at: String,
+    updated_at: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+}
+
+fn valid_model_job_id(id: &str) -> bool {
+    id.len() == 36 && id.bytes().enumerate().all(|(i, byte)| {
+        if matches!(i, 8 | 13 | 18 | 23) {
+            byte == b'-'
+        } else {
+            byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()
+        }
+    })
+}
+
+fn validate_model_job_summary(job: &ModelJobSummary) -> bool {
+    valid_model_job_id(&job.id)
+        && job.model_id == "builtin.sma_crossover"
+        && job.model_version == "1.0.0"
+        && matches!(job.state.as_str(), "queued" | "running" | "completed" | "failed" | "cancelled")
+        && job.attempts <= 3 && job.progress <= 100 && job.cancel_requested <= 1
+        && job.request_sha256.len() == 64
+        && job.request_sha256.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        && job.output_sha256.as_ref().is_none_or(|hash| hash.len() == 64)
+        && job.source_snapshot_sha256.as_ref().is_none_or(|hash| hash.len() == 64)
+}
+
+fn parse_model_job(payload: &serde_json::Value) -> Result<ModelJobSummary, String> {
+    let job: ModelJobSummary = serde_json::from_value(payload.clone())
+        .map_err(|_| "Malformed local model job response.".to_string())?;
+    if !validate_model_job_summary(&job) {
+        return Err("Incompatible local model job response.".to_string());
+    }
+    Ok(job)
+}
+
+async fn model_job_post(path: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() {
+        return Err("Managed desktop authorization required.".to_string());
+    }
+    // Callers supply only fixed routes and strictly validated UUID path components.
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Could not initialize managed model job transport.".to_string())?;
+    let response = client.post(format!("{}{path}", backend_base()))
+        .header("x-finintel-process-token", backend_token())
+        .json(&body)
+        .send().await
+        .map_err(|_| "Managed local model job backend is unavailable.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Managed local model job request failed (HTTP {}).", response.status().as_u16()));
+    }
+    response.json::<serde_json::Value>().await
+        .map_err(|_| "Malformed local model job response.".to_string())
+}
+
+/// No arbitrary model IDs, user-code fields, paths, providers, or URLs enter IPC.
+#[tauri::command]
+async fn model_job_enqueue(
+    code: String,
+    start: String,
+    end: String,
+    quality_policy: String,
+    fast_window: u16,
+    slow_window: u16,
+    expected_snapshot: String,
+) -> Result<serde_json::Value, String> {
+    if !valid_index_history_code(&code) || code == "VIX"
+        || !valid_index_history_date(&start) || !valid_index_history_date(&end)
+        || start > end
+        || !matches!(quality_policy.as_str(), "require_complete" | "allow_unverified")
+        || !(2..=100).contains(&fast_window) || !(3..=252).contains(&slow_window)
+        || fast_window >= slow_window
+        || expected_snapshot.len() != 64
+        || !expected_snapshot.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err("Invalid pinned local model job request.".to_string());
+    }
+    let body = serde_json::json!({
+        "model_id": "builtin.sma_crossover",
+        "model_version": "1.0.0",
+        "code": code, "start": start, "end": end,
+        "quality_policy": quality_policy,
+        "parameters": { "fast_window": fast_window, "slow_window": slow_window },
+        "expected_snapshot_sha256": expected_snapshot,
+    });
+    let value = model_job_post("/api/v1/models/jobs", body).await?;
+    let job = parse_model_job(&value)?;
+    serde_json::to_value(job).map_err(|_| "Invalid local model job result.".to_string())
+}
+
+#[tauri::command]
+async fn model_job_list(limit: Option<u16>, offset: u16) -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() || limit.is_some_and(|n| n == 0 || n > 100) || offset > 10_000 {
+        return Err("Invalid managed model-job pagination.".to_string());
+    }
+    let params = [
+        ("limit", limit.unwrap_or(10).to_string()),
+        ("offset", offset.to_string()),
+    ];
+    let value = read_backend("/api/v1/models/jobs", &params).await?;
+    let total = value.get("total").and_then(serde_json::Value::as_u64)
+        .ok_or("Malformed local model job list.".to_string())?;
+    let rows = value.get("items").and_then(serde_json::Value::as_array)
+        .ok_or("Malformed local model job list.".to_string())?;
+    if rows.len() > limit.unwrap_or(10) as usize {
+        return Err("Unbounded local model job list.".to_string());
+    }
+    let parsed: Vec<ModelJobSummary> = rows.iter()
+        .map(parse_model_job)
+        .collect::<Result<_, _>>()?;
+    Ok(serde_json::json!({ "total": total, "items": parsed }))
+}
+
+#[tauri::command]
+async fn model_job_detail(job_id: String, include_result: bool) -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() || !valid_model_job_id(&job_id) {
+        return Err("Invalid local model job identifier.".to_string());
+    }
+    let path = if include_result {
+        format!("/api/v1/models/jobs/{job_id}/result")
+    } else {
+        format!("/api/v1/models/jobs/{job_id}")
+    };
+    let value = read_backend(&path, &[]).await?;
+    let parsed = parse_model_job(&value)?;
+    let mut safe = serde_json::to_value(parsed)
+        .map_err(|_| "Malformed local model job response.".to_string())?;
+    if include_result {
+        let result = value.get("result").and_then(serde_json::Value::as_object)
+            .ok_or("Missing managed model job result.".to_string())?;
+        if result.get("execution_contract").and_then(serde_json::Value::as_str)
+            != Some("model-research-evaluation-v1")
+            || result.get("backtest_validated").and_then(serde_json::Value::as_bool)
+                != Some(false)
+            || result.get("read_only").and_then(serde_json::Value::as_bool) != Some(true)
+        {
+            return Err("Invalid managed model research result.".to_string());
+        }
+        safe["result"] = serde_json::Value::Object(result.clone());
+    }
+    Ok(safe)
+}
+
+#[tauri::command]
+async fn model_job_cancel(job_id: String) -> Result<serde_json::Value, String> {
+    if !valid_model_job_id(&job_id) {
+        return Err("Invalid local model job identifier.".to_string());
+    }
+    let value = model_job_post(
+        &format!("/api/v1/models/jobs/{job_id}/cancel"), serde_json::json!({})
+    ).await?;
+    if value.get("id").and_then(serde_json::Value::as_str) != Some(&job_id)
+        || !matches!(
+            value.get("status").and_then(serde_json::Value::as_str),
+            Some("queued" | "running" | "completed" | "failed" | "cancel_requested" | "cancelled")
+        )
+    {
+        return Err("Invalid managed model cancellation response.".to_string());
+    }
+    Ok(value)
+}
+
+#[tauri::command]
+async fn model_job_retry(job_id: String) -> Result<serde_json::Value, String> {
+    if !valid_model_job_id(&job_id) {
+        return Err("Invalid local model job identifier.".to_string());
+    }
+    let value = model_job_post(
+        &format!("/api/v1/models/jobs/{job_id}/retry"), serde_json::json!({})
+    ).await?;
+    let parsed = parse_model_job(&value)?;
+    serde_json::to_value(parsed).map_err(|_| "Malformed managed model retry response.".to_string())
+}
+
+#[cfg(test)]
+mod model_jobs_ipc_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_path_injection_or_unallowlisted_identifiers() {
+        assert!(!valid_model_job_id("../../../../etc/passwd"));
+        assert!(!valid_model_job_id("https://127.0.0.1:1234/api"));
+        assert!(valid_model_job_id("123e4567-e89b-42d3-a456-426614174000"));
+    }
+
+    #[test]
+    fn checks_server_response_contract_and_bounded_attempts() {
+        let base = serde_json::json!({
+            "id": "123e4567-e89b-42d3-a456-426614174000",
+            "state": "queued", "model_id": "builtin.sma_crossover",
+            "model_version": "1.0.0", "request_sha256": "a".repeat(64),
+            "attempts": 0, "progress": 0, "cancel_requested": 0,
+            "output_sha256": null, "source_snapshot_sha256": null,
+            "error_code": null, "created_at": "2026-11-05T00:00:00+00:00",
+            "updated_at": "2026-11-05T00:00:00+00:00",
+            "started_at": null, "finished_at": null,
+        });
+        assert!(parse_model_job(&base).is_ok());
+        let mut invalid = base.clone();
+        invalid["attempts"] = serde_json::json!(8);
+        assert!(parse_model_job(&invalid).is_err());
+        invalid["attempts"] = serde_json::json!(0);
+        invalid["model_id"] = serde_json::json!("custom.private");
+        assert!(parse_model_job(&invalid).is_err());
+    }
+}
+
 /// Read-only, bounded multi-index query with fixed local FRED series.
 #[tauri::command]
 async fn analytics_basket(
@@ -1409,6 +1634,11 @@ fn main() {
             analytics_series,
             analytics_basket,
             model_research_evaluate,
+            model_job_enqueue,
+            model_job_list,
+            model_job_detail,
+            model_job_cancel,
+            model_job_retry,
             index_history_acquire,
             daily_acquisition_status,
             daily_acquisition_settings,
