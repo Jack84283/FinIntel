@@ -19,6 +19,13 @@ END = date(2026, 10, 5)
 TOKEN = "local-managed-test-process-token-issue-58"
 
 
+@pytest.fixture(autouse=True)
+def keep_in_process_tests_unrestricted(monkeypatch):
+    """Direct run_child fixture calls must not patch global sockets or process limits."""
+    monkeypatch.setattr(job_worker, "_deny_outbound_network", lambda: None)
+    monkeypatch.setattr(job_worker, "_bound_child_memory", lambda: None)
+
+
 @pytest.fixture
 def local_storage(tmp_path, monkeypatch):
     market_db = tmp_path / "market.sqlite3"
