@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "./PageHeader";
-import { LocalDataTable, TablePager, TABLE_PAGE_SIZE } from "./components/TablePagination";
+import { TablePager, TABLE_PAGE_SIZE } from "./components/TablePagination";
 import { useLocale } from "./localization";
 import { useNotify } from "./notifications";
 import {
@@ -48,6 +48,8 @@ export function DataQualityPage() {
   const [providerFilter, setProviderFilter] = useState("");
   const [reviewFilter, setReviewFilter] = useState("");
   const [page, setPage] = useState(0);
+  const [correctionPage, setCorrectionPage] = useState(0);
+  const [correctionFilter, setCorrectionFilter] = useState("");
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<QualityOverview | null>(null);
@@ -71,6 +73,7 @@ export function DataQualityPage() {
 
   const reload = () => setRevision(value => value + 1);
   useEffect(() => { setPage(0); setSelectedFinding(null); setSelectedCorrection(null); }, [code, typeFilter, providerFilter, reviewFilter]);
+  useEffect(() => { setCorrectionPage(0); setCorrectionFilter(""); }, [code]);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -81,7 +84,7 @@ export function DataQualityPage() {
     };
     Promise.allSettled([
       fetchQualityOverview(code), fetchQualityFindings(filters),
-      fetchQualityCorrections(code), fetchCorporateActions(code), fetchReconciliation(code),
+      fetchQualityCorrections(code, pageSize, correctionPage * pageSize), fetchCorporateActions(code), fetchReconciliation(code),
     ]).then(results => {
       if (cancelled) return;
       const [summary, rows, proposals, actions, providers] = results;
@@ -94,7 +97,7 @@ export function DataQualityPage() {
       if (errors.length) setLoadError(errors.map(error => readableError(error.reason)).join(" · "));
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [code, typeFilter, providerFilter, reviewFilter, page, revision]);
+  }, [code, typeFilter, providerFilter, reviewFilter, page, correctionPage, revision]);
 
   useEffect(() => {
     let active = true;
@@ -149,6 +152,9 @@ export function DataQualityPage() {
     setSelectedCorrection(null);
     setProposedProvider(finding.provider.split("|")[0]);
   };
+  const visibleCorrections = (corrections?.items ?? []).filter(item => !correctionFilter.trim() ||
+    [item.session_date, item.provider, item.state, item.source_close, item.proposed_close]
+      .some(value => String(value).toLowerCase().includes(correctionFilter.trim().toLowerCase())));
   const selected = history?.finding;
   const canPropose = selected?.review_state === "confirmed" && !selected.superseded;
   const scopeDescription = scope === "index"
@@ -397,16 +403,20 @@ export function DataQualityPage() {
           <CardDescription>{t("Approval only affects the explicit resolved-close view; original OHLCV and index levels remain unchanged.")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <label className="flex max-w-md flex-col gap-1 text-xs text-muted-foreground">
+            {t("Filter current correction page")}
+            <input type="search" value={correctionFilter} onChange={event => setCorrectionFilter(event.target.value)}
+              aria-label={t("Filter current correction page")} placeholder={t("Search table values")}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground" />
+          </label>
           {!corrections?.items.length ? <p className="text-sm text-muted-foreground">{t("No correction proposals for this instrument.")}</p> :
-            <LocalDataTable rows={corrections.items} label={t("Correction overlays")}
-              searchable={row => [row.session_date, row.provider, row.state, row.source_close, row.proposed_close].join(" ")}>
-              {visible => <div className="overflow-x-auto rounded-md border border-border">
+            <div className="overflow-x-auto rounded-md border border-border">
               <table className="w-full min-w-[640px] text-left text-xs">
                 <thead className="bg-muted text-muted-foreground"><tr>
                   {["Session", "Provider", "Original close", "Proposed close", "State", "Details"].map(label =>
                     <th scope="col" className="px-2 py-2" key={label}>{t(label)}</th>)}
                 </tr></thead>
-                <tbody>{visible.map(item => <tr key={item.id} className="border-t border-border">
+                <tbody>{visibleCorrections.map(item => <tr key={item.id} className="border-t border-border">
                   <td className="px-2 py-2">{item.session_date}</td>
                   <td className="px-2 py-2">{item.provider}</td>
                   <td className="px-2 py-2 tabular-nums">{item.source_close}</td>
@@ -415,7 +425,9 @@ export function DataQualityPage() {
                   <td className="px-2 py-2"><Button variant="ghost" size="sm" onClick={() => setSelectedCorrection(item.id)}>{t("Preview")}</Button></td>
                 </tr>)}</tbody>
               </table>
-            </div>}</LocalDataTable>}
+            </div>}
+          <TablePager page={correctionPage} total={corrections?.total ?? 0}
+            onPageChange={setCorrectionPage} disabled={loading} />
           {selectedCorrection && <>
             <div className="rounded-md border border-border p-3 text-xs">
               <h3 className="mb-2 text-sm font-semibold">{t("Correction preview")}</h3>
