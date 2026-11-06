@@ -1556,7 +1556,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::wait_for_backend;
+    use super::{valid_model_job_hash, valid_model_job_id, wait_for_backend};
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -1586,6 +1586,18 @@ mod tests {
             }
         });
         (port, thread)
+    }
+
+    #[test]
+    fn model_job_native_bridge_rejects_noncanonical_ids_and_unpinned_revisions() {
+        assert!(valid_model_job_id("123e4567-e89b-12d3-a456-426614174000"));
+        assert!(!valid_model_job_id("../../local-db"));
+        assert!(!valid_model_job_id("123E4567-E89B-12D3-A456-426614174000"));
+        assert!(!valid_model_job_id("not-a-uuid"));
+        assert!(valid_model_job_hash(&"a".repeat(64)));
+        assert!(!valid_model_job_hash(&"A".repeat(64)));
+        assert!(!valid_model_job_hash(&"g".repeat(64)));
+        assert!(!valid_model_job_hash("token"));
     }
 
     #[test]
