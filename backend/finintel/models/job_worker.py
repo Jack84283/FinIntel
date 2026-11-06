@@ -341,6 +341,8 @@ class ModelJobSupervisor:
             if state and state["state"] == "running":
                 if state["cancel_requested"]:
                     self.ledger.finish_cancelled(job_id, attempt)
+                elif self._stop.is_set():
+                    self.ledger.fail(job_id, attempt, "interrupted")
                 else:
                     self.ledger.fail(job_id, attempt, "worker_failure")
         except (OSError, ModelJobStoreError):
