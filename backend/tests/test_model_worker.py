@@ -26,10 +26,7 @@ def _market(path):
             "INSERT INTO index_daily_closes "
             "(index_code,provider,session_date,close,retrieved_at,source_url) "
             "VALUES ('SP500','fred',?,?,'2026-10-25T00:00:00+00:00','local-test')",
-            [
-                ((START + timedelta(days=i)).isoformat(), str(100 + i))
-                for i in range(35)
-            ],
+            [((START + timedelta(days=i)).isoformat(), str(100 + i)) for i in range(35)],
         )
     conn.close()
 
@@ -72,35 +69,33 @@ def test_managed_fixed_routes_validate_queue_pagination_cancel_retry(tmp_path, m
     assert client.get("/api/v1/models/jobs").status_code == 403
     assert client.post("/api/v1/models/jobs", json=payload, headers=headers).status_code == 201
     for _ in range(10):
-        assert client.post(
-            "/api/v1/models/jobs", json=payload, headers=headers
-        ).status_code == 201
+        assert client.post("/api/v1/models/jobs", json=payload, headers=headers).status_code == 201
     page1 = client.get("/api/v1/models/jobs", headers=headers).json()
-    page2 = client.get(
-        "/api/v1/models/jobs?limit=10&offset=10", headers=headers
-    ).json()
+    page2 = client.get("/api/v1/models/jobs?limit=10&offset=10", headers=headers).json()
     assert page1["total"] == 11 and len(page1["items"]) == 10
     assert len(page2["items"]) == 1
     identifier = page1["items"][0]["id"]
     assert page1["items"][0]["status"] == "queued"
-    assert client.get(
-        f"/api/v1/models/jobs/{identifier}", headers=headers
-    ).status_code == 200
-    assert client.get(
-        f"/api/v1/models/jobs/{identifier}/result", headers=headers
-    ).status_code == 409
-    assert client.post(
-        f"/api/v1/models/jobs/{identifier}/cancel", headers=headers
-    ).json()["status"] == "cancelled"
-    assert client.post(
-        f"/api/v1/models/jobs/{identifier}/cancel", headers=headers
-    ).json()["status"] == "cancelled"
-    assert client.post(
-        f"/api/v1/models/jobs/{identifier}/retry", headers=headers
-    ).json()["status"] == "queued"
-    assert client.post(
-        f"/api/v1/models/jobs/{identifier}/retry", headers=headers
-    ).json()["status"] == "queued"
+    assert client.get(f"/api/v1/models/jobs/{identifier}", headers=headers).status_code == 200
+    assert (
+        client.get(f"/api/v1/models/jobs/{identifier}/result", headers=headers).status_code == 409
+    )
+    assert (
+        client.post(f"/api/v1/models/jobs/{identifier}/cancel", headers=headers).json()["status"]
+        == "cancelled"
+    )
+    assert (
+        client.post(f"/api/v1/models/jobs/{identifier}/cancel", headers=headers).json()["status"]
+        == "cancelled"
+    )
+    assert (
+        client.post(f"/api/v1/models/jobs/{identifier}/retry", headers=headers).json()["status"]
+        == "queued"
+    )
+    assert (
+        client.post(f"/api/v1/models/jobs/{identifier}/retry", headers=headers).json()["status"]
+        == "queued"
+    )
     assert ledger.get(identifier)["attempts"] == 0
     bad = client.post(
         "/api/v1/models/jobs",
@@ -108,22 +103,22 @@ def test_managed_fixed_routes_validate_queue_pagination_cancel_retry(tmp_path, m
         headers=headers,
     )
     assert bad.status_code == 422 and "/private/" not in bad.text
-    assert client.post(
-        "/api/v1/models/jobs",
-        json={**payload, "model_id": "custom.private"},
-        headers=headers,
-    ).status_code == 422
-    assert client.get(
-        "/api/v1/models/jobs?limit=101", headers=headers
-    ).status_code == 422
-    assert client.get(
-        "/api/v1/models/jobs/../../etc/passwd", headers=headers
-    ).status_code in (404, 422)
+    assert (
+        client.post(
+            "/api/v1/models/jobs",
+            json={**payload, "model_id": "custom.private"},
+            headers=headers,
+        ).status_code
+        == 422
+    )
+    assert client.get("/api/v1/models/jobs?limit=101", headers=headers).status_code == 422
+    assert client.get("/api/v1/models/jobs/../../etc/passwd", headers=headers).status_code in (
+        404,
+        422,
+    )
 
 
-def test_isolated_child_completes_strict_pinned_result_without_price_writes(
-    tmp_path, monkeypatch
-):
+def test_isolated_child_completes_strict_pinned_result_without_price_writes(tmp_path, monkeypatch):
     price, ledger, request = _setup(tmp_path, monkeypatch)
     identifier = ledger.enqueue(request)["id"]
     before = price.stat().st_size
@@ -294,6 +289,9 @@ def test_two_worker_owners_respect_exclusive_lock_and_once_only_claim(tmp_path, 
 def test_errors_are_safe_codes_not_paths_or_credentials():
     assert worker._safe_error(RuntimeError("/secret/token=ABC")) == "worker_failure"
     assert worker._safe_error(MemoryError()) == "resource_limit"
-    assert worker._safe_error(
-        worker.AnalyticsError("Local source snapshot changed; refresh model inputs")
-    ) == "source_changed"
+    assert (
+        worker._safe_error(
+            worker.AnalyticsError("Local source snapshot changed; refresh model inputs")
+        )
+        == "source_changed"
+    )
