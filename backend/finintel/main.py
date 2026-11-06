@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 from hmac import compare_digest
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -42,6 +44,14 @@ app = FastAPI(
     redoc_url=None,
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def redact_model_job_validation(request: Request, exc: RequestValidationError):
+    """Do not echo rejected model inputs, private paths, or exception contexts."""
+    if request.url.path.startswith("/api/v1/models/jobs"):
+        return JSONResponse(status_code=422, content={"detail": "Invalid local model-job request"})
+    return await request_validation_exception_handler(request, exc)
 
 
 class HealthResponse(BaseModel):
