@@ -187,6 +187,10 @@ def _parent_alive(parent_pid: int) -> bool:
         import ctypes
 
         kernel = ctypes.windll.kernel32
+        kernel.OpenProcess.restype = ctypes.c_void_p
+        kernel.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
         handle = kernel.OpenProcess(0x00100000, False, parent_pid)  # SYNCHRONIZE
         if not handle:
             return False
