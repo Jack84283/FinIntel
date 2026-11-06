@@ -9,9 +9,9 @@ from datetime import date, timedelta
 from fastapi.testclient import TestClient
 
 from finintel.main import app
+from finintel.models import worker
 from finintel.models.engine import evaluate_builtin_indicator
 from finintel.models.job_store import ModelJobLedger, ModelJobRequest
-from finintel.models import worker
 from finintel.storage.db import _write_connection
 
 START = date(2026, 9, 1)
