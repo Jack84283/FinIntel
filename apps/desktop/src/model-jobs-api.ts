@@ -70,7 +70,7 @@ export function parseModelJob(value: unknown): ModelJobSummary {
   }
   return value as ModelJobSummary;
 }
-async function nativeInvoke(command: string, args: object): Promise<unknown> {
+async function nativeInvoke(command: string, args: Record<string, unknown>): Promise<unknown> {
   if (!isTauri()) throw new Error("Model jobs require the managed FinIntel desktop.");
   return invoke(command, args);
 }
@@ -114,7 +114,7 @@ export async function getModelJobResult(id: string): Promise<ModelJobWithResult>
   const lineage = object(result.lineage);
   const parameters = object(lineage.parameters);
   const query: ModelResearchQuery = {
-    code: lineage.source_identity && object(lineage.source_identity).code as ModelResearchQuery["code"],
+    code: object(lineage.source_identity).code as ModelResearchQuery["code"],
     start: lineage.requested_start as string,
     end: lineage.requested_end as string,
     qualityPolicy: lineage.quality_policy as ModelResearchQuery["qualityPolicy"],
