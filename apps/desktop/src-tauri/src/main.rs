@@ -1022,6 +1022,7 @@ async fn model_research_evaluate(
 struct ModelJobSummary {
     id: String,
     state: String,
+    status: String,
     model_id: String,
     model_version: String,
     request_sha256: String,
@@ -1052,6 +1053,7 @@ fn validate_model_job_summary(job: &ModelJobSummary) -> bool {
         && job.model_id == "builtin.sma_crossover"
         && job.model_version == "1.0.0"
         && matches!(job.state.as_str(), "queued" | "running" | "completed" | "failed" | "cancelled")
+        && (job.status == job.state || (job.state == "running" && job.status == "cancel_requested"))
         && job.attempts <= 3 && job.progress <= 100 && job.cancel_requested <= 1
         && job.request_sha256.len() == 64
         && job.request_sha256.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
@@ -1224,7 +1226,7 @@ mod model_jobs_ipc_tests {
     fn checks_server_response_contract_and_bounded_attempts() {
         let base = serde_json::json!({
             "id": "123e4567-e89b-42d3-a456-426614174000",
-            "state": "queued", "model_id": "builtin.sma_crossover",
+            "state": "queued", "status": "queued", "model_id": "builtin.sma_crossover",
             "model_version": "1.0.0", "request_sha256": "a".repeat(64),
             "attempts": 0, "progress": 0, "cancel_requested": 0,
             "output_sha256": null, "source_snapshot_sha256": null,
