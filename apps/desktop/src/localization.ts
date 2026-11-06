@@ -5,6 +5,7 @@ const translations = {
   en: {
     Workspace: "Workspace", "Data & Operations": "Data & Operations",
     "Workspace & Preferences": "Workspace & Preferences",
+    "Main content": "Main content",
     Overview: "Overview", Market: "Market", Intelligence: "Intelligence",
     "Data Acquisition": "Data Acquisition", "Data Validation": "Data Validation",
     "Index Constituents": "Index Constituents", "Action History": "Action History",
@@ -678,6 +679,7 @@ const additionalChinese: Readonly<Record<string, string>> = {
   "Connection through native Tauri IPC or local Vite proxy.": "通过 Tauri 原生通信或本地 Vite 代理连接。",
   "FinIntel · Local-first · No synthetic market values displayed": "FinIntel · 本地优先 · 不显示虚构市场数据",
   "Main navigation": "主导航",
+  "Main content": "主要内容",
   "Sections": "栏目",
   "Mobile sections": "移动端栏目",
   "FinIntel / Overview": "FinIntel / 概览",
