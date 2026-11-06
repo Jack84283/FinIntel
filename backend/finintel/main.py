@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 from hmac import compare_digest
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -17,6 +19,8 @@ from finintel.market_data.membership_api import router as membership_router
 from finintel.market_data.quality_api import router as quality_router
 from finintel.market_data.validation_api import router as validation_router
 from finintel.models.api import router as models_router
+from finintel.models.jobs_api import router as model_jobs_router
+from finintel.models.worker import start_supervisor, stop_supervisor
 from finintel.settings.api import router as settings_router
 from finintel.storage.api import router as market_data_router
 
@@ -24,9 +28,11 @@ from finintel.storage.api import router as market_data_router
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     start_scheduler()
+    start_supervisor()
     try:
         yield
     finally:
+        stop_supervisor()
         stop_scheduler()
 
 
@@ -56,6 +62,7 @@ def health() -> HealthResponse:
 app.include_router(market_data_router)
 app.include_router(analytics_router)
 app.include_router(models_router)
+app.include_router(model_jobs_router)
 app.include_router(validation_router)
 app.include_router(quality_router)
 app.include_router(membership_router)
@@ -75,3 +82,12 @@ async def require_desktop_process_token(request: Request, call_next):
             status_code=403, content={"detail": "Desktop process authorization required"}
         )
     return await call_next(request)
+
+
+@app.exception_handler(RequestValidationError)
+async def safe_job_request_validation(request: Request, exc: RequestValidationError):
+    # FastAPI ordinarily includes rejected input values in 422 responses.
+    # Do not echo submitted private paths or code on the managed jobs boundary.
+    if request.url.path.startswith("/api/v1/models/jobs"):
+        return JSONResponse(status_code=422, content={"detail": "Invalid local model job request"})
+    return await request_validation_exception_handler(request, exc)
