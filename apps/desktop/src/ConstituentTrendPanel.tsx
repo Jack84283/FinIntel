@@ -9,8 +9,9 @@ import {
   fetchMembershipTrend, type TrendEvidence, type TrendPoint, type TrendQuery, type TrendResult,
 } from "./membership-trend-api";
 import { useLocale } from "./localization";
+import { TablePager, TABLE_PAGE_SIZE } from "./components/TablePagination";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = TABLE_PAGE_SIZE;
 const selectClass = "h-9 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const evidenceDescriptions: Record<TrendEvidence, string> = {
   verified_snapshot: "Verified dated membership snapshot",
@@ -51,6 +52,7 @@ export function ConstituentTrendPanel({
   const [overrideEnd, setOverrideEnd] = useState("");
   const [offset, setOffset] = useState(0);
   const [revision, setRevision] = useState(0);
+  const [evidenceFilter, setEvidenceFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<TrendResult | null>(null);
   const [error, setError] = useState("");
@@ -84,6 +86,9 @@ export function ConstituentTrendPanel({
   }, [expanded, code, start, end, invalidRange, offset, revision]);
 
   const snapshots = result?.snapshots ?? [];
+  // Evidence filtering is confined to the explicitly loaded page; pagination totals
+  // continue to reflect all stored source snapshots, never a fabricated count.
+  const visibleSnapshots = evidenceFilter ? snapshots.filter(item => item.evidence_status === evidenceFilter) : snapshots;
   const maximum = Math.max(1, ...snapshots.map(p => p.member_count));
   const total = result?.total_snapshots ?? 0;
   const count = (value: number | null) =>
@@ -153,6 +158,14 @@ export function ConstituentTrendPanel({
             {total < 2 && <p role="status" className="text-xs text-muted-foreground">
               {t("At least two stored snapshots are needed to observe changes.")}
             </p>}
+            <label className="flex max-w-xs flex-col gap-1 text-xs text-muted-foreground">
+              {t("Filter current page by evidence")}
+              <select className={selectClass} value={evidenceFilter} onChange={event => setEvidenceFilter(event.target.value)}>
+                <option value="">{t("All evidence statuses")}</option>
+                {(Object.keys(evidenceDescriptions) as TrendEvidence[]).map(status =>
+                  <option key={status} value={status}>{t(trendEvidenceDescription(status))}</option>)}
+              </select>
+            </label>
             <div className="max-h-[430px] overflow-auto rounded-md border border-border">
               <table className="w-full border-collapse text-left text-xs tabular-nums">
                 <caption className="px-3 py-2 text-left text-muted-foreground">
@@ -169,7 +182,7 @@ export function ConstituentTrendPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {snapshots.map(point => <tr key={point.snapshot_as_of} className="border-t border-border align-top">
+                  {visibleSnapshots.map(point => <tr key={point.snapshot_as_of} className="border-t border-border align-top">
                     <th scope="row" className="p-2 font-medium">{point.snapshot_as_of}</th>
                     <td className="p-2">
                       <span>{count(point.member_count)}</span>
@@ -203,15 +216,8 @@ export function ConstituentTrendPanel({
                 </tbody>
               </table>
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>{count(offset + 1)}–{count(Math.min(offset + snapshots.length, total))} / {count(total)}</span>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" type="button" disabled={offset === 0}
-                  onClick={() => setOffset(n => Math.max(0, n - PAGE_SIZE))}>{t("Previous")}</Button>
-                <Button size="sm" variant="outline" type="button" disabled={offset + PAGE_SIZE >= total}
-                  onClick={() => setOffset(n => n + PAGE_SIZE)}>{t("Next")}</Button>
-              </div>
-            </div>
+            <TablePager page={Math.floor(offset / PAGE_SIZE)} total={total}
+              onPageChange={next => setOffset(next * PAGE_SIZE)} disabled={busy} />
           </>}
           <p className="text-xs text-muted-foreground">
             {t("Observed snapshot changes do not establish when membership changed between imports, and indicative sources must not be used as verified backtests.")}
