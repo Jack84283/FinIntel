@@ -131,11 +131,14 @@ def list_corrections(
     *,
     code: str | None = None,
     state: str | None = None,
+    q: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
     if state is not None and state not in STATES:
         raise ValueError("Invalid correction state")
+    if q is not None and (len(q) > 80 or any(ord(c) < 32 for c in q)):
+        raise ValueError("Invalid correction search")
     if not 1 <= limit <= 500 or offset < 0:
         raise ValueError("Invalid pagination")
     conn = _read_connection(path)
@@ -150,6 +153,16 @@ def list_corrections(
         if state is not None:
             clauses.append("state=?")
             values.append(state)
+        search = (q or "").strip()
+        if search:
+            # Literal substring matching, not SQL wildcards or interpolated SQL.
+            pattern = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            clauses.append("(" + " OR ".join(
+                f"{column} LIKE ? ESCAPE '\\'" for column in (
+                    "session_date", "provider", "state", "source_close", "proposed_close"
+                )
+            ) + ")")
+            values.extend([pattern] * 5)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         total = conn.execute("SELECT COUNT(*) FROM quality_corrections" + where, values).fetchone()[
             0
