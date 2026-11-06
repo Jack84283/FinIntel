@@ -15,7 +15,7 @@ def _ledger_error(exc: ModelJobStoreError) -> HTTPException:
     # provider credentials, request JSON or model exception contents.
     if str(exc) == "Model-job queue is full":
         return HTTPException(status_code=429, detail="Local model-job queue is full")
-    if "storage" in str(exc).lower():
+    if "storage" in str(exc).lower() or "integrity" in str(exc).lower():
         return HTTPException(status_code=503, detail="Local model-job storage unavailable")
     return HTTPException(status_code=422, detail="Invalid local model-job operation")
 
