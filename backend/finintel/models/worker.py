@@ -37,6 +37,95 @@ MEMORY_LIMIT_BYTES = 2 * 1024**3
 MAX_ENVELOPE_BYTES = 8192
 
 
+def _limit_windows_worker(process: subprocess.Popen[bytes]) -> int | None:
+    """Assign a child to a bounded Windows Job Object, fail closed on errors."""
+    if os.name != "nt":
+        return None
+
+    import ctypes
+    from ctypes import wintypes
+
+    class IoCounters(ctypes.Structure):
+        _fields_ = [
+            (name, ctypes.c_uint64)
+            for name in (
+                "ReadOperationCount",
+                "WriteOperationCount",
+                "OtherOperationCount",
+                "ReadTransferCount",
+                "WriteTransferCount",
+                "OtherTransferCount",
+            )
+        ]
+
+    class BasicLimits(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class ExtendedLimits(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", BasicLimits),
+            ("IoInfo", IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel.CreateJobObjectW.restype = ctypes.c_void_p
+    kernel.SetInformationJobObject.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    kernel.SetInformationJobObject.restype = wintypes.BOOL
+    kernel.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel.CloseHandle.restype = wintypes.BOOL
+
+    handle = kernel.CreateJobObjectW(None, None)
+    if not handle:
+        raise OSError("Model-worker memory isolation unavailable")
+    try:
+        limits = ExtendedLimits()
+        # Terminate remaining members if supervision exits unexpectedly.
+        limits.BasicLimitInformation.LimitFlags = 0x100 | 0x2000
+        limits.ProcessMemoryLimit = MEMORY_LIMIT_BYTES
+        if not kernel.SetInformationJobObject(
+            handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)
+        ):
+            raise OSError("Model-worker memory isolation unavailable")
+        if not kernel.AssignProcessToJobObject(handle, ctypes.c_void_p(process._handle)):
+            raise OSError("Model-worker memory isolation unavailable")
+        return int(handle)
+    except Exception:
+        kernel.CloseHandle(handle)
+        raise
+
+
+def _close_windows_job(handle: int | None) -> None:
+    if handle is not None and os.name == "nt":
+        import ctypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel.CloseHandle.restype = ctypes.c_int
+        kernel.CloseHandle(ctypes.c_void_p(handle))
+
+
 def _restrict_resources() -> None:
     """Apply hard process limits where available; fail closed if installation fails."""
     if os.name == "posix":
@@ -186,6 +275,7 @@ def _evaluate_claim(identifier: str, attempt: int, request: ModelJobRequest) -> 
 
 def child_main() -> None:
     """Fixed child protocol. Never echo requests, paths or exception messages."""
+    _watch_supervisor_parent()
     try:
         _restrict_resources()
         _disable_network()
@@ -219,6 +309,51 @@ def child_main() -> None:
         response = {"kind": "error", "code": _safe_error(exc)}
     sys.stdout.write(json.dumps(response, separators=(",", ":"), ensure_ascii=True))
     sys.stdout.flush()
+
+
+def _parent_alive(parent_pid: int) -> bool:
+    if os.name == "nt":
+        # A Windows subprocess is not necessarily killed when its launcher dies.
+        import ctypes
+
+        kernel = ctypes.windll.kernel32
+        kernel.OpenProcess.restype = ctypes.c_void_p
+        kernel.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        handle = kernel.OpenProcess(0x00100000, False, parent_pid)  # SYNCHRONIZE
+        if not handle:
+            return False
+        try:
+            return kernel.WaitForSingleObject(handle, 0) == 0x00000102  # WAIT_TIMEOUT
+        finally:
+            kernel.CloseHandle(handle)
+    # PyInstaller one-file executables place a bootloader between the sidecar
+    # and Python worker. A direct PPID equality check would kill every packaged
+    # worker even though its original supervisor is still running.
+    try:
+        os.kill(parent_pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
+
+
+def _watch_supervisor_parent() -> None:
+    """A watchdog prevents orphaned computation after an unexpected sidecar crash."""
+    raw = os.environ.get("FININTEL_WORKER_PARENT_PID", "")
+    if not raw.isascii() or not raw.isdigit():
+        return
+    parent_pid = int(raw)
+    if parent_pid <= 1:
+        return
+
+    def watch() -> None:
+        while _parent_alive(parent_pid):
+            time.sleep(POLL_SECONDS)
+        # Parent death: no private log, and new sidecar will reconcile this attempt.
+        os._exit(4)
+
+    threading.Thread(target=watch, name="finintel-model-parent-watch", daemon=True).start()
 
 
 @contextlib.contextmanager
@@ -277,11 +412,12 @@ def _child_command() -> list[str]:
 
 def _child_env(ledger: ModelJobLedger) -> dict[str, str]:
     # Avoid passing provider tokens, process credentials or arbitrary app secrets.
-    allowed = ("PATH", "SYSTEMROOT", "WINDIR", "HOME", "TMP", "TEMP", "TMPDIR", "PYTHONPATH")
+    allowed = ("PATH", "SYSTEMROOT", "WINDIR", "HOME", "TMP", "TEMP", "TMPDIR")
     result = {key: os.environ[key] for key in allowed if key in os.environ}
     result["FININTEL_DB_PATH"] = str(database_path())
     result["FININTEL_MODEL_JOBS_DB_PATH"] = str(ledger.path)
     result["PYTHONIOENCODING"] = "utf-8"
+    result["FININTEL_WORKER_PARENT_PID"] = str(os.getpid())
     return result
 
 
@@ -296,9 +432,12 @@ class ModelJobSupervisor:
         self._process_lock = threading.Lock()
 
     def start(self) -> None:
-        if self._thread is not None:
+        if self._thread is not None and self._thread.is_alive():
             return
-        self._thread = threading.Thread(target=self._run, name="finintel-model-supervisor")
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._run, name="finintel-model-supervisor", daemon=True
+        )
         self._thread.start()
 
     def stop(self) -> None:
@@ -321,26 +460,27 @@ class ModelJobSupervisor:
             pass
 
     def _run(self) -> None:
-        try:
-            # An idle managed backend must not create a job database or lock.
-            # The first explicit enqueue creates the ledger; poll until then.
-            while not self._stop.is_set() and not self.ledger.path.is_file():
+        # A second sidecar waits for ownership; a transient SQLite failure
+        # releases the lock and retries with reconciliation, rather than
+        # permanently abandoning durable queued jobs.
+        while not self._stop.is_set():
+            if not self.ledger.path.is_file():
                 self._stop.wait(POLL_SECONDS)
-            if self._stop.is_set():
-                return
-            with _exclusive_owner(self.ledger.path) as owned:
-                if not owned:
-                    return
-                self.ledger.reconcile_interrupted()
-                while not self._stop.is_set():
-                    claim = self.ledger.claim_next()
-                    if claim is None:
-                        self._stop.wait(POLL_SECONDS)
-                    else:
-                        self._execute(*claim)
-        except (ModelJobStoreError, OSError, sqlite3.Error):
-            # No exception or user-specific path reaches the API or frontend.
-            return
+                continue
+            try:
+                with _exclusive_owner(self.ledger.path) as owned:
+                    if owned:
+                        self.ledger.reconcile_interrupted()
+                        while not self._stop.is_set():
+                            claim = self.ledger.claim_next()
+                            if claim is None:
+                                self._stop.wait(POLL_SECONDS)
+                            else:
+                                self._execute(*claim)
+            except (ModelJobStoreError, OSError, sqlite3.Error):
+                # No private paths, provider tokens or exception text are logged.
+                pass
+            self._stop.wait(max(POLL_SECONDS, 1.0))
 
     @staticmethod
     def _source_is_current(request: ModelJobRequest) -> bool:
@@ -360,6 +500,7 @@ class ModelJobSupervisor:
 
     def _execute(self, identifier: str, request: ModelJobRequest, attempt: int) -> None:
         process = None
+        windows_job: int | None = None
         reason = "worker_failure"
         try:
             if self._stop.is_set():
@@ -382,6 +523,9 @@ class ModelJobSupervisor:
                     return
                 process = subprocess.Popen(_child_command(), **options)
                 self._process = process
+                # The supervisor owns a kill-on-close Job Object covering the
+                # frozen launcher and descendants (not only its first PID).
+                windows_job = _limit_windows_worker(process)
             envelope = json.dumps(
                 {"id": identifier, "attempt": attempt, "request": request.model_dump(mode="json")}
             ).encode()
@@ -455,6 +599,9 @@ class ModelJobSupervisor:
                 self.ledger.fail(identifier, attempt, reason)
         finally:
             self._terminate(process)
+            # Close even if the original launcher exited before the inner
+            # PyInstaller worker; the Job Object kills remaining descendants.
+            _close_windows_job(windows_job)
             if process is not None:
                 with contextlib.suppress(OSError, subprocess.TimeoutExpired):
                     process.communicate(timeout=2)
