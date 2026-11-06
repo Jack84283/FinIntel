@@ -183,9 +183,10 @@ class ModelJobLedger:
     @staticmethod
     def _summary(row: sqlite3.Row) -> dict:
         return {
-            key: row[key]
-            for key in (
-                "id",
+            **{
+                key: row[key]
+                for key in (
+                    "id",
                 "state",
                 "model_id",
                 "model_version",
@@ -200,7 +201,11 @@ class ModelJobLedger:
                 "updated_at",
                 "started_at",
                 "finished_at",
-            )
+                )
+            },
+            "status": "cancel_requested"
+            if row["state"] == "running" and row["cancel_requested"]
+            else row["state"],
         }
 
     def enqueue(self, request: ModelJobRequest) -> dict:
