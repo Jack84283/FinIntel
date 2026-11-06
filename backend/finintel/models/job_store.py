@@ -308,8 +308,9 @@ class ModelJobLedger:
             ).fetchone()
             if row is None:
                 return None
-            if hashlib.sha256(row["request_json"].encode("utf-8")).hexdigest() != (
-                row["request_sha256"]
+            if (
+                hashlib.sha256(row["request_json"].encode("utf-8")).hexdigest()
+                != (row["request_sha256"])
             ):
                 raise ModelJobStoreError("Model-job request identity is invalid")
             try:
