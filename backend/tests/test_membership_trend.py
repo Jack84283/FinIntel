@@ -217,8 +217,13 @@ def test_evidence_filter_counts_and_pages_matching_snapshots_globally(tmp_path, 
     baseline = db.read_bytes()
 
     proxy = constituent_snapshot_trend(
-        "SP500", from_as_of="2026-10-01", to_as_of="2026-10-20",
-        evidence_status="proxy_only", limit=1, offset=0, db=db,
+        "SP500",
+        from_as_of="2026-10-01",
+        to_as_of="2026-10-20",
+        evidence_status="proxy_only",
+        limit=1,
+        offset=0,
+        db=db,
     )
     assert proxy["total_snapshots"] == 1
     assert [row["snapshot_as_of"] for row in proxy["snapshots"]] == ["2026-10-10"]
@@ -229,28 +234,51 @@ def test_evidence_filter_counts_and_pages_matching_snapshots_globally(tmp_path, 
     assert only["change_status"] == "indicative_pair"
 
     verified = constituent_snapshot_trend(
-        "SP500", from_as_of="2026-10-01", to_as_of="2026-10-20",
-        evidence_status="verified_snapshot", limit=1, offset=1, db=db,
+        "SP500",
+        from_as_of="2026-10-01",
+        to_as_of="2026-10-20",
+        evidence_status="verified_snapshot",
+        limit=1,
+        offset=1,
+        db=db,
     )
     assert verified["total_snapshots"] == 2
     assert verified["snapshots"][0]["snapshot_as_of"] == "2026-10-06"
     assert verified["snapshots"][0]["previous_snapshot_as_of"] == "2026-10-01"
-    assert constituent_snapshot_trend(
-        "SP500", from_as_of="2026-10-01", to_as_of="2026-10-20",
-        evidence_status="unverified", limit=10, db=db,
-    )["total_snapshots"] == 0
+    assert (
+        constituent_snapshot_trend(
+            "SP500",
+            from_as_of="2026-10-01",
+            to_as_of="2026-10-20",
+            evidence_status="unverified",
+            limit=10,
+            db=db,
+        )["total_snapshots"]
+        == 0
+    )
 
     monkeypatch.setenv("FININTEL_DB_PATH", str(db))
     with TestClient(app) as client:
-        response = client.get("/api/v1/market-data/indexes/snapshot-trend", params={
-            "code": "SP500", "from_as_of": "2026-10-01",
-            "to_as_of": "2026-10-20", "limit": 1, "offset": 0,
-            "evidence_status": "proxy_only",
-        })
-        invalid = client.get("/api/v1/market-data/indexes/snapshot-trend", params={
-            "code": "SP500", "from_as_of": "2026-10-01",
-            "to_as_of": "2026-10-20", "evidence_status": "fictional",
-        })
+        response = client.get(
+            "/api/v1/market-data/indexes/snapshot-trend",
+            params={
+                "code": "SP500",
+                "from_as_of": "2026-10-01",
+                "to_as_of": "2026-10-20",
+                "limit": 1,
+                "offset": 0,
+                "evidence_status": "proxy_only",
+            },
+        )
+        invalid = client.get(
+            "/api/v1/market-data/indexes/snapshot-trend",
+            params={
+                "code": "SP500",
+                "from_as_of": "2026-10-01",
+                "to_as_of": "2026-10-20",
+                "evidence_status": "fictional",
+            },
+        )
     assert response.status_code == 200, response.text
     assert response.json()["total_snapshots"] == 1
     assert response.json()["snapshots"][0]["previous_snapshot_as_of"] == "2026-10-06"
@@ -262,7 +290,10 @@ def test_invalid_evidence_filter_rejected_before_any_sqlite_file_is_created(tmp_
     missing = tmp_path / "missing.sqlite"
     with pytest.raises(ValueError, match="evidence filter"):
         constituent_snapshot_trend(
-            "SP500", from_as_of="2026-10-01", to_as_of="2026-10-20",
-            evidence_status="invalid", db=missing,
+            "SP500",
+            from_as_of="2026-10-01",
+            to_as_of="2026-10-20",
+            evidence_status="invalid",
+            db=missing,
         )
     assert not missing.exists()
