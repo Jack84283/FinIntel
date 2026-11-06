@@ -435,29 +435,28 @@ class ModelJobSupervisor:
     def _loop(self) -> None:
         try:
             while not self._stop.is_set():
-                if self._lock_fd is None:
-                    if not self.ledger.path.is_file():
-                        self._stop.wait(POLL_SECONDS)
-                        continue
-                    # A competing sidecar may own the ledger; retry instead of
-                    # terminating this supervisor permanently after one miss.
-                    if not self._acquire_lock():
-                        self._stop.wait(POLL_SECONDS)
-                        continue
-                    try:
+                try:
+                    if self._lock_fd is None:
+                        if not self.ledger.path.is_file():
+                            self._stop.wait(POLL_SECONDS)
+                            continue
+                        # Only one sidecar may reconcile or claim from this ledger.
+                        if not self._acquire_lock():
+                            self._stop.wait(POLL_SECONDS)
+                            continue
                         self.ledger.reconcile_interrupted()
-                    except ModelJobStoreError:
-                        self._release_lock()
-                        self._stop.wait(POLL_SECONDS)
+                    claim = self.ledger.claim_next()
+                    if claim is not None:
+                        self._run_claim(*claim)
                         continue
-                claim = self.ledger.claim_next()
-                if claim is not None:
-                    self._run_claim(*claim)
-                    continue
-                self._stop.wait(POLL_SECONDS)
-        except (OSError, ModelJobStoreError):
-            # Safe shutdown: no inputs, path details or private observations in logs.
-            pass
+                    self._stop.wait(POLL_SECONDS)
+                except (OSError, ModelJobStoreError):
+                    # A temporary SQLite failure must not silently disable jobs.
+                    # Release ownership so the next acquisition reconciles any
+                    # interrupted claim before another worker can start.
+                    # No paths, credentials or underlying errors are logged.
+                    self._release_lock()
+                    self._stop.wait(max(POLL_SECONDS, 1.0))
         finally:
             self._release_lock()
 
