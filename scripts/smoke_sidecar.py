@@ -60,6 +60,11 @@ def main() -> None:
                     time.sleep(0.4)
             if health is None or health.get("status") != "ok":
                 raise RuntimeError("Packaged local backend failed readiness check")
+            # An idle packaged backend must not open the worker lock: abruptly
+            # terminated sidecars cannot release an open Windows lock handle.
+            lock = Path(directory) / "finintel-model-jobs.sqlite3.worker.lock"
+            if lock.exists():
+                raise AssertionError("Idle sidecar unexpectedly opened model-worker lock")
             try:
                 urlopen(url, timeout=2)
                 raise AssertionError("Missing process token should be rejected")
