@@ -333,7 +333,8 @@ def get_snapshot_trend(
     offset: int = Query(default=0, ge=0, le=1_000_000),
     evidence_status: Literal[
         "verified_snapshot", "source_date_mismatch", "proxy_only", "incomplete", "unverified"
-    ] | None = None,
+    ]
+    | None = None,
 ) -> dict:
     """Historical source snapshots only; evidence is filtered before pagination."""
     try:
