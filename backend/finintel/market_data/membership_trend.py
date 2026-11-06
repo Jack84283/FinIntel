@@ -44,6 +44,48 @@ def _evidence_status(record: dict) -> str:
     return "verified_snapshot"
 
 
+EVIDENCE_STATUSES = frozenset(
+    ("verified_snapshot", "source_date_mismatch", "proxy_only", "incomplete", "unverified")
+)
+
+
+def _snapshot_point(
+    conn: sqlite3.Connection, code: str, record: dict, previous: dict | None
+) -> dict:
+    """Preserve deltas against the immediately preceding *unfiltered* snapshot."""
+    day = record["as_of"]
+    status = _evidence_status(record)
+    added: int | None = None
+    removed: int | None = None
+    change_status = "first_observed"
+    if previous is not None:
+        added, removed = _differences(conn, code, previous["as_of"], day)
+        if previous["total"] + added - removed != record["total"]:
+            raise StorageError("Inconsistent membership snapshot differences")
+        change_status = (
+            "verified_pair"
+            if _evidence_status(previous) == "verified_snapshot" and status == "verified_snapshot"
+            else "indicative_pair"
+        )
+    return {
+        "snapshot_as_of": day,
+        "source": record["source"],
+        "source_as_of": record["source_as_of"],
+        "source_kind": record["source_kind"],
+        "validation_status": record["validation_status"],
+        "availability_status": record["availability_status"],
+        "confidence": record["confidence"],
+        "expected_count": record["expected_count"],
+        "member_count": record["total"],
+        "evidence_status": status,
+        "previous_snapshot_as_of": previous["as_of"] if previous else None,
+        "previous_evidence_status": _evidence_status(previous) if previous else None,
+        "added_members": added,
+        "removed_members": removed,
+        "change_status": change_status,
+    }
+
+
 def constituent_snapshot_trend(
     code: str,
     *,
@@ -51,6 +93,7 @@ def constituent_snapshot_trend(
     to_as_of: str,
     limit: int = 25,
     offset: int = 0,
+    evidence_status: str | None = None,
     db: Path | None = None,
 ) -> dict:
     """Return bounded historical snapshots; do not project constituents across gaps.
@@ -66,6 +109,8 @@ def constituent_snapshot_trend(
         raise ValueError("Snapshot trend dates are out of order")
     if not 1 <= limit <= 100 or not 0 <= offset <= 1_000_000:
         raise ValueError("Invalid snapshot trend pagination")
+    if evidence_status is not None and evidence_status not in EVIDENCE_STATUSES:
+        raise ValueError("Invalid snapshot evidence filter")
 
     conn = _read_connection(db if db is not None else database_path())
     response = {
@@ -90,11 +135,42 @@ def constituent_snapshot_trend(
             return response
         where = "WHERE index_code=? AND as_of>=? AND as_of<=?"
         args = (code, start, end)
+        if evidence_status is not None:
+            # Snapshot dates are metadata only; never query or export price observations.
+            # Selection occurs before LIMIT/OFFSET, producing the true filtered total.
+            all_dates = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT DISTINCT as_of FROM index_memberships "
+                    + where
+                    + " ORDER BY as_of",
+                    args,
+                )
+            ]
+            records: list[dict] = []
+            matches: list[int] = []
+            for day in all_dates:
+                record = _latest(conn, code, day)
+                if record is None or record["as_of"] != day:
+                    raise StorageError("Dated membership snapshot became unavailable")
+                if record["source_as_of"] is not None and record["source_as_of"] > day:
+                    raise StorageError("Source evidence postdates claimed membership snapshot")
+                records.append(record)
+                if _evidence_status(record) == evidence_status:
+                    matches.append(len(records) - 1)
+            response["total_snapshots"] = len(matches)
+            for position in matches[offset : offset + limit]:
+                previous = records[position - 1] if position else None
+                response["snapshots"].append(
+                    _snapshot_point(conn, code, records[position], previous)
+                )
+            return response
+
         response["total_snapshots"] = conn.execute(
             "SELECT COUNT(DISTINCT as_of) FROM index_memberships " + where, args
         ).fetchone()[0]
-        # Include one preceding in-range date to compute the first displayed
-        # delta on any page after the first; never compare to a future snapshot.
+        # Include one preceding in-range date on subsequent pages, retaining
+        # the *unfiltered* adjacent snapshot for valid historical differences.
         from_offset = max(offset - 1, 0)
         size = limit + (1 if offset else 0)
         dates = [
@@ -113,39 +189,8 @@ def constituent_snapshot_trend(
                 raise StorageError("Dated membership snapshot became unavailable")
             if record["source_as_of"] is not None and record["source_as_of"] > day:
                 raise StorageError("Source evidence postdates claimed membership snapshot")
-            status = _evidence_status(record)
-            added: int | None = None
-            removed: int | None = None
-            change_status = "first_observed"
-            if previous is not None:
-                added, removed = _differences(conn, code, previous["as_of"], day)
-                if previous["total"] + added - removed != record["total"]:
-                    raise StorageError("Inconsistent membership snapshot differences")
-                change_status = (
-                    "verified_pair"
-                    if _evidence_status(previous) == "verified_snapshot"
-                    and status == "verified_snapshot"
-                    else "indicative_pair"
-                )
-            item = {
-                "snapshot_as_of": day,
-                "source": record["source"],
-                "source_as_of": record["source_as_of"],
-                "source_kind": record["source_kind"],
-                "validation_status": record["validation_status"],
-                "availability_status": record["availability_status"],
-                "confidence": record["confidence"],
-                "expected_count": record["expected_count"],
-                "member_count": record["total"],
-                "evidence_status": status,
-                "previous_snapshot_as_of": previous["as_of"] if previous else None,
-                "previous_evidence_status": _evidence_status(previous) if previous else None,
-                "added_members": added,
-                "removed_members": removed,
-                "change_status": change_status,
-            }
             if not (offset and position == 0):
-                response["snapshots"].append(item)
+                response["snapshots"].append(_snapshot_point(conn, code, record, previous))
             previous = record
         return response
     except sqlite3.Error as exc:
