@@ -320,6 +320,12 @@ class ModelJobSupervisor:
 
     def _run(self) -> None:
         try:
+            # An idle managed backend must not create a job database or lock.
+            # The first explicit enqueue creates the ledger; poll until then.
+            while not self._stop.is_set() and not self.ledger.path.is_file():
+                self._stop.wait(POLL_SECONDS)
+            if self._stop.is_set():
+                return
             with _exclusive_owner(self.ledger.path) as owned:
                 if not owned:
                     return
