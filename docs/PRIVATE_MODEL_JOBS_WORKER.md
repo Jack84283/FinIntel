@@ -11,22 +11,26 @@ Python execution facility, or validated backtesting engine.
   queue and starts a separate Python child process for each claimed job;
   model computation is never performed on a FastAPI request or event loop.
 - A cross-process exclusive worker lock prevents a second owner from
-  reconciling or claiming jobs. Exclusive startup marks previously running
-  attempts interrupted (or cancelled if cancellation was requested).
-  Queued entries remain durable and are not auto-resumed.
+  reconciling or claiming jobs. Competing sidecars retry exclusive ownership;
+  recoverable SQLite failures release the lock and retry with bounded backoff.
+  Each ownership acquisition reconciles interrupted attempts without silently
+  resuming them, while queued entries stay durable.
 - The only executable model is builtin.sma_crossover version 1.0.0. Requests
   have typed source parameters and a mandatory SHA-256 snapshot pin. No
   Python module, command, source filepath, arbitrary provider, executable,
   URL, or dynamic model identifier is accepted for these jobs.
 - Child requests use bounded stdin envelopes, a reduced environment without
-  provider tokens or process credentials, and a fixed executable selected
-  by the backend. Computation uses read-only local data; network socket
+  provider tokens, process credentials or inherited PYTHONPATH, and a fixed
+  executable selected by the backend. Computation uses read-only local data; network socket
   operations are disabled inside the child.
 - The model engine checks the expected snapshot before computing. The child
   reads the source again after computation, and the supervisor verifies
   the snapshot before calling the ledger completion transition. The ledger
   validates claim generation, request identity, source and lineage hashes,
-  output schema and retention limit. Source changes fail closed.
+  output schema and retention limit. On every completed-result read, the
+  trusted ledger also checks source/parameters against the original request
+  and recomputes the observation and lineage hashes before returning data.
+  Corruption fails closed without modifying observations. Source changes fail closed.
 - All state writes are fenced by the monotonically increasing claim attempt;
   a late worker cannot overwrite a cancelled or retried attempt.
 
@@ -36,7 +40,10 @@ Python execution facility, or validated backtesting engine.
   observations per job, 4 MiB maximum retained model output.
 - A 60-second wall-clock limit; POSIX processes have 2 GiB virtual-memory
   and 50/55-second CPU limits. Windows children request a 2 GiB Job Object
-  process-memory limit with kill-on-close behavior.
+  process-memory limit with kill-on-close behavior. A supervisor-owned Windows
+  Job Object also contains the launcher and descendants and kills them if the
+  supervisor exits unexpectedly. Frozen workers monitor their parent process
+  and packaged sidecars monitor their PyInstaller launcher.
 - A running cancellation enters cancel_requested; the child checks this
   between computation phases. The supervisor allows two seconds for
   cooperation and then hard-stops the process. Shutdown terminates the
@@ -66,6 +73,8 @@ A derived status reports cancel_requested when state is running and the
 cancel flag is set. The native shell uses only dedicated fixed model_job
 IPC commands and the managed loopback transport; the typed React client
 does not expose browser HTTP access or caller-selected localhost URLs.
+Responses are also validated at the native IPC boundary using bounded,
+deny-unknown-fields metadata, result and lineage contracts.
 
 ## Validation and rollout
 
@@ -73,7 +82,9 @@ Synthetic tests cover source changes before execution and just before
 persistence, separate-process completion, price-data preservation, restart
 reconciliation, two independent queue owners, cancellation, timeouts,
 attempt fencing, managed API validation, native IPC route security,
-and typed desktop transport.
+and typed desktop transport. Native CI runs model-job Rust contract tests,
+Windows/macOS worker regressions and a real packaged-worker smoke on all
+platforms, verifying synthetic queued execution, hashes and lock cleanup.
 
 Run CI for Ruff/pytest, React lint/typecheck/tests and the macOS, Windows
 and Linux native builds. Installed manual desktop testing on all three
