@@ -119,7 +119,7 @@ def test_reject_unallowlisted_code_paths_and_raw_exception_details(tmp_path):
     with pytest.raises(ValidationError):
         request(model_version="2.0.0")
     with pytest.raises(ValidationError):
-        request(start=date(2026, 12, 1), end=date(2026, 12, 2))
+        request(start=date(2099, 12, 1), end=date(2099, 12, 2))
     ledger = ModelJobLedger(tmp_path / "jobs.sqlite")
     with pytest.raises(ModelJobStoreError):
         ledger.enqueue({"start": "2026-09-01"})
@@ -176,3 +176,22 @@ def test_queue_quota_with_no_implicit_eviction(tmp_path):
     assert ledger.list(limit=MAX_ACTIVE_JOBS)["total"] == MAX_ACTIVE_JOBS
     assert ledger.cancel(ledger.list()["items"][0]["id"]) == "cancelled"
     assert ledger.enqueue(request())["state"] == "queued"
+
+
+def test_two_ledger_connections_cannot_claim_the_same_job(tmp_path):
+    path = tmp_path / "shared.sqlite"
+    first = ModelJobLedger(path)
+    second = ModelJobLedger(path)
+    identifier = first.enqueue(request())["id"]
+    assert first.claim_next()[0] == identifier
+    assert second.claim_next() is None
+
+
+def test_result_cannot_bypass_expected_source_revision(tmp_path):
+    ledger = ModelJobLedger(tmp_path / "pinned.sqlite")
+    identifier = ledger.enqueue(request(expected_snapshot_sha256="c" * 64))["id"]
+    ledger.claim_next()
+    with pytest.raises(ModelJobStoreError, match="does not match queued request"):
+        ledger.complete(identifier, result(source="a" * 64))
+    assert ledger.get(identifier)["state"] == "running"
+    assert ledger.fail(identifier, "source_changed")
