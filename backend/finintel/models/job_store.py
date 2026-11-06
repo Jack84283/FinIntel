@@ -381,11 +381,23 @@ class ModelJobLedger:
         # The API result model has a dict lineage for backwards compatibility;
         # this private ledger must never retain arbitrary hidden fields inside it.
         expected_lineage_keys = {
-            "model_id", "model_version", "implementation_revision", "parameters",
-            "source_identity", "source_snapshot_sha256", "analysis_calculation_version",
-            "requested_start", "requested_end", "first_observed_session",
-            "last_observed_session", "quality_policy", "quality_status", "quality_verified",
-            "point_in_time_membership", "dividends_included", "corporate_action_adjustment",
+            "model_id",
+            "model_version",
+            "implementation_revision",
+            "parameters",
+            "source_identity",
+            "source_snapshot_sha256",
+            "analysis_calculation_version",
+            "requested_start",
+            "requested_end",
+            "first_observed_session",
+            "last_observed_session",
+            "quality_policy",
+            "quality_status",
+            "quality_verified",
+            "point_in_time_membership",
+            "dividends_included",
+            "corporate_action_adjustment",
         }
         if not isinstance(lineage, dict) or set(lineage) != expected_lineage_keys:
             raise ModelJobStoreError("Invalid model-job lineage schema")
@@ -416,7 +428,8 @@ class ModelJobLedger:
         if (
             validated.observations != len(validated.points)
             or not 0 < validated.observations <= MAX_MODEL_OBSERVATIONS
-            or validated.quality_warning not in (
+            or validated.quality_warning
+            not in (
                 None,
                 "Unverified data: research-only results, not verified for backtesting",
             )
@@ -426,11 +439,12 @@ class ModelJobLedger:
         if (
             points[0]["session_date"] != lineage["first_observed_session"]
             or points[-1]["session_date"] != lineage["last_observed_session"]
-            or any(points[i]["session_date"] >= points[i + 1]["session_date"]
-                   for i in range(len(points) - 1))
+            or any(
+                points[i]["session_date"] >= points[i + 1]["session_date"]
+                for i in range(len(points) - 1)
+            )
             or hashlib.sha256(_canonical(points).encode("utf-8")).hexdigest() != output
-            or hashlib.sha256(_canonical(lineage).encode("utf-8")).hexdigest()
-            != reproducibility
+            or hashlib.sha256(_canonical(lineage).encode("utf-8")).hexdigest() != reproducibility
         ):
             raise ModelJobStoreError("Inconsistent model-job output hashes or dates")
         canonical = _canonical(validated.model_dump())
@@ -447,16 +461,21 @@ class ModelJobLedger:
                     (identifier,),
                 ).fetchone()
                 if (
-                    row is None or row["state"] != "running"
-                    or row["cancel_requested"] or row["attempts"] != attempt
+                    row is None
+                    or row["state"] != "running"
+                    or row["cancel_requested"]
+                    or row["attempts"] != attempt
                 ):
                     return False
                 original = json.loads(row["request_json"])
                 source_identity = lineage["source_identity"]
                 expected_identity = {
-                    "instrument_kind": "index", "code": original["code"],
-                    "provider": "fred", "adjustment": "price_index",
-                    "return_semantics": "price_index", "frequency": "daily",
+                    "instrument_kind": "index",
+                    "code": original["code"],
+                    "provider": "fred",
+                    "adjustment": "price_index",
+                    "return_semantics": "price_index",
+                    "frequency": "daily",
                     "units": "index_points",
                 }
                 if (
