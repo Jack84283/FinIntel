@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "./PageHeader";
+import { LocalDataTable, TablePager, TABLE_PAGE_SIZE } from "./components/TablePagination";
 import { useLocale } from "./localization";
 import { useNotify } from "./notifications";
 import {
@@ -17,7 +18,7 @@ import {
 } from "./quality-api";
 
 const indexCodes = ["SP500", "DJIA", "NASDAQCOM", "NDX", "VIX"] as const;
-const pageSize = 20;
+const pageSize = TABLE_PAGE_SIZE;
 const selectClass = "h-9 max-w-full rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const inputClass = "h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
@@ -153,7 +154,6 @@ export function DataQualityPage() {
   const scopeDescription = scope === "index"
     ? t("Index levels are examined separately from equity OHLCV and total-return series.")
     : t("Inspect stored equity providers and their daily raw, unadjusted observations.");
-  const pageCount = Math.max(1, Math.ceil((findings?.total ?? 0) / pageSize));
 
   async function exportReport(format: "json" | "csv") {
     if (!overview) return;
@@ -319,13 +319,7 @@ export function DataQualityPage() {
             </table>
             {!loading && !(findings?.items.length) && <p className="p-4 text-sm text-muted-foreground">{t("No matching quality findings.")}</p>}
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span aria-live="polite">{t("Showing")} {findings?.total ? page * pageSize + 1 : 0}–{Math.min((page + 1) * pageSize, findings?.total ?? 0)} {t("of")} {findings?.total ?? 0} · {t("Page")} {page + 1} {t("of")} {pageCount}</span>
-            <div className="flex gap-2">
-              <Button size="sm" variant="secondary" disabled={loading || page === 0} onClick={() => setPage(v => Math.max(0, v - 1))}>{t("Previous")}</Button>
-              <Button size="sm" variant="secondary" disabled={loading || page + 1 >= pageCount} onClick={() => setPage(v => v + 1)}>{t("Next")}</Button>
-            </div>
-          </div>
+          <TablePager page={page} total={findings?.total ?? 0} onPageChange={setPage} disabled={loading} />
           {selectedFinding !== null && <section className="space-y-3 rounded-md border border-border bg-muted/20 p-3" aria-label={t("Finding investigation")}>
             {!history && !historyError && <p className="text-xs">{t("Loading review history…")}</p>}
             {historyError && <p role="alert" className="text-xs text-destructive">{historyError}</p>}
@@ -404,13 +398,15 @@ export function DataQualityPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           {!corrections?.items.length ? <p className="text-sm text-muted-foreground">{t("No correction proposals for this instrument.")}</p> :
-            <div className="overflow-x-auto rounded-md border border-border">
+            <LocalDataTable rows={corrections.items} label={t("Correction overlays")}
+              searchable={row => [row.session_date, row.provider, row.state, row.source_close, row.proposed_close].join(" ")}>
+              {visible => <div className="overflow-x-auto rounded-md border border-border">
               <table className="w-full min-w-[640px] text-left text-xs">
                 <thead className="bg-muted text-muted-foreground"><tr>
                   {["Session", "Provider", "Original close", "Proposed close", "State", "Details"].map(label =>
                     <th scope="col" className="px-2 py-2" key={label}>{t(label)}</th>)}
                 </tr></thead>
-                <tbody>{corrections.items.map(item => <tr key={item.id} className="border-t border-border">
+                <tbody>{visible.map(item => <tr key={item.id} className="border-t border-border">
                   <td className="px-2 py-2">{item.session_date}</td>
                   <td className="px-2 py-2">{item.provider}</td>
                   <td className="px-2 py-2 tabular-nums">{item.source_close}</td>
@@ -419,7 +415,7 @@ export function DataQualityPage() {
                   <td className="px-2 py-2"><Button variant="ghost" size="sm" onClick={() => setSelectedCorrection(item.id)}>{t("Preview")}</Button></td>
                 </tr>)}</tbody>
               </table>
-            </div>}
+            </div>}</LocalDataTable>}
           {selectedCorrection && <>
             <div className="rounded-md border border-border p-3 text-xs">
               <h3 className="mb-2 text-sm font-semibold">{t("Correction preview")}</h3>
