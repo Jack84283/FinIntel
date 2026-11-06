@@ -32,7 +32,7 @@ export function DataAcquisitionPage({
               <BarChart3 aria-hidden="true" /> {t("Open Markets")}
             </Button></>} />
 
-      <div className="grid min-w-0 items-start gap-2 2xl:grid-cols-[minmax(0,1fr)_300px]">
+      <div className={`grid min-w-0 items-start gap-2 ${mode === "daily" ? "grid-cols-1" : "2xl:grid-cols-[minmax(0,1fr)_300px]"}`}>
         <div className="min-w-0 space-y-2">
           {mode === "history" && <>
           <IndexHistoryCard />
@@ -53,7 +53,7 @@ export function DataAcquisitionPage({
           </>}
           {mode === "daily" && <DailyAcquisitionPanel />}
         </div>
-        <aside className="grid min-w-0 gap-2 sm:grid-cols-2 2xl:grid-cols-1" aria-label={t("Acquisition guidance")}>
+        <aside className={`grid min-w-0 gap-2 ${mode === "daily" ? "grid-cols-1" : "sm:grid-cols-2 2xl:grid-cols-1"}`} aria-label={t("Acquisition guidance")}>
           {mode === "history" && <Card className="min-w-0">
             <CardHeader className="gap-y-2">
               <CardTitle className="flex items-center gap-2"><Database aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" /> {t("Local data workflow")}</CardTitle>
