@@ -21,6 +21,7 @@ from finintel.models.job_store import ModelJobLedger, ModelJobRequest, ModelJobS
 from finintel.storage.db import _write_connection
 
 REAL_WINDOWS_JOB_LIMIT = job_worker._limit_windows_worker
+REAL_MACOS_RSS = job_worker._macos_rss_bytes
 
 START = date(2026, 9, 1)
 END = date(2026, 10, 5)
@@ -615,16 +616,11 @@ def test_worker_accepts_live_supervisor_through_bootloader(monkeypatch):
 
 def test_macos_rss_includes_frozen_child_process_tree(monkeypatch):
     monkeypatch.setattr(job_worker.sys, "platform", "darwin")
-    sample = (
-        "100 1 10\n"
-        "101 100 200\n"
-        "102 101 300\n"
-        "103 1 90000\n"
-    )
+    sample = "100 1 10\n101 100 200\n102 101 300\n103 1 90000\n"
     result = subprocess.CompletedProcess([], 0, stdout=sample, stderr="")
     monkeypatch.setattr(job_worker.subprocess, "run", lambda *_a, **_kw: result)
-    assert job_worker._macos_rss_bytes(100) == (10 + 200 + 300) * 1024
-    assert job_worker._macos_rss_bytes(999999) is None
+    assert REAL_MACOS_RSS(100) == (10 + 200 + 300) * 1024
+    assert REAL_MACOS_RSS(999999) is None
 
 
 def test_safe_error_mapping_never_contains_exception_text():
