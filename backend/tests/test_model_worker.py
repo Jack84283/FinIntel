@@ -605,6 +605,28 @@ def test_persisted_result_hashes_are_verified_on_read(local_storage):
     assert ledger.get(identifier, include_result=True)["result"] == original
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX packaged parent PID regression")
+def test_worker_accepts_live_supervisor_through_bootloader(monkeypatch):
+    # The immediate PPID belongs to PyInstaller, not the original sidecar.
+    monkeypatch.setattr(job_worker.os, "getppid", lambda: 999999)
+    assert job_worker._parent_alive(os.getpid())
+    assert not job_worker._parent_alive(999999999)
+
+
+def test_macos_rss_includes_frozen_child_process_tree(monkeypatch):
+    monkeypatch.setattr(job_worker.sys, "platform", "darwin")
+    sample = (
+        "100 1 10\n"
+        "101 100 200\n"
+        "102 101 300\n"
+        "103 1 90000\n"
+    )
+    result = subprocess.CompletedProcess([], 0, stdout=sample, stderr="")
+    monkeypatch.setattr(job_worker.subprocess, "run", lambda *_a, **_kw: result)
+    assert job_worker._macos_rss_bytes(100) == (10 + 200 + 300) * 1024
+    assert job_worker._macos_rss_bytes(999999) is None
+
+
 def test_safe_error_mapping_never_contains_exception_text():
     assert job_worker._safe_error_code(AnalyticsError("Local source snapshot changed")) == (
         "source_changed"
