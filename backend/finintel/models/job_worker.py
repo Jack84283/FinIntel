@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import date
 from pathlib import Path
 
 from finintel.market_data.analytics import AnalyticsError
@@ -63,7 +63,7 @@ def _bound_child_memory() -> None:
 
 
 def source_snapshot_for_job(
-    *, code: str, start: datetime.date, end: datetime.date, quality_policy: str,
+    *, code: str, start: date, end: date, quality_policy: str,
 ) -> str:
     """Read only local bounded observations; do not run the model on an HTTP thread."""
     response = run_analytics(
