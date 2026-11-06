@@ -12,6 +12,7 @@ import json
 import os
 import signal
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -131,7 +132,7 @@ def _safe_error(exc: Exception) -> str:
         if "2,000" in description or "observation limit" in description:
             return "resource_limit"
         return "invalid_input"
-    if isinstance(exc, (StorageError, ModelJobStoreError, OSError)):
+    if isinstance(exc, (StorageError, ModelJobStoreError, OSError, sqlite3.Error)):
         return "storage_unavailable"
     if isinstance(exc, MemoryError):
         return "resource_limit"
@@ -208,6 +209,7 @@ def child_main() -> None:
         StorageError,
         ModelJobStoreError,
         OSError,
+        sqlite3.Error,
         MemoryError,
         ValueError,
         KeyError,
@@ -336,7 +338,7 @@ class ModelJobSupervisor:
                         self._stop.wait(POLL_SECONDS)
                     else:
                         self._execute(*claim)
-        except (ModelJobStoreError, OSError):
+        except (ModelJobStoreError, OSError, sqlite3.Error):
             # No exception or user-specific path reaches the API or frontend.
             return
 
@@ -446,7 +448,7 @@ class ModelJobSupervisor:
                 self.ledger.finish_cancelled(identifier, attempt)
             else:
                 self.ledger.fail(identifier, attempt, reason)
-        except (OSError, ValueError, KeyError, TypeError, ModelJobStoreError):
+        except (OSError, sqlite3.Error, ValueError, KeyError, TypeError, ModelJobStoreError):
             if _active(self.ledger, identifier, attempt) == "cancelled":
                 self.ledger.finish_cancelled(identifier, attempt)
             else:
