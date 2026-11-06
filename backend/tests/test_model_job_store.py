@@ -23,22 +23,32 @@ def request(**changes):
 
 def result(source="a" * 64):
     lineage = {
-        "model_id": "builtin.sma_crossover", "model_version": "1.0.0",
+        "model_id": "builtin.sma_crossover",
+        "model_version": "1.0.0",
         "source_snapshot_sha256": source,
         "source_identity": {"code": "SP500", "provider": "fred", "adjustment": "price_index"},
-        "requested_start": "2026-09-01", "requested_end": "2026-10-01",
+        "requested_start": "2026-09-01",
+        "requested_end": "2026-10-01",
         "parameters": {"fast_window": 5, "slow_window": 20},
         "quality_policy": "require_complete",
     }
     points = [{"session_date": "2026-09-01"}]
-    digest = lambda value: hashlib.sha256(json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
-    ).encode("utf-8")).hexdigest()
+    digest = lambda value: hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
     return {
-        "execution_contract": "model-research-evaluation-v1", "status": "completed",
-        "backtest_validated": False, "lineage": lineage,
+        "execution_contract": "model-research-evaluation-v1",
+        "status": "completed",
+        "backtest_validated": False,
+        "lineage": lineage,
         "reproducibility_sha256": digest(lineage),
-        "output_sha256": digest(points), "points": points,
+        "output_sha256": digest(points),
+        "points": points,
     }
 
 
@@ -135,9 +145,14 @@ def test_reject_unallowlisted_code_paths_and_raw_exception_details(tmp_path):
     tampered["lineage"]["source_identity"]["code"] = "DJIA"
     import hashlib
     import json
-    tampered["reproducibility_sha256"] = hashlib.sha256(json.dumps(
-        tampered["lineage"], sort_keys=True, separators=(",", ":"), ensure_ascii=True,
-    ).encode("utf-8")).hexdigest()
+    tampered["reproducibility_sha256"] = hashlib.sha256(
+        json.dumps(
+            tampered["lineage"],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
     with pytest.raises(ModelJobStoreError, match="does not match queued request"):
         ledger.complete(job, tampered)
     with pytest.raises(ModelJobStoreError):
@@ -161,6 +176,7 @@ def test_unsafe_path_and_preexisting_unknown_schema_are_refused(tmp_path, monkey
         ModelJobLedger(alias).enqueue(request())
     assert target.read_text() == "sentinel"
     import sqlite3
+
     with sqlite3.connect(tmp_path / "foreign.sqlite") as conn:
         conn.execute("CREATE TABLE unrelated (id INTEGER)")
     with pytest.raises(ModelJobStoreError):
