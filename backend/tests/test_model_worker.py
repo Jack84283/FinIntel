@@ -423,7 +423,7 @@ def test_supervisor_lazily_takes_ownership_and_recovers_running_job(local_storag
         owner.stop()
 
 
-def test_managed_validation_does_not_echo_private_path_or_secret(local_storage):
+def test_managed_validation_does_not_echo_private_path_or_secret(local_storage, monkeypatch):
     headers = {"x-finintel-process-token": TOKEN}
     private_path = "/Users/private/keys/secret-model.py"
     with TestClient(backend_main.app) as client:
@@ -442,6 +442,14 @@ def test_managed_validation_does_not_echo_private_path_or_secret(local_storage):
         )
         assert response.status_code == 422
         assert "secret-backend-token" not in response.text
+        monkeypatch.setattr(job_api, "source_snapshot_for_job", lambda **_kw: "a" * 64)
+        response = client.post(
+            "/api/v1/models/jobs",
+            json=job_api_body(start="2026-10-05", end="2026-09-01"),
+            headers=headers,
+        )
+        assert response.status_code == 422
+        assert response.json() == {"detail": "Invalid local model-job request"}
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job Object regression")
@@ -460,6 +468,26 @@ def test_windows_worker_is_assigned_to_memory_limited_job():
     finally:
         job_worker._stop_process(process)
         job_worker._close_windows_job(job_handle)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS resident-memory watchdog")
+def test_macos_worker_rss_limit_terminates_child(local_storage, monkeypatch):
+    _, jobs_db = local_storage
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request("a" * 64))["id"]
+    claim = ledger.claim_next()
+    assert claim is not None
+    child = SimulatedChild()
+    monkeypatch.setattr(job_worker.subprocess, "Popen", lambda *_args, **_kw: child)
+    monkeypatch.setattr(
+        job_worker, "_macos_rss_bytes",
+        lambda _pid: job_worker.MAX_WORKER_MEMORY_BYTES + 1,
+    )
+    owner = job_worker.ModelJobSupervisor(ledger)
+    owner._run_claim(*claim)
+    assert child.terminated
+    assert ledger.get(identifier)["state"] == "failed"
+    assert ledger.get(identifier)["error_code"] == "resource_limit"
 
 
 def test_safe_error_mapping_never_contains_exception_text():
