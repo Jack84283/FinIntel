@@ -480,7 +480,8 @@ def test_macos_worker_rss_limit_terminates_child(local_storage, monkeypatch):
     child = SimulatedChild()
     monkeypatch.setattr(job_worker.subprocess, "Popen", lambda *_args, **_kw: child)
     monkeypatch.setattr(
-        job_worker, "_macos_rss_bytes",
+        job_worker,
+        "_macos_rss_bytes",
         lambda _pid: job_worker.MAX_WORKER_MEMORY_BYTES + 1,
     )
     owner = job_worker.ModelJobSupervisor(ledger)
