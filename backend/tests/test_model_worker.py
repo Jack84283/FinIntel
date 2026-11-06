@@ -6,6 +6,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import time
 from datetime import date, timedelta
 
 import pytest
@@ -17,6 +18,8 @@ from finintel.models import job_api, job_worker
 from finintel.models.job_store import ModelJobLedger, ModelJobRequest
 from finintel.storage.db import _write_connection
 
+REAL_WINDOWS_JOB_LIMIT = job_worker._limit_windows_worker
+
 START = date(2026, 9, 1)
 END = date(2026, 10, 5)
 TOKEN = "local-managed-test-process-token-issue-58"
@@ -27,6 +30,9 @@ def keep_in_process_tests_unrestricted(monkeypatch):
     """Direct run_child fixture calls must not patch global sockets or process limits."""
     monkeypatch.setattr(job_worker, "_deny_outbound_network", lambda: None)
     monkeypatch.setattr(job_worker, "_bound_child_memory", lambda: None)
+    # Mocked supervisor children do not own an OS process handle or PID.
+    monkeypatch.setattr(job_worker, "_limit_windows_worker", lambda _process: None)
+    monkeypatch.setattr(job_worker, "_macos_rss_bytes", lambda _pid: 1024)
 
 
 @pytest.fixture
@@ -291,6 +297,7 @@ def test_two_supervisors_cannot_own_same_ledger(local_storage):
 
 class SimulatedChild:
     def __init__(self):
+        self.pid = os.getpid()
         self.terminated = False
         self.exit_status = None
 
@@ -382,6 +389,77 @@ def test_wrong_worker_attempt_does_not_read_claim(local_storage):
     assert ledger.read_claim(identifier, attempt) is not None
     assert ledger.read_claim(identifier, attempt + 1) is None
     assert job_worker.run_child("not-a-uuid", attempt) == 2
+
+
+def test_idle_supervisor_does_not_open_or_create_lock(local_storage):
+    _, jobs_db = local_storage
+    owner = job_worker.ModelJobSupervisor(ModelJobLedger(jobs_db))
+    assert owner.start()
+    try:
+        time.sleep(0.35)
+        assert not jobs_db.exists()
+        assert not jobs_db.with_name(jobs_db.name + ".worker.lock").exists()
+    finally:
+        owner.stop()
+
+
+def test_supervisor_lazily_takes_ownership_and_recovers_running_job(local_storage):
+    _, jobs_db = local_storage
+    owner = job_worker.ModelJobSupervisor(ModelJobLedger(jobs_db))
+    assert owner.start()
+    try:
+        ledger = ModelJobLedger(jobs_db)
+        identifier = ledger.enqueue(request("a" * 64))["id"]
+        assert ledger.claim_next() is not None
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            if ledger.get(identifier)["state"] == "failed":
+                break
+            time.sleep(0.05)
+        assert ledger.get(identifier)["state"] == "failed"
+        assert ledger.get(identifier)["error_code"] == "interrupted"
+        assert jobs_db.with_name(jobs_db.name + ".worker.lock").exists()
+    finally:
+        owner.stop()
+
+
+def test_managed_validation_does_not_echo_private_path_or_secret(local_storage):
+    headers = {"x-finintel-process-token": TOKEN}
+    private_path = "/Users/private/keys/secret-model.py"
+    with TestClient(backend_main.app) as client:
+        response = client.post(
+            "/api/v1/models/jobs",
+            json=job_api_body(module_path=private_path),
+            headers=headers,
+        )
+        assert response.status_code == 422
+        assert private_path not in response.text
+        assert "module_path" not in response.text
+        response = client.post(
+            "/api/v1/models/jobs",
+            json=job_api_body(start="secret-backend-token"),
+            headers=headers,
+        )
+        assert response.status_code == 422
+        assert "secret-backend-token" not in response.text
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Object regression")
+def test_windows_worker_is_assigned_to_memory_limited_job():
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(4)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    job_handle = None
+    try:
+        job_handle = REAL_WINDOWS_JOB_LIMIT(process)
+        assert isinstance(job_handle, int) and job_handle > 0
+        assert process.poll() is None
+    finally:
+        job_worker._stop_process(process)
+        job_worker._close_windows_job(job_handle)
 
 
 def test_safe_error_mapping_never_contains_exception_text():
