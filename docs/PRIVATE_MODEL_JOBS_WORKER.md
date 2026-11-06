@@ -39,7 +39,9 @@ backtest, a cloud service, a proprietary-code loader, or a desktop job dashboard
   file until a persisted ledger actually exists (important for abrupt Windows
   sidecar shutdown). A second supervisor waits to acquire ownership.
   In-progress jobs are marked interrupted/cancelled after a supervisor restart
-  rather than silently resumed. Queued jobs persist.
+  rather than silently resumed. Queued jobs persist. Recoverable ledger failures
+  release ownership, back off and retry, including safe reconciliation of any
+  previously claimed attempt.
 
 ## Managed routes (sidecar-only)
 
@@ -50,8 +52,8 @@ the token or an arbitrary URL proxy.
 | Method | Route | Operation |
 |---|---|---|
 | POST | `/api/v1/models/jobs` | Validate the built-in model input, pin current bounded local source, enqueue; HTTP 202 |
-| GET | `/api/v1/models/jobs?limit=10&offset=0` | Paginated summaries; 1–100 rows, offset <=10,000 |
-| GET | `/api/v1/models/jobs/{uuid}?include_result=true` | Detail and optional validated local result |
+| GET | `/api/v1/models/jobs?limit=10&offset=0` | Paginated summaries; 1–100 rows, offset <=10,000; explicit `cancel_requested` presentation status |
+| GET | `/api/v1/models/jobs/{uuid}?include_result=true` | Detail and optional local result, with read-time observation/lineage hash verification |
 | POST | `/api/v1/models/jobs/{uuid}/cancel` | Cancel queued immediately or request running child termination |
 | POST | `/api/v1/models/jobs/{uuid}/retry` | Queue same snapshot-pinned request, with attempt/active-job caps |
 
@@ -60,7 +62,10 @@ The corresponding Tauri commands are `model_jobs_create`,
 `model_jobs_retry`. They validate date/index/window selections and job UUID
 before routing to fixed localhost endpoints. Native responses are checked
 against deny-unknown-field job summaries, bounded result contracts, states,
-source identity and hashes before they reach the webview. Managed model-job
+source identity and hashes before they reach the webview. The ledger independently
+recomputes observation and lineage hashes when a completed result is read,
+and responds with a safe storage error if persisted data is corrupted.
+Managed model-job
 request validation errors are redacted without echoing rejected private input. **No new UI is included**; the
 next Phase 2B2 adds bilingual history, filtering and 10-row page controls.
 
@@ -69,8 +74,12 @@ next Phase 2B2 adds bilingual history, filtering and 10-row page controls.
 The synthetic suite covers managed token failures, invalid dynamic inputs,
 source-pinned queueing, bounded list/filter inputs, cancellation/retry,
 actual source-backed completion, revision changes before/during computation,
-stale attempt rejection, supervisor ownership, child timeout and cancellation,
-secret-free child environment, and safe failure-code mapping.
+stale attempt rejection, supervisor ownership, transient ledger-error recovery,
+explicit pending-cancel status, read-time detection of corrupted output and lineage,
+child timeout and cancellation, secret-free child environment, and safe failure-code
+mapping. Each native-platform CI job also starts the packaged one-file sidecar,
+seeds a disposable index series, submits a pinned job through HTTP, waits for the
+frozen child to execute, and checks actual result hashes. No downloaded data is used.
 
 Full CI and installed-desktop testing are distinct gates. Multi-platform
 packaging smoke tests do not prove actual production-memory isolation, data
