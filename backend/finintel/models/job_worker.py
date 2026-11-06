@@ -30,11 +30,26 @@ TERMINATE_GRACE_SECONDS = 2
 LINUX_MAX_ADDRESS_SPACE_BYTES = 2 * 1024 * 1024 * 1024
 
 # Do not inherit provider credentials, API keys, proxy endpoints or a Python import path.
-CHILD_ENV_KEYS = frozenset({
-    "PATH", "HOME", "USER", "TMPDIR", "TMP", "TEMP", "SYSTEMROOT",
-    "WINDIR", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "VIRTUAL_ENV",
-    "FININTEL_DB_PATH", "FININTEL_MODEL_JOBS_DB_PATH", "LANG", "LC_ALL",
-})
+CHILD_ENV_KEYS = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USER",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "SYSTEMROOT",
+        "WINDIR",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMDATA",
+        "VIRTUAL_ENV",
+        "FININTEL_DB_PATH",
+        "FININTEL_MODEL_JOBS_DB_PATH",
+        "LANG",
+        "LC_ALL",
+    }
+)
 
 
 def _disabled_network(*_args: object, **_kwargs: object) -> None:
@@ -63,7 +78,11 @@ def _bound_child_memory() -> None:
 
 
 def source_snapshot_for_job(
-    *, code: str, start: date, end: date, quality_policy: str,
+    *,
+    code: str,
+    start: date,
+    end: date,
+    quality_policy: str,
 ) -> str:
     """Read only local bounded observations; do not run the model on an HTTP thread."""
     response = run_analytics(
@@ -119,21 +138,29 @@ def run_child(job_id: str, attempt: int) -> int:
         if request is None:
             return 0  # Cancelled/stale; no result is allowed.
         actual_before = source_snapshot_for_job(
-            code=request.code, start=request.start, end=request.end,
+            code=request.code,
+            start=request.start,
+            end=request.end,
             quality_policy=request.quality_policy,
         )
         if actual_before != request.expected_snapshot_sha256:
             ledger.fail(job_id, attempt, "source_changed")
             return 2
         result = evaluate_builtin_indicator(
-            model_id=request.model_id, model_version=request.model_version,
-            code=request.code, start=request.start, end=request.end,
-            parameters=request.parameters, quality_policy=request.quality_policy,
+            model_id=request.model_id,
+            model_version=request.model_version,
+            code=request.code,
+            start=request.start,
+            end=request.end,
+            parameters=request.parameters,
+            quality_policy=request.quality_policy,
             expected_snapshot_sha256=request.expected_snapshot_sha256,
         )
         # Fail closed if the source was revised while this child was executing.
         actual_after = source_snapshot_for_job(
-            code=request.code, start=request.start, end=request.end,
+            code=request.code,
+            start=request.start,
+            end=request.end,
             quality_policy=request.quality_policy,
         )
         if actual_after != request.expected_snapshot_sha256:
@@ -184,9 +211,13 @@ class ModelJobSupervisor:
 
     def _acquire_lock(self) -> bool:
         path = self.ledger.path
-        if path.is_symlink() or path.resolve() == Path(os.environ.get(
-            "FININTEL_DB_PATH", "data/finintel.sqlite3"
-        )).expanduser().resolve():
+        if (
+            path.is_symlink()
+            or path.resolve()
+            == Path(os.environ.get("FININTEL_DB_PATH", "data/finintel.sqlite3"))
+            .expanduser()
+            .resolve()
+        ):
             raise ModelJobStoreError("Unsafe model-job supervisor location")
         lock_path = path.with_name(path.name + ".worker.lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -235,7 +266,9 @@ class ModelJobSupervisor:
         if not self._acquire_lock():
             return False
         self._stop.clear()
-        self._thread = threading.Thread(target=self._loop, name="finintel-model-supervisor", daemon=True)
+        self._thread = threading.Thread(
+            target=self._loop, name="finintel-model-supervisor", daemon=True
+        )
         self._thread.start()
         return True
 
