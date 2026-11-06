@@ -17,6 +17,8 @@ from finintel.market_data.membership_api import router as membership_router
 from finintel.market_data.quality_api import router as quality_router
 from finintel.market_data.validation_api import router as validation_router
 from finintel.models.api import router as models_router
+from finintel.models.job_api import router as model_jobs_router
+from finintel.models.job_worker import start_model_jobs, stop_model_jobs
 from finintel.settings.api import router as settings_router
 from finintel.storage.api import router as market_data_router
 
@@ -24,9 +26,11 @@ from finintel.storage.api import router as market_data_router
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     start_scheduler()
+    start_model_jobs()
     try:
         yield
     finally:
+        stop_model_jobs()
         stop_scheduler()
 
 
@@ -56,6 +60,7 @@ def health() -> HealthResponse:
 app.include_router(market_data_router)
 app.include_router(analytics_router)
 app.include_router(models_router)
+app.include_router(model_jobs_router)
 app.include_router(validation_router)
 app.include_router(quality_router)
 app.include_router(membership_router)
