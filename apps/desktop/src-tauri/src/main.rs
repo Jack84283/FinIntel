@@ -1,3 +1,5 @@
+mod model_jobs_contract;
+
 use std::sync::{atomic::{AtomicBool, AtomicU16, Ordering}, Mutex, OnceLock};
 use std::time::Duration;
 use tauri::Manager;
@@ -1018,26 +1020,6 @@ async fn model_research_evaluate(
 }
 
 
-#[derive(serde::Deserialize, serde::Serialize)]
-struct ModelJobSummary {
-    id: String,
-    state: String,
-    status: String,
-    model_id: String,
-    model_version: String,
-    request_sha256: String,
-    attempts: u8,
-    progress: u8,
-    cancel_requested: u8,
-    output_sha256: Option<String>,
-    source_snapshot_sha256: Option<String>,
-    error_code: Option<String>,
-    created_at: String,
-    updated_at: String,
-    started_at: Option<String>,
-    finished_at: Option<String>,
-}
-
 fn valid_model_job_id(id: &str) -> bool {
     id.len() == 36 && id.bytes().enumerate().all(|(i, byte)| {
         if matches!(i, 8 | 13 | 18 | 23) {
@@ -1046,28 +1028,6 @@ fn valid_model_job_id(id: &str) -> bool {
             byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()
         }
     })
-}
-
-fn validate_model_job_summary(job: &ModelJobSummary) -> bool {
-    valid_model_job_id(&job.id)
-        && job.model_id == "builtin.sma_crossover"
-        && job.model_version == "1.0.0"
-        && matches!(job.state.as_str(), "queued" | "running" | "completed" | "failed" | "cancelled")
-        && (job.status == job.state || (job.state == "running" && job.status == "cancel_requested"))
-        && job.attempts <= 3 && job.progress <= 100 && job.cancel_requested <= 1
-        && job.request_sha256.len() == 64
-        && job.request_sha256.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        && job.output_sha256.as_ref().is_none_or(|hash| hash.len() == 64)
-        && job.source_snapshot_sha256.as_ref().is_none_or(|hash| hash.len() == 64)
-}
-
-fn parse_model_job(payload: &serde_json::Value) -> Result<ModelJobSummary, String> {
-    let job: ModelJobSummary = serde_json::from_value(payload.clone())
-        .map_err(|_| "Malformed local model job response.".to_string())?;
-    if !validate_model_job_summary(&job) {
-        return Err("Incompatible local model job response.".to_string());
-    }
-    Ok(job)
 }
 
 async fn model_job_post(path: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
@@ -1123,8 +1083,7 @@ async fn model_job_enqueue(
         "expected_snapshot_sha256": expected_snapshot,
     });
     let value = model_job_post("/api/v1/models/jobs", body).await?;
-    let job = parse_model_job(&value)?;
-    serde_json::to_value(job).map_err(|_| "Invalid local model job result.".to_string())
+    model_jobs_contract::validate_summary(value)
 }
 
 #[tauri::command]
@@ -1144,10 +1103,10 @@ async fn model_job_list(limit: Option<u16>, offset: u16) -> Result<serde_json::V
     if rows.len() > limit.unwrap_or(10) as usize {
         return Err("Unbounded local model job list.".to_string());
     }
-    let parsed: Vec<ModelJobSummary> = rows.iter()
-        .map(parse_model_job)
-        .collect::<Result<_, _>>()?;
-    Ok(serde_json::json!({ "total": total, "items": parsed }))
+    if total < rows.len() as u64 {
+        return Err("Inconsistent managed model job count.".to_string());
+    }
+    model_jobs_contract::validate_list(value)
 }
 
 #[tauri::command]
@@ -1161,23 +1120,7 @@ async fn model_job_detail(job_id: String, include_result: bool) -> Result<serde_
         format!("/api/v1/models/jobs/{job_id}")
     };
     let value = read_backend(&path, &[]).await?;
-    let parsed = parse_model_job(&value)?;
-    let mut safe = serde_json::to_value(parsed)
-        .map_err(|_| "Malformed local model job response.".to_string())?;
-    if include_result {
-        let result = value.get("result").and_then(serde_json::Value::as_object)
-            .ok_or("Missing managed model job result.".to_string())?;
-        if result.get("execution_contract").and_then(serde_json::Value::as_str)
-            != Some("model-research-evaluation-v1")
-            || result.get("backtest_validated").and_then(serde_json::Value::as_bool)
-                != Some(false)
-            || result.get("read_only").and_then(serde_json::Value::as_bool) != Some(true)
-        {
-            return Err("Invalid managed model research result.".to_string());
-        }
-        safe["result"] = serde_json::Value::Object(result.clone());
-    }
-    Ok(safe)
+    model_jobs_contract::validate_detail(value, include_result)
 }
 
 #[tauri::command]
@@ -1188,15 +1131,7 @@ async fn model_job_cancel(job_id: String) -> Result<serde_json::Value, String> {
     let value = model_job_post(
         &format!("/api/v1/models/jobs/{job_id}/cancel"), serde_json::json!({})
     ).await?;
-    if value.get("id").and_then(serde_json::Value::as_str) != Some(&job_id)
-        || !matches!(
-            value.get("status").and_then(serde_json::Value::as_str),
-            Some("queued" | "running" | "completed" | "failed" | "cancel_requested" | "cancelled")
-        )
-    {
-        return Err("Invalid managed model cancellation response.".to_string());
-    }
-    Ok(value)
+    model_jobs_contract::validate_cancel(value, &job_id)
 }
 
 #[tauri::command]
@@ -1207,8 +1142,7 @@ async fn model_job_retry(job_id: String) -> Result<serde_json::Value, String> {
     let value = model_job_post(
         &format!("/api/v1/models/jobs/{job_id}/retry"), serde_json::json!({})
     ).await?;
-    let parsed = parse_model_job(&value)?;
-    serde_json::to_value(parsed).map_err(|_| "Malformed managed model retry response.".to_string())
+    model_jobs_contract::validate_summary(value)
 }
 
 #[cfg(test)]
@@ -1234,13 +1168,13 @@ mod model_jobs_ipc_tests {
             "updated_at": "2026-11-05T00:00:00+00:00",
             "started_at": null, "finished_at": null,
         });
-        assert!(parse_model_job(&base).is_ok());
+        assert!(model_jobs_contract::validate_summary(base.clone()).is_ok());
         let mut invalid = base.clone();
         invalid["attempts"] = serde_json::json!(8);
-        assert!(parse_model_job(&invalid).is_err());
+        assert!(model_jobs_contract::validate_summary(invalid.clone()).is_err());
         invalid["attempts"] = serde_json::json!(0);
         invalid["model_id"] = serde_json::json!("custom.private");
-        assert!(parse_model_job(&invalid).is_err());
+        assert!(model_jobs_contract::validate_summary(invalid.clone()).is_err());
     }
 }
 
