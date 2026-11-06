@@ -4,7 +4,7 @@ import {
   fetchMembershipTrend, parseTrendResult, validateTrendQuery,
   type TrendPoint, type TrendQuery, type TrendResult,
 } from "./membership-trend-api";
-import { ConstituentTrendPanel, SnapshotCountBar, trendEvidenceDescription } from "./ConstituentTrendPanel";
+import { ConstituentTrendPanel, SnapshotCountBar, TrendEvidenceControls, trendEvidenceDescription } from "./ConstituentTrendPanel";
 import { translate } from "./localization";
 
 const native = vi.hoisted(() => ({ enabled: false, invoke: vi.fn() }));
@@ -180,6 +180,34 @@ describe("Bilingual snapshot-only Index Intelligence UI", () => {
   });
 });
 
+
+describe("Zero-result evidence filter recovery", () => {
+  const renderControls = (filter: string, total: number) => renderToStaticMarkup(
+    <TrendEvidenceControls evidenceFilter={filter} total={total} onChange={() => undefined} />,
+  );
+
+  it("keeps the selector and All option visible when a selected status has zero matches", () => {
+    const filtered = renderControls("proxy_only", 0);
+    expect(filtered).toContain('value="proxy_only"');
+    expect(filtered).toContain("All evidence statuses");
+    expect(filtered).toContain("No snapshots match the selected evidence filter.");
+    expect(filtered).not.toContain("No imported membership snapshots in this period");
+
+    // Selecting All restores the unfiltered request (already verified by API tests below).
+    const restored = renderControls("", 3);
+    expect(restored).toContain("All evidence statuses");
+    expect(restored).not.toContain("No snapshots match the selected evidence filter.");
+    expect(restored).not.toContain("No imported membership snapshots in this period");
+  });
+
+  it("distinguishes no stored snapshots from zero evidence matches in both languages", () => {
+    const missing = renderControls("", 0);
+    expect(missing).toContain("No imported membership snapshots in this period");
+    expect(missing).not.toContain("No snapshots match the selected evidence filter.");
+    const label = "No snapshots match the selected evidence filter.";
+    expect(translate("zh-CN", label)).not.toBe(label);
+  });
+});
 
 describe("Global source-evidence filtering", () => {
   it("validates later-page hits and preserves their actual unfiltered predecessors", () => {
