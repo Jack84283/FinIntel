@@ -31,6 +31,27 @@ describe("navigation between research and data operations", () => {
     expect(market).not.toContain("Action History");
   });
 
+  it("renders two distinct acquisition pages with non-overlapping controls", () => {
+    const historical = renderToStaticMarkup(
+      <DataAcquisitionPage mode="history" onViewMarket={() => undefined} />,
+    );
+    const daily = renderToStaticMarkup(
+      <DataAcquisitionPage mode="daily" onViewMarket={() => undefined} />,
+    );
+    expect(historical).toContain("Historical Data");
+    expect(historical).toContain("Index History");
+    expect(historical).toContain("Fetch &amp; store");
+    expect(historical).not.toContain("Daily acquisition");
+    expect(daily).toContain("Daily &amp; Incremental Data");
+    expect(daily).toContain("Daily acquisition");
+    expect(daily).not.toContain("Fetch &amp; store");
+    expect(daily).not.toContain("Index History");
+    const app = readFileSync(join(import.meta.dirname, "App.tsx"), "utf8");
+    expect(app).toContain('id: "daily-acquisition"');
+    expect(app).toContain('mode="history"');
+    expect(app).toContain('mode="daily"');
+  });
+
   it("keeps fetch controls on Data Acquisition and records on Action History", () => {
     const acquisition = renderToStaticMarkup(
       <DataAcquisitionPage onViewMarket={() => undefined} />,
