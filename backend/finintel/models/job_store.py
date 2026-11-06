@@ -182,7 +182,7 @@ class ModelJobLedger:
 
     @staticmethod
     def _summary(row: sqlite3.Row) -> dict:
-        return {
+        summary = {
             key: row[key]
             for key in (
                 "id",
@@ -202,6 +202,14 @@ class ModelJobLedger:
                 "finished_at",
             )
         }
+        # Public presentation status is additive; durable SQLite state stays
+        # unchanged for atomic transitions and backward compatibility.
+        summary["status"] = (
+            "cancel_requested"
+            if row["state"] == "running" and row["cancel_requested"] == 1
+            else row["state"]
+        )
+        return summary
 
     def enqueue(self, request: ModelJobRequest) -> dict:
         if not isinstance(request, ModelJobRequest):
@@ -233,6 +241,81 @@ class ModelJobLedger:
         finally:
             conn.close()
 
+    @staticmethod
+    def _verified_stored_result(row: sqlite3.Row) -> dict | None:
+        """Fail closed on stored-result corruption, without modifying any observation."""
+        raw = row["result_json"]
+        if row["state"] != "completed":
+            if raw is not None:
+                raise ModelJobStoreError("Stored model-job result failed integrity checks")
+            return None
+        if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_RESULT_BYTES:
+            raise ModelJobStoreError("Stored model-job result failed integrity checks")
+        try:
+            result = ModelResearchResult.model_validate_json(raw)
+            original = ModelJobRequest.model_validate_json(row["request_json"]).model_dump(mode="json")
+            lineage = result.lineage
+            points = [point.model_dump() for point in result.points]
+            identity = {
+                "instrument_kind": "index",
+                "code": original["code"],
+                "provider": "fred",
+                "adjustment": "price_index",
+                "return_semantics": "price_index",
+                "frequency": "daily",
+                "units": "index_points",
+            }
+            valid = (
+                json.loads(raw) == result.model_dump()
+                and hashlib.sha256(row["request_json"].encode("utf-8")).hexdigest()
+                == row["request_sha256"]
+                and original["model_id"] == row["model_id"]
+                and original["model_version"] == row["model_version"]
+                and result.execution_contract == "model-research-evaluation-v1"
+                and result.status == "completed"
+                and result.read_only is True
+                and result.no_network is True
+                and result.no_synthetic_sessions is True
+                and result.signal_after_close_only is True
+                and result.backtest_validated is False
+                and result.persistent_job is False
+                and isinstance(lineage, dict)
+                and lineage.get("model_id") == row["model_id"]
+                and lineage.get("model_version") == row["model_version"]
+                and lineage.get("implementation_revision") == IMPLEMENTATION_REVISION
+                and lineage.get("analysis_calculation_version") == CALCULATION_VERSION
+                and lineage.get("source_identity") == identity
+                and lineage.get("parameters") == original["parameters"]
+                and lineage.get("requested_start") == original["start"]
+                and lineage.get("requested_end") == original["end"]
+                and lineage.get("quality_policy") == original["quality_policy"]
+                and lineage.get("source_snapshot_sha256") == original["expected_snapshot_sha256"]
+                and lineage.get("point_in_time_membership") == "not_used"
+                and lineage.get("dividends_included") is False
+                and lineage.get("corporate_action_adjustment") == "none_index_price_level"
+                and result.quality_warning
+                in (None, "Unverified data: research-only results, not verified for backtesting")
+                and 0 < len(points) <= MAX_MODEL_OBSERVATIONS
+                and result.observations == len(points)
+                and points[0]["session_date"] == lineage.get("first_observed_session")
+                and points[-1]["session_date"] == lineage.get("last_observed_session")
+                and all(
+                    points[i]["session_date"] < points[i + 1]["session_date"]
+                    for i in range(len(points) - 1)
+                )
+                and result.output_sha256 == row["output_sha256"]
+                and lineage.get("source_snapshot_sha256") == row["source_snapshot_sha256"]
+                and hashlib.sha256(_canonical(points).encode("utf-8")).hexdigest()
+                == row["output_sha256"]
+                and hashlib.sha256(_canonical(lineage).encode("utf-8")).hexdigest()
+                == result.reproducibility_sha256
+            )
+            if not valid:
+                raise ModelJobStoreError("Stored model-job result failed integrity checks")
+            return result.model_dump()
+        except (ValidationError, ValueError, TypeError, KeyError, IndexError) as exc:
+            raise ModelJobStoreError("Stored model-job result failed integrity checks") from exc
+
     def get(self, identifier: str, *, include_result: bool = False) -> dict | None:
         conn = self._open(writable=False)
         if conn is None:
@@ -243,7 +326,7 @@ class ModelJobLedger:
                 return None
             result = self._summary(row)
             if include_result:
-                result["result"] = json.loads(row["result_json"]) if row["result_json"] else None
+                result["result"] = self._verified_stored_result(row)
             return result
         finally:
             conn.close()
