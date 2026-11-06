@@ -370,7 +370,7 @@ async fn quality_read(
         "report" => ("/api/v1/quality/report".into(), &["limit"]),
         "corrections" => (
             "/api/v1/quality/corrections".into(),
-            &["code", "state", "limit", "offset"],
+            &["code", "state", "q", "limit", "offset"],
         ),
         "corporate-actions" => (
             "/api/v1/quality/corporate-actions".into(),
@@ -667,22 +667,28 @@ async fn index_membership_trend(
     to_as_of: String,
     limit: u8,
     offset: u32,
+    evidence_status: Option<String>,
 ) -> Result<serde_json::Value, String> {
     if !valid_index(&code) || !valid_date(&from_as_of) || !valid_date(&to_as_of)
         || from_as_of > to_as_of || limit == 0 || limit > 100 || offset > 1_000_000
+        || evidence_status.as_deref().is_some_and(|status| !matches!(
+            status, "verified_snapshot" | "source_date_mismatch" | "proxy_only" |
+            "incomplete" | "unverified"
+        ))
     {
         return Err("Invalid dated membership trend query.".to_string());
     }
-    read_backend(
-        "/api/v1/market-data/indexes/snapshot-trend",
-        &[
-            ("code", code),
-            ("from_as_of", from_as_of),
-            ("to_as_of", to_as_of),
-            ("limit", limit.to_string()),
-            ("offset", offset.to_string()),
-        ],
-    ).await
+    let mut params = vec![
+        ("code", code),
+        ("from_as_of", from_as_of),
+        ("to_as_of", to_as_of),
+        ("limit", limit.to_string()),
+        ("offset", offset.to_string()),
+    ];
+    if let Some(status) = evidence_status {
+        params.push(("evidence_status", status));
+    }
+    read_backend("/api/v1/market-data/indexes/snapshot-trend", &params).await
 }
 
 #[tauri::command]
