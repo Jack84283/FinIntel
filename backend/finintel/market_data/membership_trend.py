@@ -141,9 +141,7 @@ def constituent_snapshot_trend(
             all_dates = [
                 row[0]
                 for row in conn.execute(
-                    "SELECT DISTINCT as_of FROM index_memberships "
-                    + where
-                    + " ORDER BY as_of",
+                    "SELECT DISTINCT as_of FROM index_memberships " + where + " ORDER BY as_of",
                     args,
                 )
             ]
