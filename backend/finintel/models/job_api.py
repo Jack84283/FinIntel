@@ -38,7 +38,9 @@ def enqueue_model_job(payload: ModelRunInput, request: Request) -> dict:
     _require_managed(request)
     try:
         snapshot = source_snapshot_for_job(
-            code=payload.code, start=payload.start, end=payload.end,
+            code=payload.code,
+            start=payload.start,
+            end=payload.end,
             quality_policy=payload.quality_policy,
         )
     except (AnalyticsError, StorageError) as exc:
