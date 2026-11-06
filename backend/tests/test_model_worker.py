@@ -61,7 +61,9 @@ def seed_market(db):
 
 def request(snapshot):
     return ModelJobRequest(
-        code="SP500", start=START, end=END,
+        code="SP500",
+        start=START,
+        end=END,
         quality_policy="allow_unverified",
         expected_snapshot_sha256=snapshot,
     )
@@ -95,16 +97,22 @@ def test_managed_job_api_rejects_missing_token_and_dynamic_modules(local_storage
             response = getattr(client, method)(path)
             assert response.status_code == 403
         headers = {"x-finintel-process-token": TOKEN}
-        assert client.post(
-            "/api/v1/models/jobs",
-            json=job_api_body(module_path="/private/secret.py"),
-            headers=headers,
-        ).status_code == 422
-        assert client.post(
-            "/api/v1/models/jobs",
-            json=job_api_body(model_id="dynamic.custom"),
-            headers=headers,
-        ).status_code == 422
+        assert (
+            client.post(
+                "/api/v1/models/jobs",
+                json=job_api_body(module_path="/private/secret.py"),
+                headers=headers,
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                "/api/v1/models/jobs",
+                json=job_api_body(model_id="dynamic.custom"),
+                headers=headers,
+            ).status_code
+            == 422
+        )
         assert not jobs.exists() and not market.exists()
 
 
@@ -114,7 +122,8 @@ def test_managed_enqueue_pins_local_snapshot_and_paginated_history(local_storage
     headers = {"x-finintel-process-token": TOKEN}
     with TestClient(backend_main.app) as client:
         stale = client.post(
-            "/api/v1/models/jobs", json=job_api_body(expected_snapshot_sha256="b" * 64),
+            "/api/v1/models/jobs",
+            json=job_api_body(expected_snapshot_sha256="b" * 64),
             headers=headers,
         )
         assert stale.status_code == 409
@@ -126,13 +135,21 @@ def test_managed_enqueue_pins_local_snapshot_and_paginated_history(local_storage
         assert page.status_code == 200
         assert page.json()["total"] == 1
         assert len(page.json()["items"]) == 1
-        assert client.get(
-            f"/api/v1/models/jobs/{identifier}?include_result=true", headers=headers,
-        ).json()["result"] is None
+        assert (
+            client.get(
+                f"/api/v1/models/jobs/{identifier}?include_result=true",
+                headers=headers,
+            ).json()["result"]
+            is None
+        )
         assert client.get("/api/v1/models/jobs?limit=0", headers=headers).status_code == 422
-        assert client.post(
-            f"/api/v1/models/jobs/{identifier}/retry", headers=headers,
-        ).status_code == 409
+        assert (
+            client.post(
+                f"/api/v1/models/jobs/{identifier}/retry",
+                headers=headers,
+            ).status_code
+            == 409
+        )
         cancelled = client.post(f"/api/v1/models/jobs/{identifier}/cancel", headers=headers)
         assert cancelled.status_code == 200
         assert cancelled.json()["state"] == "cancelled"
@@ -151,7 +168,10 @@ def test_child_completes_only_pinned_observations_and_returns_verified_result(
     market_db, jobs_db = local_storage
     seed_market(market_db)
     source = job_worker.source_snapshot_for_job(
-        code="SP500", start=START, end=END, quality_policy="allow_unverified",
+        code="SP500",
+        start=START,
+        end=END,
+        quality_policy="allow_unverified",
     )
     ledger = ModelJobLedger(jobs_db)
     identifier = ledger.enqueue(request(source))["id"]
@@ -174,7 +194,10 @@ def test_changed_source_before_running_fails_closed(local_storage):
     market_db, jobs_db = local_storage
     seed_market(market_db)
     source = job_worker.source_snapshot_for_job(
-        code="SP500", start=START, end=END, quality_policy="allow_unverified",
+        code="SP500",
+        start=START,
+        end=END,
+        quality_policy="allow_unverified",
     )
     ledger = ModelJobLedger(jobs_db)
     identifier = ledger.enqueue(request(source))["id"]
@@ -194,7 +217,10 @@ def test_changed_source_during_run_never_commits_old_result(local_storage, monke
     market_db, jobs_db = local_storage
     seed_market(market_db)
     snapshot = job_worker.source_snapshot_for_job(
-        code="SP500", start=START, end=END, quality_policy="allow_unverified",
+        code="SP500",
+        start=START,
+        end=END,
+        quality_policy="allow_unverified",
     )
     ledger = ModelJobLedger(jobs_db)
     identifier = ledger.enqueue(request(snapshot))["id"]
@@ -268,7 +294,8 @@ class SimulatedChild:
 
 
 def test_supervisor_cancels_child_without_orphan_or_late_result(
-    local_storage, monkeypatch,
+    local_storage,
+    monkeypatch,
 ):
     _, jobs_db = local_storage
     ledger = ModelJobLedger(jobs_db)
