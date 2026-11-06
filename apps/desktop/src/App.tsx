@@ -78,14 +78,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground lg:grid lg:h-dvh lg:min-h-0 lg:grid-cols-[256px_minmax(0,1fr)] lg:overflow-hidden">
-      <aside tabIndex={0} className="hidden min-h-0 flex-col overflow-y-auto overscroll-y-contain border-r border-border bg-muted px-3 py-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring lg:flex lg:h-dvh" aria-label={t("Main navigation")}>
-        <div className="mx-3 mb-12 grid h-11 w-12 place-items-center rounded-lg border border-[#568ad1] text-xl font-extrabold tracking-tight" aria-hidden="true">FI</div>
+      <aside tabIndex={0} className="hidden min-h-0 flex-col overflow-y-auto overscroll-y-contain border-r border-border bg-muted px-3 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring lg:flex lg:h-dvh" aria-label={t("Main navigation")}>
+        <div className="mx-3 mb-6 grid h-11 w-12 place-items-center rounded-lg border border-[#568ad1] text-xl font-extrabold tracking-tight" aria-hidden="true">FI</div>
         <nav aria-label={t("Sections")} className="flex flex-col gap-1 text-sm">
           {groups.map((group) => (
-            <div key={t(group.heading)} className="mb-5 flex flex-col gap-1">
-              <span className="mb-2 px-3 text-sm font-bold tracking-[0.16em] text-[#146B82] [html[data-theme=dark]_&]:text-[#73D5E8] uppercase">{t(group.heading)}</span>
+            <div key={t(group.heading)} className="mb-3 flex flex-col gap-1">
+              <span className="mb-1 px-3 text-sm font-bold tracking-[0.16em] text-[#146B82] [html[data-theme=dark]_&]:text-[#73D5E8] uppercase">{t(group.heading)}</span>
               {group.items.map(({ id, label, icon: Icon }) => (
-                <button key={id} type="button" aria-current={screen === id ? "page" : undefined} onClick={() => id === "market" ? openMarkets() : setScreen(id)} className={(screen === id ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
+                <button key={id} type="button" aria-current={screen === id ? "page" : undefined} onClick={() => id === "market" ? openMarkets() : setScreen(id)} className={(screen === id ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-2 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
                   <Icon aria-hidden="true" className="size-4" /> {t(label)}
                 </button>
               ))}
@@ -95,7 +95,7 @@ export default function App() {
         <p className="mt-auto px-2 pt-8 text-[10px] font-medium tracking-widest text-[#62758d]">{t("PRIVATE · LOCAL FIRST")}</p>
       </aside>
 
-      <main ref={mainScrollRef} tabIndex={0} aria-label={t("Main content")} className="w-full min-w-0 px-3 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-4 lg:h-dvh lg:min-h-0 lg:overflow-y-auto lg:overscroll-y-contain lg:py-5">
+      <main ref={mainScrollRef} tabIndex={0} aria-label={t("Main content")} className="w-full min-w-0 px-3 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-4 lg:h-dvh lg:min-h-0 lg:overflow-y-auto lg:overscroll-y-contain lg:pt-0 lg:pb-5">
         <nav aria-label={t("Mobile sections")} className="mb-5 flex gap-2 overflow-x-auto pb-2 lg:hidden">
           {allSections.map(({ id, label, icon: Icon }) => (
             <Button key={id} type="button" className="shrink-0" variant={screen === id ? "secondary" : "ghost"} onClick={() => id === "market" ? openMarkets() : setScreen(id)} aria-current={screen === id ? "page" : undefined}>
