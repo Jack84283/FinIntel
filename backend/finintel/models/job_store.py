@@ -16,9 +16,17 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from finintel.models.registry import MODEL_ID, MODEL_VERSION, ModelParameters
+from finintel.market_data.analytics import CALCULATION_VERSION
+from finintel.models.api import ModelResearchResult
+from finintel.models.registry import (
+    IMPLEMENTATION_REVISION,
+    MAX_MODEL_OBSERVATIONS,
+    MODEL_ID,
+    MODEL_VERSION,
+    ModelParameters,
+)
 from finintel.storage.db import database_path
 
 JOB_SCHEMA_VERSION = 1
@@ -57,7 +65,8 @@ class ModelJobRequest(BaseModel):
     end: date
     quality_policy: Literal["require_complete", "allow_unverified"] = "require_complete"
     parameters: ModelParameters = Field(default_factory=ModelParameters)
-    expected_snapshot_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    # Durable jobs require source pinning before queuing; synchronous evaluation remains optional.
+    expected_snapshot_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def validate_range(self) -> ModelJobRequest:
@@ -141,7 +150,7 @@ class ModelJobLedger:
             if writable:
                 conn = sqlite3.connect(path, timeout=10)
             else:
-                conn = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=5)
+                conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA busy_timeout = 10000")
             if writable:
@@ -255,8 +264,13 @@ class ModelJobLedger:
         finally:
             conn.close()
 
-    def claim_next(self) -> tuple[str, ModelJobRequest] | None:
-        """Reserve one queued job atomically; a worker will execute it later."""
+    @staticmethod
+    def _validate_attempt(attempt: int) -> None:
+        if type(attempt) is not int or not 1 <= attempt <= MAX_ATTEMPTS:
+            raise ModelJobStoreError("Invalid model-job attempt")
+
+    def claim_next(self) -> tuple[str, ModelJobRequest, int] | None:
+        """Reserve one queued job atomically; return a monotonic attempt generation."""
         conn = self._open(writable=True)
         assert conn is not None
         try:
@@ -276,11 +290,12 @@ class ModelJobLedger:
                     (_now(), _now(), row["id"]),
                 )
                 request = ModelJobRequest.model_validate_json(row["request_json"])
-                return row["id"], request
+                return row["id"], request, row["attempts"] + 1
         finally:
             conn.close()
 
-    def set_progress(self, identifier: str, progress: int) -> bool:
+    def set_progress(self, identifier: str, attempt: int, progress: int) -> bool:
+        self._validate_attempt(attempt)
         if isinstance(progress, bool) or not isinstance(progress, int) or not 0 <= progress < 100:
             raise ModelJobStoreError("Invalid model-job progress")
         conn = self._open(writable=True)
@@ -289,8 +304,9 @@ class ModelJobLedger:
             with conn:
                 cursor = conn.execute(
                     "UPDATE model_jobs SET progress=?,updated_at=? "
-                    "WHERE id=? AND state='running' AND cancel_requested=0 AND progress<=?",
-                    (progress, _now(), identifier, progress),
+                    "WHERE id=? AND attempts=? AND state='running' "
+                    "AND cancel_requested=0 AND progress<=?",
+                    (progress, _now(), identifier, attempt, progress),
                 )
                 return cursor.rowcount == 1
         finally:
@@ -326,8 +342,9 @@ class ModelJobLedger:
         finally:
             conn.close()
 
-    def finish_cancelled(self, identifier: str) -> bool:
+    def finish_cancelled(self, identifier: str, attempt: int) -> bool:
         """Cooperative worker acknowledgement; no results survive cancellation."""
+        self._validate_attempt(attempt)
         conn = self._open(writable=True)
         assert conn is not None
         try:
@@ -335,32 +352,60 @@ class ModelJobLedger:
                 at = _now()
                 cursor = conn.execute(
                     "UPDATE model_jobs SET state='cancelled',updated_at=?,finished_at=? "
-                    "WHERE id=? AND state='running' AND cancel_requested=1",
-                    (at, at, identifier),
+                    "WHERE id=? AND attempts=? AND state='running' AND cancel_requested=1",
+                    (at, at, identifier, attempt),
                 )
                 return cursor.rowcount == 1
         finally:
             conn.close()
 
-    def complete(self, identifier: str, result: dict) -> bool:
-        """Retain a validated bounded built-in result; never accept arbitrary code."""
+    def complete(self, identifier: str, attempt: int, result: dict) -> bool:
+        """Persist only the complete allowlisted indicator result of this claim."""
+        self._validate_attempt(attempt)
+        try:
+            validated = ModelResearchResult.model_validate(result)
+        except (ValidationError, ValueError, TypeError) as exc:
+            raise ModelJobStoreError("Invalid model-job output schema") from exc
         if (
-            not isinstance(result, dict)
-            or result.get("execution_contract") != ("model-research-evaluation-v1")
-            or result.get("status") != "completed"
-            or result.get("backtest_validated") is not False
+            validated.execution_contract != "model-research-evaluation-v1"
+            or validated.status != "completed"
+            or validated.backtest_validated is not False
+            or validated.persistent_job is not False
+            or validated.read_only is not True
+            or validated.no_network is not True
+            or validated.no_synthetic_sessions is not True
+            or validated.signal_after_close_only is not True
         ):
             raise ModelJobStoreError("Invalid model-job output contract")
-        lineage = result.get("lineage")
+        lineage = validated.lineage
+        # The API result model has a dict lineage for backwards compatibility;
+        # this private ledger must never retain arbitrary hidden fields inside it.
+        expected_lineage_keys = {
+            "model_id", "model_version", "implementation_revision", "parameters",
+            "source_identity", "source_snapshot_sha256", "analysis_calculation_version",
+            "requested_start", "requested_end", "first_observed_session",
+            "last_observed_session", "quality_policy", "quality_status", "quality_verified",
+            "point_in_time_membership", "dividends_included", "corporate_action_adjustment",
+        }
+        if not isinstance(lineage, dict) or set(lineage) != expected_lineage_keys:
+            raise ModelJobStoreError("Invalid model-job lineage schema")
         if (
-            not isinstance(lineage, dict)
-            or lineage.get("model_id") != MODEL_ID
-            or (lineage.get("model_version") != MODEL_VERSION)
+            lineage["model_id"] != MODEL_ID
+            or lineage["model_version"] != MODEL_VERSION
+            or lineage["implementation_revision"] != IMPLEMENTATION_REVISION
+            or lineage["analysis_calculation_version"] != CALCULATION_VERSION
+            or lineage["point_in_time_membership"] != "not_used"
+            or lineage["dividends_included"] is not False
+            or lineage["corporate_action_adjustment"] != "none_index_price_level"
+            or type(lineage["quality_verified"]) is not bool
+            or not isinstance(lineage["quality_status"], str)
+            or len(lineage["quality_status"]) > 40
+            or not lineage["quality_status"].replace("_", "").isalnum()
         ):
-            raise ModelJobStoreError("Model-job output identity mismatch")
-        source = lineage.get("source_snapshot_sha256")
-        output = result.get("output_sha256")
-        reproducibility = result.get("reproducibility_sha256")
+            raise ModelJobStoreError("Incompatible model-job lineage")
+        source = lineage["source_snapshot_sha256"]
+        output = validated.output_sha256
+        reproducibility = validated.reproducibility_sha256
         if any(
             not isinstance(value, str)
             or len(value) != 64
@@ -368,12 +413,27 @@ class ModelJobLedger:
             for value in (source, output, reproducibility)
         ):
             raise ModelJobStoreError("Invalid model-job source/output hash")
-        if not isinstance(result.get("points"), list) or (
-            hashlib.sha256(_canonical(result["points"]).encode("utf-8")).hexdigest() != output
-            or hashlib.sha256(_canonical(lineage).encode("utf-8")).hexdigest() != reproducibility
+        if (
+            validated.observations != len(validated.points)
+            or not 0 < validated.observations <= MAX_MODEL_OBSERVATIONS
+            or validated.quality_warning not in (
+                None,
+                "Unverified data: research-only results, not verified for backtesting",
+            )
         ):
-            raise ModelJobStoreError("Inconsistent model-job output hashes")
-        canonical = _canonical(result)
+            raise ModelJobStoreError("Invalid model-job observations or warning")
+        points = [point.model_dump() for point in validated.points]
+        if (
+            points[0]["session_date"] != lineage["first_observed_session"]
+            or points[-1]["session_date"] != lineage["last_observed_session"]
+            or any(points[i]["session_date"] >= points[i + 1]["session_date"]
+                   for i in range(len(points) - 1))
+            or hashlib.sha256(_canonical(points).encode("utf-8")).hexdigest() != output
+            or hashlib.sha256(_canonical(lineage).encode("utf-8")).hexdigest()
+            != reproducibility
+        ):
+            raise ModelJobStoreError("Inconsistent model-job output hashes or dates")
+        canonical = _canonical(validated.model_dump())
         if len(canonical.encode("utf-8")) > MAX_RESULT_BYTES:
             raise ModelJobStoreError("Model-job result exceeds retention quota")
         conn = self._open(writable=True)
@@ -382,40 +442,45 @@ class ModelJobLedger:
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
-                    "SELECT request_json,state,cancel_requested FROM model_jobs WHERE id=?",
+                    "SELECT request_json,state,cancel_requested,attempts "
+                    "FROM model_jobs WHERE id=?",
                     (identifier,),
                 ).fetchone()
-                if row is None or row["state"] != "running" or row["cancel_requested"]:
+                if (
+                    row is None or row["state"] != "running"
+                    or row["cancel_requested"] or row["attempts"] != attempt
+                ):
                     return False
                 original = json.loads(row["request_json"])
-                source_identity = lineage.get("source_identity")
+                source_identity = lineage["source_identity"]
+                expected_identity = {
+                    "instrument_kind": "index", "code": original["code"],
+                    "provider": "fred", "adjustment": "price_index",
+                    "return_semantics": "price_index", "frequency": "daily",
+                    "units": "index_points",
+                }
                 if (
-                    not isinstance(source_identity, dict)
-                    or source_identity.get("code") != original["code"]
-                    or source_identity.get("provider") != "fred"
-                    or source_identity.get("adjustment") != "price_index"
-                    or lineage.get("requested_start") != original["start"]
-                    or lineage.get("requested_end") != original["end"]
-                    or lineage.get("parameters") != original["parameters"]
-                    or lineage.get("quality_policy") != original["quality_policy"]
-                    or (
-                        original["expected_snapshot_sha256"] is not None
-                        and source != original["expected_snapshot_sha256"]
-                    )
+                    source_identity != expected_identity
+                    or lineage["requested_start"] != original["start"]
+                    or lineage["requested_end"] != original["end"]
+                    or lineage["parameters"] != original["parameters"]
+                    or lineage["quality_policy"] != original["quality_policy"]
+                    or source != original["expected_snapshot_sha256"]
                 ):
                     raise ModelJobStoreError("Model-job result does not match queued request")
                 at = _now()
                 cursor = conn.execute(
                     "UPDATE model_jobs SET state='completed',progress=100,result_json=?,"
                     "output_sha256=?,source_snapshot_sha256=?,updated_at=?,finished_at=? "
-                    "WHERE id=? AND state='running' AND cancel_requested=0",
-                    (canonical, output, source, at, at, identifier),
+                    "WHERE id=? AND attempts=? AND state='running' AND cancel_requested=0",
+                    (canonical, output, source, at, at, identifier, attempt),
                 )
                 return cursor.rowcount == 1
         finally:
             conn.close()
 
-    def fail(self, identifier: str, code: str) -> bool:
+    def fail(self, identifier: str, attempt: int, code: str) -> bool:
+        self._validate_attempt(attempt)
         if code not in ERROR_CODES:
             raise ModelJobStoreError("Invalid safe model-job error code")
         conn = self._open(writable=True)
@@ -425,8 +490,8 @@ class ModelJobLedger:
                 at = _now()
                 cursor = conn.execute(
                     "UPDATE model_jobs SET state='failed',error_code=?,updated_at=?,finished_at=? "
-                    "WHERE id=? AND state='running' AND cancel_requested=0",
-                    (code, at, at, identifier),
+                    "WHERE id=? AND attempts=? AND state='running' AND cancel_requested=0",
+                    (code, at, at, identifier, attempt),
                 )
                 return cursor.rowcount == 1
         finally:
