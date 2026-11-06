@@ -39,6 +39,29 @@ export function SnapshotCountBar({ point, maximum }: { point: TrendPoint; maximu
   );
 }
 
+/** Keep evidence selection available even when the filtered result is empty. */
+export function TrendEvidenceControls({ evidenceFilter, total, onChange }: {
+  evidenceFilter: string; total: number; onChange: (value: string) => void;
+}) {
+  const { t } = useLocale();
+  return <>
+    <label className="flex max-w-xs flex-col gap-1 text-xs text-muted-foreground">
+      {t("Filter by evidence")}
+      <select className={selectClass} value={evidenceFilter}
+        onChange={event => onChange(event.target.value)}>
+        <option value="">{t("All evidence statuses")}</option>
+        {(Object.keys(evidenceDescriptions) as TrendEvidence[]).map(status =>
+          <option key={status} value={status}>{t(trendEvidenceDescription(status))}</option>)}
+      </select>
+    </label>
+    {total === 0 && <p role="status" className="text-sm text-muted-foreground">
+      {t(evidenceFilter
+        ? "No snapshots match the selected evidence filter."
+        : "No imported membership snapshots in this period; unknown is not zero membership.")}
+    </p>}
+  </>;
+}
+
 /** Source-backed snapshots; missing dates are deliberately not plotted or filled. */
 export function ConstituentTrendPanel({
   primaryIndex, analysisStart, analysisEnd,
@@ -153,21 +176,12 @@ export function ConstituentTrendPanel({
             <Badge variant="outline">{t(evidenceFilter ? "Matching source snapshots" : "Observed source snapshots")}: {count(total)}</Badge>
             <Badge variant="outline">{t("Snapshot-only; no interpolation")}</Badge>
           </div>
-          {total === 0 ? <p role="status" className="text-sm text-muted-foreground">
-            {t("No imported membership snapshots in this period; unknown is not zero membership.")}
-          </p> : <>
+          <TrendEvidenceControls evidenceFilter={evidenceFilter} total={total}
+            onChange={value => { setEvidenceFilter(value); setOffset(0); }} />
+          {total > 0 && <>
             {total < 2 && <p role="status" className="text-xs text-muted-foreground">
               {t("At least two stored snapshots are needed to observe changes.")}
             </p>}
-            <label className="flex max-w-xs flex-col gap-1 text-xs text-muted-foreground">
-              {t("Filter by evidence")}
-              <select className={selectClass} value={evidenceFilter}
-                onChange={event => { setEvidenceFilter(event.target.value); setOffset(0); }}>
-                <option value="">{t("All evidence statuses")}</option>
-                {(Object.keys(evidenceDescriptions) as TrendEvidence[]).map(status =>
-                  <option key={status} value={status}>{t(trendEvidenceDescription(status))}</option>)}
-              </select>
-            </label>
             <div className="max-h-[430px] overflow-auto rounded-md border border-border">
               <table className="w-full border-collapse text-left text-xs tabular-nums">
                 <caption className="px-3 py-2 text-left text-muted-foreground">
