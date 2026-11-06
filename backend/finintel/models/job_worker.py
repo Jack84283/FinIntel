@@ -146,7 +146,7 @@ def run_child(job_id: str, attempt: int) -> int:
         ledger.fail(job_id, attempt, _safe_error_code(exc))
         ledger.finish_cancelled(job_id, attempt)
         return 2
-    except Exception:
+    except Exception:  # noqa: BLE001 - worker must not leak unexpected exception details
         # Never print private exception arguments or local file paths.
         ledger.fail(job_id, attempt, "worker_failure")
         ledger.finish_cancelled(job_id, attempt)
