@@ -182,10 +182,12 @@ def test_child_completes_only_pinned_observations_and_returns_verified_result(
     assert claim is not None and claim[0] == identifier
     # Exercise the real child interpreter and Linux RLIMIT, not a patched in-process mock.
     completed = subprocess.run(
-        [sys.executable, "-m", "finintel.models.job_worker", "--child",
-         identifier, str(claim[2])],
-        env={**os.environ, "FININTEL_DB_PATH": str(market_db),
-             "FININTEL_MODEL_JOBS_DB_PATH": str(jobs_db)},
+        [sys.executable, "-m", "finintel.models.job_worker", "--child", identifier, str(claim[2])],
+        env={
+            **os.environ,
+            "FININTEL_DB_PATH": str(market_db),
+            "FININTEL_MODEL_JOBS_DB_PATH": str(jobs_db),
+        },
         stdin=subprocess.DEVNULL,
         capture_output=True,
         timeout=40,
