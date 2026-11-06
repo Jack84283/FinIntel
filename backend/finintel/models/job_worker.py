@@ -306,7 +306,14 @@ def _parent_alive(parent_pid: int) -> bool:
             return kernel.WaitForSingleObject(handle, 0) == 0x00000102  # WAIT_TIMEOUT
         finally:
             kernel.CloseHandle(handle)
-    return os.getppid() == parent_pid
+    # PyInstaller one-file executables place a bootloader between the sidecar
+    # and Python worker. A direct PPID equality check would kill every packaged
+    # worker even though its original supervisor is still running.
+    try:
+        os.kill(parent_pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
 
 
 def _watch_supervisor_parent() -> None:
