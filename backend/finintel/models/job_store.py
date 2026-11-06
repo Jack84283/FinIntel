@@ -202,9 +202,11 @@ class ModelJobLedger:
                 "finished_at",
             )
         }
+        # Public presentation status is additive; durable SQLite state stays
+        # unchanged for atomic transitions and backward compatibility.
         summary["status"] = (
             "cancel_requested"
-            if row["state"] == "running" and row["cancel_requested"]
+            if row["state"] == "running" and row["cancel_requested"] == 1
             else row["state"]
         )
         return summary
@@ -374,6 +376,32 @@ class ModelJobLedger:
                 )
                 request = ModelJobRequest.model_validate_json(row["request_json"])
                 return row["id"], request, row["attempts"] + 1
+        finally:
+            conn.close()
+
+    def read_claim(self, identifier: str, attempt: int) -> ModelJobRequest | None:
+        """Read the exact running attempt for the isolated process, never a stale retry."""
+        self._validate_attempt(attempt)
+        conn = self._open(writable=False)
+        if conn is None:
+            return None
+        try:
+            row = conn.execute(
+                "SELECT request_json,request_sha256 FROM model_jobs "
+                "WHERE id=? AND attempts=? AND state='running' AND cancel_requested=0",
+                (identifier, attempt),
+            ).fetchone()
+            if row is None:
+                return None
+            if (
+                hashlib.sha256(row["request_json"].encode("utf-8")).hexdigest()
+                != (row["request_sha256"])
+            ):
+                raise ModelJobStoreError("Model-job request identity is invalid")
+            try:
+                return ModelJobRequest.model_validate_json(row["request_json"])
+            except ValidationError as exc:
+                raise ModelJobStoreError("Stored model-job request is invalid") from exc
         finally:
             conn.close()
 
@@ -605,6 +633,19 @@ class ModelJobLedger:
         assert conn is not None
         try:
             with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                target = conn.execute(
+                    "SELECT state,attempts FROM model_jobs WHERE id=?", (identifier,)
+                ).fetchone()
+                if target is None or target["state"] not in {"failed", "cancelled"}:
+                    return False
+                if target["attempts"] >= MAX_ATTEMPTS:
+                    return False
+                active = conn.execute(
+                    "SELECT COUNT(*) FROM model_jobs WHERE state IN ('queued','running')"
+                ).fetchone()[0]
+                if active >= MAX_ACTIVE_JOBS:
+                    raise ModelJobStoreError("Model-job queue is full")
                 cursor = conn.execute(
                     "UPDATE model_jobs SET state='queued',progress=0,cancel_requested=0,"
                     "result_json=NULL,output_sha256=NULL,source_snapshot_sha256=NULL,"

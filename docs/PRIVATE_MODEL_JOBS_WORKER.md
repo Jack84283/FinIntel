@@ -1,97 +1,93 @@
-# Issue #58 — Isolated local model worker (Phase 2B1)
+# Issue #58 — Isolated local model worker and managed job API (Phase 2B1)
 
-This increment builds on the non-executing job ledger from PR #57. It is an
-**opt-in managed-desktop process**, not a trading system, generalized
-Python execution facility, or validated backtesting engine.
+This phase connects the Phase 2A source-pinned SQLite model-job ledger to an explicitly
+queued, **local-only** research calculation. It does **not** implement a trading
+backtest, a cloud service, a proprietary-code loader, or a desktop job dashboard.
 
-## Execution and ownership
+## Execution and safety
 
-- FastAPI lifespan starts one supervisor thread only when a managed desktop
-  process token of at least 32 characters is present. That thread owns the
-  queue and starts a separate Python child process for each claimed job;
-  model computation is never performed on a FastAPI request or event loop.
-- A cross-process exclusive worker lock prevents a second owner from
-  reconciling or claiming jobs. Competing sidecars retry exclusive ownership;
-  recoverable SQLite failures release the lock and retry with bounded backoff.
-  Each ownership acquisition reconciles interrupted attempts without silently
-  resuming them, while queued entries stay durable.
-- The only executable model is builtin.sma_crossover version 1.0.0. Requests
-  have typed source parameters and a mandatory SHA-256 snapshot pin. No
-  Python module, command, source filepath, arbitrary provider, executable,
-  URL, or dynamic model identifier is accepted for these jobs.
-- Child requests use bounded stdin envelopes, a reduced environment without
-  provider tokens, process credentials or inherited PYTHONPATH, and a fixed
-  executable selected by the backend. Computation uses read-only local data; network socket
-  operations are disabled inside the child.
-- The model engine checks the expected snapshot before computing. The child
-  reads the source again after computation, and the supervisor verifies
-  the snapshot before calling the ledger completion transition. The ledger
-  validates claim generation, request identity, source and lineage hashes,
-  output schema and retention limit. On every completed-result read, the
-  trusted ledger also checks source/parameters against the original request
-  and recomputes the observation and lineage hashes before returning data.
-  Corruption fails closed without modifying observations. Source changes fail closed.
-- All state writes are fenced by the monotonically increasing claim attempt;
-  a late worker cannot overwrite a cancelled or retried attempt.
+- The managed FastAPI sidecar creates a **single supervisor thread**, which
+  runs the actual built-in `builtin.sma_crossover@1.0.0` indicator in a separate
+  Python subprocess. The API thread performs only bounded read-only source
+  inspection and records the queued request. It does not execute the indicator.
+- The worker reads its exact queued ID and attempt generation from the isolated
+  model-jobs SQLite database and refuses stale, cancelled, or unpinned claims.
+  The source revision is checked before evaluation, by the evaluator, and again
+  before committing the result. All result hashes, dates, semantics and lineage
+  are verified by the existing strict ledger.
+- No dynamic Python path, custom model ID, uploaded code, provider acquisition,
+  network AI call, browser-supplied host or arbitrary command is accepted.
+  Child environment variables are allowlisted to exclude process tokens and
+  provider/API secrets; outbound Python socket methods are disabled in the worker.
+  Logs do not emit source observations or exception arguments.
+- Only the owning supervisor can recover interrupted jobs. It holds a
+  cross-process OS file lock for startup reconciliation, queue polling and
+  child lifetime. A second sidecar cannot claim/recover the same jobs.
+  Packaged Python children monitor their PyInstaller launcher's lifetime and
+  terminate promptly if the launcher is killed, including on Windows.
+- Exactly one model subprocess is launched at a time. The existing 2,000-row
+  bound, 32 active-job limit, three-attempt limit and 4 MiB retained-result cap
+  remain enforced. A worker receives a 90-second wall-clock limit; cancellation
+  and shutdown terminate the child, then use a bounded hard kill fallback.
+- Linux restricts child virtual address space to 2 GiB with RLIMIT_AS.
+  Windows assigns the process to an OS Job Object with a 2 GiB committed-memory
+  ceiling and kill-on-job-close, failing closed if assignment is unavailable.
+  macOS polls the packaged launcher and all descendant worker processes' combined
+  resident footprint with /bin/ps once per second and
+  terminates it above 2 GiB or if monitoring fails. macOS polling is **not a
+  strict kernel-enforced limit**; short-lived spikes between polls are possible.
+  The 90-second timeout and 2,000-observation cap apply to all platforms.
+- No jobs execute until explicitly queued by an authenticated managed desktop.
+  Startup creates neither the model-jobs SQLite database nor a supervisor lock
+  file until a persisted ledger actually exists (important for abrupt Windows
+  sidecar shutdown). A second supervisor waits to acquire ownership.
+  In-progress jobs are marked interrupted/cancelled after a supervisor restart
+  rather than silently resumed. Queued jobs persist. Recoverable ledger failures
+  release ownership, back off and retry, including safe reconciliation of any
+  previously claimed attempt.
 
-## Limits and cancellation
+## Managed routes (sidecar-only)
 
-- Default one child at a time, 32 queued/running jobs maximum, 2,000
-  observations per job, 4 MiB maximum retained model output.
-- A 60-second wall-clock limit; POSIX processes have 2 GiB virtual-memory
-  and 50/55-second CPU limits. Windows children request a 2 GiB Job Object
-  process-memory limit with kill-on-close behavior. A supervisor-owned Windows
-  Job Object also contains the launcher and descendants and kills them if the
-  supervisor exits unexpectedly. Frozen workers monitor their parent process
-  and packaged sidecars monitor their PyInstaller launcher.
-- A running cancellation enters cancel_requested; the child checks this
-  between computation phases. The supervisor allows two seconds for
-  cooperation and then hard-stops the process. Shutdown terminates the
-  child and joins the supervisor.
-- Running progress is indeterminate (0) until actual completion (100);
-  intermediate percentages are never invented.
-- Failures retain only allowed safe codes (interrupted, invalid_input,
-  quality_blocked, source_changed, storage_unavailable, resource_limit,
-  worker_failure). Exception text, raw inputs, credentials, private paths
-  and stderr are never persisted as failure diagnostics.
+All routes require the private `x-finintel-process-token` header, even on
+developer mode. The webview only obtains fixed native Tauri commands and never
+the token or an arbitrary URL proxy.
 
-## Managed local API
-
-All routes require the existing desktop process token, including reads;
-bad request validation does not echo private or unrecognized input fields.
-
-| Route | Operation | Output |
+| Method | Route | Operation |
 |---|---|---|
-| POST /api/v1/models/jobs | Enqueue source-pinned built-in SMA request | 201 and summary |
-| GET /api/v1/models/jobs?limit=10&offset=0 | Newest-first list, 10 by default | total and items |
-| GET /api/v1/models/jobs/{uuid} | Read status and attempt metadata | summary |
-| GET /api/v1/models/jobs/{uuid}/result | Read completed result with lineage | summary and result |
-| POST /api/v1/models/jobs/{uuid}/cancel | Cancel queued or request running cancel | status |
-| POST /api/v1/models/jobs/{uuid}/retry | Requeue identical pin, max three attempts | summary |
+| POST | `/api/v1/models/jobs` | Validate the built-in model input, pin current bounded local source, enqueue; HTTP 202 |
+| GET | `/api/v1/models/jobs?limit=10&offset=0` | Paginated summaries; 1–100 rows, offset <=10,000; explicit `cancel_requested` presentation status |
+| GET | `/api/v1/models/jobs/{uuid}?include_result=true` | Detail and optional local result, with read-time observation/lineage hash verification |
+| POST | `/api/v1/models/jobs/{uuid}/cancel` | Cancel queued immediately or request running child termination |
+| POST | `/api/v1/models/jobs/{uuid}/retry` | Queue same snapshot-pinned request, with attempt/active-job caps |
 
-A derived status reports cancel_requested when state is running and the
-cancel flag is set. The native shell uses only dedicated fixed model_job
-IPC commands and the managed loopback transport; the typed React client
-does not expose browser HTTP access or caller-selected localhost URLs.
-Responses are also validated at the native IPC boundary using bounded,
-deny-unknown-fields metadata, result and lineage contracts.
+The corresponding Tauri commands are `model_jobs_create`,
+`model_jobs_list`, `model_jobs_get`, `model_jobs_cancel`, and
+`model_jobs_retry`. They validate date/index/window selections and job UUID
+before routing to fixed localhost endpoints. Native responses are checked
+against deny-unknown-field job summaries, bounded result contracts, states,
+source identity and hashes before they reach the webview. The ledger independently
+recomputes observation and lineage hashes when a completed result is read,
+and responds with a safe storage error if persisted data is corrupted.
+Managed model-job
+request validation errors are redacted without echoing rejected private input. **No new UI is included**; the
+next Phase 2B2 adds bilingual history, filtering and 10-row page controls.
 
-## Validation and rollout
+## Regression tests and acceptance
 
-Synthetic tests cover source changes before execution and just before
-persistence, separate-process completion, price-data preservation, restart
-reconciliation, two independent queue owners, cancellation, timeouts,
-attempt fencing, managed API validation, native IPC route security,
-and typed desktop transport. Native CI runs model-job Rust contract tests,
-Windows/macOS worker regressions and a real packaged-worker smoke on all
-platforms, verifying synthetic queued execution, hashes and lock cleanup.
+The synthetic suite covers managed token failures, invalid dynamic inputs,
+source-pinned queueing, bounded list/filter inputs, cancellation/retry,
+actual source-backed completion, revision changes before/during computation,
+stale attempt rejection, supervisor ownership, transient ledger-error recovery,
+explicit pending-cancel status, read-time detection of corrupted output and lineage,
+child timeout and cancellation, secret-free child environment, and safe failure-code
+mapping. Each native-platform CI job also starts the packaged one-file sidecar,
+seeds a disposable index series, submits a pinned job through HTTP, waits for the
+frozen child to execute, and checks actual result hashes. No downloaded data is used.
 
-Run CI for Ruff/pytest, React lint/typecheck/tests and the macOS, Windows
-and Linux native builds. Installed manual desktop testing on all three
-platforms remains a separate gate. Do not merge the PR automatically
-or close parent issue #32. Phase 2B2 will add bilingual visible job
-management; Phase 2C may introduce separate verified backtesting contracts.
+Full CI and installed-desktop testing are distinct gates. Multi-platform
+packaging smoke tests do not prove actual production-memory isolation, data
+quality sign-off or user-interface accessibility. Keep parent #32 open.
 
-**Data preservation:** No automatic provider requests, historical price
-changes, destructive migrations, model source imports, secret logging,
-auto backups, or overwrite of existing job attempts.
+**Local data invariants:** The existing market-data SQLite schema and original
+observations are never modified by the model worker; the model-job ledger
+remains a separate local file. There are no automatic backups or provider calls.

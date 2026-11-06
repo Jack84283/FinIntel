@@ -63,15 +63,6 @@ def _get_json(url: str, token: str, *, timeout: float = 5) -> dict:
 def _verify_packaged_worker(base: str, token: str, db: Path) -> None:
     """Exercise HTTP enqueue -> SQLite ledger -> frozen child -> verified API result."""
     _seed_disposable_market(db)
-    # PR #60 requires the exact immutable local snapshot on enqueue.
-    from finintel.models.engine import evaluate_builtin_indicator
-
-    expected_snapshot = evaluate_builtin_indicator(
-        start=date(2026, 9, 1),
-        end=date(2026, 10, 5),
-        quality_policy="allow_unverified",
-        db=db,
-    )["lineage"]["source_snapshot_sha256"]
     payload = {
         "model_id": "builtin.sma_crossover",
         "model_version": "1.0.0",
@@ -80,7 +71,6 @@ def _verify_packaged_worker(base: str, token: str, db: Path) -> None:
         "end": "2026-10-05",
         "quality_policy": "allow_unverified",
         "parameters": {"fast_window": 5, "slow_window": 20},
-        "expected_snapshot_sha256": expected_snapshot,
     }
     request = Request(
         base + "/api/v1/models/jobs",
@@ -92,13 +82,13 @@ def _verify_packaged_worker(base: str, token: str, db: Path) -> None:
         method="POST",
     )
     with urlopen(request, timeout=20) as response:
-        if response.status != 201:
+        if response.status != 202:
             raise AssertionError("Packaged sidecar refused a valid synthetic model job")
         queued = json.load(response)
     if queued.get("state") != "queued" or queued.get("status") != "queued":
         raise AssertionError("Packaged sidecar returned unexpected queued job state")
     job_id = queued["id"]
-    url = base + "/api/v1/models/jobs/" + job_id
+    url = base + "/api/v1/models/jobs/" + job_id + "?include_result=true"
     deadline = time.monotonic() + 120
     result = None
     while time.monotonic() < deadline:
@@ -117,8 +107,6 @@ def _verify_packaged_worker(base: str, token: str, db: Path) -> None:
     if result is None or result.get("state") != "completed":
         raise AssertionError("Packaged model child did not finish within the smoke-test deadline")
 
-    # The result route is separate from detail in this PR.
-    result = _get_json(url + "/result", token, timeout=10)
     output = result.get("result") or {}
     points = output.get("points")
     lineage = output.get("lineage")

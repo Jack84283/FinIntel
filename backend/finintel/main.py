@@ -19,8 +19,8 @@ from finintel.market_data.membership_api import router as membership_router
 from finintel.market_data.quality_api import router as quality_router
 from finintel.market_data.validation_api import router as validation_router
 from finintel.models.api import router as models_router
-from finintel.models.jobs_api import router as model_jobs_router
-from finintel.models.worker import start_supervisor, stop_supervisor
+from finintel.models.job_api import router as model_jobs_router
+from finintel.models.job_worker import start_model_jobs, stop_model_jobs
 from finintel.settings.api import router as settings_router
 from finintel.storage.api import router as market_data_router
 
@@ -28,11 +28,11 @@ from finintel.storage.api import router as market_data_router
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     start_scheduler()
-    start_supervisor()
+    start_model_jobs()
     try:
         yield
     finally:
-        stop_supervisor()
+        stop_model_jobs()
         stop_scheduler()
 
 
@@ -44,6 +44,14 @@ app = FastAPI(
     redoc_url=None,
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def redact_model_job_validation(request: Request, exc: RequestValidationError):
+    """Do not echo rejected model inputs, private paths, or exception contexts."""
+    if request.url.path.startswith("/api/v1/models/jobs"):
+        return JSONResponse(status_code=422, content={"detail": "Invalid local model-job request"})
+    return await request_validation_exception_handler(request, exc)
 
 
 class HealthResponse(BaseModel):
@@ -82,12 +90,3 @@ async def require_desktop_process_token(request: Request, call_next):
             status_code=403, content={"detail": "Desktop process authorization required"}
         )
     return await call_next(request)
-
-
-@app.exception_handler(RequestValidationError)
-async def safe_job_request_validation(request: Request, exc: RequestValidationError):
-    # FastAPI ordinarily includes rejected input values in 422 responses.
-    # Do not echo submitted private paths or code on the managed jobs boundary.
-    if request.url.path.startswith("/api/v1/models/jobs"):
-        return JSONResponse(status_code=422, content={"detail": "Invalid local model job request"})
-    return await request_validation_exception_handler(request, exc)

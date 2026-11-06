@@ -69,8 +69,7 @@ struct JobList {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct JobState {
-    id: String,
-    status: String,
+    state: String,
 }
 
 #[derive(Deserialize)]
@@ -261,12 +260,11 @@ pub fn validate_detail(mut value: Value, include_result: bool) -> Result<Value, 
     Ok(value)
 }
 
-pub fn validate_cancel(value: Value, requested_id: &str) -> Result<Value, String> {
+pub fn validate_cancel(value: Value) -> Result<Value, String> {
     let state: JobState = serde_json::from_value(value.clone())
         .map_err(|_| "Model-jobs backend returned an invalid cancel schema.".to_string())?;
-    if state.id != requested_id
-        || !matches!(state.status.as_str(),
-            "queued" | "running" | "completed" | "failed" | "cancelled" | "cancel_requested")
+    if !matches!(state.state.as_str(),
+        "queued" | "running" | "completed" | "failed" | "cancelled" | "cancel_requested")
     {
         return Err("Model-jobs backend returned an invalid cancel state.".to_string());
     }
@@ -332,10 +330,8 @@ mod tests {
 
     #[test]
     fn reject_forged_or_unspecified_cancel_state() {
-        let id = "123e4567-e89b-12d3-a456-426614174000";
-        assert!(validate_cancel(json!({"id": id, "status": "cancel_requested"}), id).is_ok());
-        assert!(validate_cancel(json!({"id": id, "status": "unknown"}), id).is_err());
-        assert!(validate_cancel(json!({"id": id, "status": "cancelled", "hidden": 123}), id).is_err());
-        assert!(validate_cancel(json!({"id": "not-the-job", "status": "cancelled"}), id).is_err());
+        assert!(validate_cancel(json!({"state": "cancel_requested"})).is_ok());
+        assert!(validate_cancel(json!({"state": "unknown"})).is_err());
+        assert!(validate_cancel(json!({"state": "cancelled", "hidden": 123})).is_err());
     }
 }

@@ -1,4 +1,4 @@
-/** Phase 2B1 native-only durable model job transport. No browser/localhost fallback. */
+/** Native-only durable model jobs client for existing Phase 2B1 IPC. No HTTP fallback. */
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
@@ -77,7 +77,7 @@ async function nativeInvoke(command: string, args: Record<string, unknown>): Pro
 export async function queueModelJob(query: PinnedJobQuery): Promise<ModelJobSummary> {
   validateModelResearchQuery(query);
   if (!hash(query.expectedSnapshot)) throw new Error("Source snapshot pin is required.");
-  return parseModelJob(await nativeInvoke("model_job_enqueue", {
+  return parseModelJob(await nativeInvoke("model_jobs_create", {
     code: query.code, start: query.start, end: query.end,
     qualityPolicy: query.qualityPolicy,
     fastWindow: query.fastWindow, slowWindow: query.slowWindow,
@@ -88,18 +88,19 @@ export async function listModelJobs(page = 1): Promise<ModelJobPage> {
   if (!Number.isSafeInteger(page) || page < 1 || page > 1001) {
     throw new Error("Invalid local model job page.");
   }
-  const value = object(await nativeInvoke("model_job_list", {
+  const value = object(await nativeInvoke("model_jobs_list", {
     limit: 10, offset: (page - 1) * 10,
   }));
   if (!Number.isSafeInteger(value.total) || (value.total as number) < 0 ||
-    !Array.isArray(value.items) || value.items.length > 10) {
+    !Array.isArray(value.items) || value.items.length > 10 ||
+    (value.total as number) < value.items.length) {
     throw new Error("Invalid local model job pagination response.");
   }
   return { total: value.total as number, items: value.items.map(parseModelJob) };
 }
 export async function getModelJob(id: string): Promise<ModelJobSummary> {
   if (!identifier(id)) throw new Error("Invalid local model job identifier.");
-  return parseModelJob(await nativeInvoke("model_job_detail", {
+  return parseModelJob(await nativeInvoke("model_jobs_get", {
     jobId: id, includeResult: false,
   }));
 }
@@ -132,13 +133,14 @@ export async function getModelJobResult(id: string): Promise<ModelJobWithResult>
 }
 export async function cancelModelJob(id: string): Promise<{ id: string; status: ModelJobStatus }> {
   if (!identifier(id)) throw new Error("Invalid local model job identifier.");
-  const result = object(await nativeInvoke("model_job_cancel", { jobId: id }));
-  if (result.id !== id || ![...states, "cancel_requested"].includes(result.status as string)) {
+  const result = object(await nativeInvoke("model_jobs_cancel", { jobId: id }));
+  if (Object.keys(result).some((key) => key !== "state") ||
+    ![...states, "cancel_requested"].includes(result.state as string)) {
     throw new Error("Malformed model job cancellation response.");
   }
-  return { id, status: result.status as ModelJobStatus };
+  return { id, status: result.state as ModelJobStatus };
 }
 export async function retryModelJob(id: string): Promise<ModelJobSummary> {
   if (!identifier(id)) throw new Error("Invalid local model job identifier.");
-  return parseModelJob(await nativeInvoke("model_job_retry", { jobId: id }));
+  return parseModelJob(await nativeInvoke("model_jobs_retry", { jobId: id }));
 }

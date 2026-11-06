@@ -35,7 +35,7 @@ describe("fixed managed durable-model-job IPC", () => {
       expectedSnapshot: "b".repeat(64),
     };
     expect((await queueModelJob(query)).state).toBe("queued");
-    expect(native.invoke).toHaveBeenCalledWith("model_job_enqueue", {
+    expect(native.invoke).toHaveBeenCalledWith("model_jobs_create", {
       code: "SP500", start: query.start, end: query.end,
       qualityPolicy: query.qualityPolicy, fastWindow: 5, slowWindow: 20,
       expectedSnapshot: query.expectedSnapshot,
@@ -49,7 +49,7 @@ describe("fixed managed durable-model-job IPC", () => {
   it("checks page size, UUIDs, and rejects forged response metadata", async () => {
     native.invoke.mockResolvedValue({ total: 11, items: [sample()] });
     expect((await listModelJobs(2)).total).toBe(11);
-    expect(native.invoke).toHaveBeenCalledWith("model_job_list", {
+    expect(native.invoke).toHaveBeenCalledWith("model_jobs_list", {
       limit: 10, offset: 10,
     });
     await expect(listModelJobs(1002)).rejects.toThrow();
@@ -65,12 +65,12 @@ describe("fixed managed durable-model-job IPC", () => {
   });
 
   it("cancels and retries only by validated UUID on fixed commands", async () => {
-    native.invoke.mockResolvedValueOnce({ id, status: "cancelled" });
+    native.invoke.mockResolvedValueOnce({ state: "cancelled" });
     expect((await cancelModelJob(id)).status).toBe("cancelled");
-    expect(native.invoke).toHaveBeenCalledWith("model_job_cancel", { jobId: id });
+    expect(native.invoke).toHaveBeenCalledWith("model_jobs_cancel", { jobId: id });
     native.invoke.mockResolvedValueOnce(sample());
     expect((await retryModelJob(id)).state).toBe("queued");
-    expect(native.invoke).toHaveBeenCalledWith("model_job_retry", { jobId: id });
+    expect(native.invoke).toHaveBeenCalledWith("model_jobs_retry", { jobId: id });
     await expect(retryModelJob("http://localhost:8765/evil")).rejects.toThrow();
     native.enabled = false;
     await expect(getModelJob(id)).rejects.toThrow("managed FinIntel desktop");

@@ -48,11 +48,14 @@ def main() -> int:
     _watch_frozen_launcher()
     # Frozen one-file executables must re-enter this entry point for the worker.
     # Worker children do not start the HTTP server and inherit no provider secrets.
-    if sys.argv[1:] == ["--model-worker"]:
-        from finintel.models.worker import child_main
+    if len(sys.argv) == 4 and sys.argv[1] == "--model-job-worker":
+        try:
+            attempt = int(sys.argv[3])
+        except ValueError:
+            return 2
+        from finintel.models.job_worker import run_child
 
-        child_main()
-        return 0
+        return run_child(sys.argv[2], attempt)
     if len(sys.argv) != 1:
         raise ValueError("Unsupported desktop sidecar arguments")
 

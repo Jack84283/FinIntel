@@ -1,384 +1,589 @@
-"""Phase 2B1 synthetic process, cancellation, and managed API acceptance tests."""
+"""Issue #58: hermetic model-worker, managed API and failure-state tests."""
+
+from __future__ import annotations
 
 import json
 import os
 import sqlite3
 import subprocess
 import sys
-import threading
 import time
 from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
-from finintel.main import app
-from finintel.models import worker
+from finintel import main as backend_main
+from finintel.market_data.analytics import AnalyticsError
+from finintel.models import job_api, job_worker
 from finintel.models.engine import evaluate_builtin_indicator
 from finintel.models.job_store import ModelJobLedger, ModelJobRequest, ModelJobStoreError
 from finintel.storage.db import _write_connection
 
+REAL_WINDOWS_JOB_LIMIT = job_worker._limit_windows_worker
+REAL_MACOS_RSS = job_worker._macos_rss_bytes
+
 START = date(2026, 9, 1)
-END = START + timedelta(days=34)
-TOKEN = "issue58-managed-desktop-test-token-value-32-bytes"
+END = date(2026, 10, 5)
+TOKEN = "local-managed-test-process-token-issue-58"
 
 
-def _market(path):
-    conn = _write_connection(path)
+@pytest.fixture(autouse=True)
+def keep_in_process_tests_unrestricted(monkeypatch):
+    """Direct run_child fixture calls must not patch global sockets or process limits."""
+    monkeypatch.setattr(job_worker, "_deny_outbound_network", lambda: None)
+    monkeypatch.setattr(job_worker, "_bound_child_memory", lambda: None)
+    # Mocked supervisor children do not own an OS process handle or PID.
+    monkeypatch.setattr(job_worker, "_limit_windows_worker", lambda _process: None)
+    monkeypatch.setattr(job_worker, "_macos_rss_bytes", lambda _pid: 1024)
+
+
+@pytest.fixture
+def local_storage(tmp_path, monkeypatch):
+    market_db = tmp_path / "market.sqlite3"
+    jobs_db = tmp_path / "jobs.sqlite3"
+    monkeypatch.setenv("FININTEL_DB_PATH", str(market_db))
+    monkeypatch.setenv("FININTEL_MODEL_JOBS_DB_PATH", str(jobs_db))
+    monkeypatch.setenv("FININTEL_PROCESS_TOKEN", TOKEN)
+    # API tests focus on authorization and persistence without asynchronous jobs.
+    monkeypatch.setattr(backend_main, "start_model_jobs", lambda: None)
+    monkeypatch.setattr(backend_main, "stop_model_jobs", lambda: None)
+    return market_db, jobs_db
+
+
+def seed_market(db):
+    conn = _write_connection(db)
     with conn:
         conn.executemany(
             "INSERT INTO index_daily_closes "
             "(index_code,provider,session_date,close,retrieved_at,source_url) "
-            "VALUES ('SP500','fred',?,?,'2026-10-25T00:00:00+00:00','local-test')",
-            [((START + timedelta(days=i)).isoformat(), str(100 + i)) for i in range(35)],
+            "VALUES (?,'fred',?,?,'2026-10-25T00:00:00+00:00',?)",
+            [
+                (
+                    "SP500",
+                    (START + timedelta(days=i)).isoformat(),
+                    str(100 + i),
+                    "https://fred.stlouisfed.org/series/SP500",
+                )
+                for i in range(35)
+            ],
         )
     conn.close()
 
 
-def _setup(tmp_path, monkeypatch):
-    price = tmp_path / "prices.sqlite3"
-    jobs = tmp_path / "jobs.sqlite3"
-    _market(price)
-    monkeypatch.setenv("FININTEL_DB_PATH", str(price))
-    monkeypatch.setenv("FININTEL_MODEL_JOBS_DB_PATH", str(jobs))
-    result = evaluate_builtin_indicator(
-        start=START, end=END, quality_policy="allow_unverified", db=price
-    )
-    request = ModelJobRequest(
+def request(snapshot):
+    return ModelJobRequest(
+        code="SP500",
         start=START,
         end=END,
         quality_policy="allow_unverified",
-        expected_snapshot_sha256=result["lineage"]["source_snapshot_sha256"],
+        expected_snapshot_sha256=snapshot,
     )
-    return price, ModelJobLedger(jobs), request
 
 
-def _await_state(ledger, identifier, states, timeout=15):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        record = ledger.get(identifier)
-        if record and record["state"] in states:
-            return record
-        time.sleep(0.05)
-    raise AssertionError("Local model job did not reach a terminal state")
+def job_api_body(**updates):
+    return {
+        "model_id": "builtin.sma_crossover",
+        "model_version": "1.0.0",
+        "code": "SP500",
+        "start": START.isoformat(),
+        "end": END.isoformat(),
+        "quality_policy": "allow_unverified",
+        "parameters": {"fast_window": 5, "slow_window": 20},
+        **updates,
+    }
 
 
-def test_managed_fixed_routes_validate_queue_pagination_cancel_retry(tmp_path, monkeypatch):
-    _price, ledger, request = _setup(tmp_path, monkeypatch)
-    monkeypatch.setenv("FININTEL_PROCESS_TOKEN", TOKEN)
-    payload = request.model_dump(mode="json")
-    client = TestClient(app)  # no lifespan: deterministic queue API without a live consumer
+def test_managed_job_api_rejects_missing_token_and_dynamic_modules(local_storage, monkeypatch):
+    market, jobs = local_storage
+    monkeypatch.setattr(job_api, "source_snapshot_for_job", lambda **_kwargs: "a" * 64)
+    with TestClient(backend_main.app) as client:
+        paths = [
+            ("get", "/api/v1/models/jobs"),
+            ("post", "/api/v1/models/jobs"),
+            ("get", "/api/v1/models/jobs/00000000-0000-0000-0000-000000000000"),
+            ("post", "/api/v1/models/jobs/00000000-0000-0000-0000-000000000000/cancel"),
+            ("post", "/api/v1/models/jobs/00000000-0000-0000-0000-000000000000/retry"),
+        ]
+        for method, path in paths:
+            response = getattr(client, method)(path)
+            assert response.status_code == 403
+        headers = {"x-finintel-process-token": TOKEN}
+        assert (
+            client.post(
+                "/api/v1/models/jobs",
+                json=job_api_body(module_path="/private/secret.py"),
+                headers=headers,
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                "/api/v1/models/jobs",
+                json=job_api_body(model_id="dynamic.custom"),
+                headers=headers,
+            ).status_code
+            == 422
+        )
+        assert not jobs.exists() and not market.exists()
+
+
+def test_managed_enqueue_pins_local_snapshot_and_paginated_history(local_storage, monkeypatch):
+    _, jobs = local_storage
+    monkeypatch.setattr(job_api, "source_snapshot_for_job", lambda **_kwargs: "a" * 64)
     headers = {"x-finintel-process-token": TOKEN}
-    assert client.post("/api/v1/models/jobs", json=payload).status_code == 403
-    assert client.get("/api/v1/models/jobs").status_code == 403
-    assert client.post("/api/v1/models/jobs", json=payload, headers=headers).status_code == 201
-    for _ in range(10):
-        assert client.post("/api/v1/models/jobs", json=payload, headers=headers).status_code == 201
-    page1 = client.get("/api/v1/models/jobs", headers=headers).json()
-    page2 = client.get("/api/v1/models/jobs?limit=10&offset=10", headers=headers).json()
-    assert page1["total"] == 11 and len(page1["items"]) == 10
-    assert len(page2["items"]) == 1
-    identifier = page1["items"][0]["id"]
-    assert page1["items"][0]["status"] == "queued"
-    assert client.get(f"/api/v1/models/jobs/{identifier}", headers=headers).status_code == 200
-    assert (
-        client.get(f"/api/v1/models/jobs/{identifier}/result", headers=headers).status_code == 409
-    )
-    assert (
-        client.post(f"/api/v1/models/jobs/{identifier}/cancel", headers=headers).json()["status"]
-        == "cancelled"
-    )
-    assert (
-        client.post(f"/api/v1/models/jobs/{identifier}/cancel", headers=headers).json()["status"]
-        == "cancelled"
-    )
-    assert (
-        client.post(f"/api/v1/models/jobs/{identifier}/retry", headers=headers).json()["status"]
-        == "queued"
-    )
-    assert (
-        client.post(f"/api/v1/models/jobs/{identifier}/retry", headers=headers).json()["status"]
-        == "queued"
-    )
-    assert ledger.get(identifier)["attempts"] == 0
-    bad = client.post(
-        "/api/v1/models/jobs",
-        json={**payload, "module_path": "/private/secret/model.py"},
-        headers=headers,
-    )
-    assert bad.status_code == 422 and "/private/" not in bad.text
-    assert (
-        client.post(
+    with TestClient(backend_main.app) as client:
+        stale = client.post(
             "/api/v1/models/jobs",
-            json={**payload, "model_id": "custom.private"},
+            json=job_api_body(expected_snapshot_sha256="b" * 64),
             headers=headers,
-        ).status_code
-        == 422
-    )
-    assert client.get("/api/v1/models/jobs?limit=101", headers=headers).status_code == 422
-    assert client.get("/api/v1/models/jobs/../../etc/passwd", headers=headers).status_code in (
-        404,
-        422,
-    )
+        )
+        assert stale.status_code == 409
+        assert not jobs.exists()
+        queued = client.post("/api/v1/models/jobs", json=job_api_body(), headers=headers)
+        assert queued.status_code == 202, queued.text
+        identifier = queued.json()["id"]
+        page = client.get("/api/v1/models/jobs", headers=headers)
+        assert page.status_code == 200
+        assert page.json()["total"] == 1
+        assert len(page.json()["items"]) == 1
+        assert (
+            client.get(
+                f"/api/v1/models/jobs/{identifier}?include_result=true",
+                headers=headers,
+            ).json()["result"]
+            is None
+        )
+        assert client.get("/api/v1/models/jobs?limit=0", headers=headers).status_code == 422
+        assert (
+            client.post(
+                f"/api/v1/models/jobs/{identifier}/retry",
+                headers=headers,
+            ).status_code
+            == 409
+        )
+        cancelled = client.post(f"/api/v1/models/jobs/{identifier}/cancel", headers=headers)
+        assert cancelled.status_code == 200
+        assert cancelled.json()["state"] == "cancelled"
+        again = client.post(f"/api/v1/models/jobs/{identifier}/retry", headers=headers)
+        assert again.status_code == 200
+        assert again.json()["state"] == "queued"
+        claimed = ModelJobLedger(jobs).claim_next()
+        assert claimed is not None
+        assert claimed[1].expected_snapshot_sha256 == "a" * 64
+        assert client.get("/api/v1/models/jobs/not-a-uuid", headers=headers).status_code == 422
 
 
-def test_isolated_child_completes_strict_pinned_result_without_price_writes(tmp_path, monkeypatch):
-    price, ledger, request = _setup(tmp_path, monkeypatch)
-    identifier = ledger.enqueue(request)["id"]
-    before = price.stat().st_size
-    supervisor = worker.ModelJobSupervisor(ledger)
-    supervisor.start()
-    try:
-        record = _await_state(ledger, identifier, {"completed", "failed"})
-    finally:
-        supervisor.stop()
-    assert record["state"] == "completed", record
-    assert record["attempts"] == 1 and record["status"] == "completed"
-    saved = ledger.get(identifier, include_result=True)
-    assert saved["result"]["lineage"]["source_snapshot_sha256"] == request.expected_snapshot_sha256
-    assert saved["result"]["status"] == "completed"
-    assert saved["result"]["backtest_validated"] is False
-    assert saved["result"]["no_network"] is True
-    assert price.stat().st_size == before
-    with sqlite3.connect(price) as conn:
+def test_child_completes_only_pinned_observations_and_returns_verified_result(
+    local_storage,
+):
+    market_db, jobs_db = local_storage
+    seed_market(market_db)
+    source = job_worker.source_snapshot_for_job(
+        code="SP500",
+        start=START,
+        end=END,
+        quality_policy="allow_unverified",
+    )
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request(source))["id"]
+    claim = ledger.claim_next()
+    assert claim is not None and claim[0] == identifier
+    # Exercise the real child interpreter and Linux RLIMIT, not a patched in-process mock.
+    completed = subprocess.run(
+        [sys.executable, "-m", "finintel.models.job_worker", "--child", identifier, str(claim[2])],
+        env={
+            **os.environ,
+            "FININTEL_DB_PATH": str(market_db),
+            "FININTEL_MODEL_JOBS_DB_PATH": str(jobs_db),
+        },
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=40,
+        check=False,
+    )
+    assert completed.returncode == 0, "Isolated model worker failed"
+    finished = ledger.get(identifier, include_result=True)
+    assert finished["state"] == "completed"
+    assert finished["progress"] == 100
+    assert finished["source_snapshot_sha256"] == source
+    assert finished["result"]["output_sha256"] == finished["output_sha256"]
+    assert finished["result"]["backtest_validated"] is False
+    assert finished["result"]["persistent_job"] is False
+    assert not ledger.set_progress(identifier, claim[2], 50)
+    with sqlite3.connect(market_db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM index_daily_closes").fetchone()[0] == 35
 
 
-def test_worker_rejects_changed_source_before_claim(tmp_path, monkeypatch):
-    price, ledger, request = _setup(tmp_path, monkeypatch)
-    identifier = ledger.enqueue(request)["id"]
-    with sqlite3.connect(price) as conn:
-        conn.execute(
-            "UPDATE index_daily_closes SET close='999' WHERE index_code='SP500' "
-            "AND session_date='2026-09-03'"
-        )
-    supervisor = worker.ModelJobSupervisor(ledger)
-    supervisor.start()
-    try:
-        record = _await_state(ledger, identifier, {"completed", "failed"})
-    finally:
-        supervisor.stop()
-    assert record["state"] == "failed"
-    assert record["error_code"] == "source_changed"
-    assert ledger.get(identifier, include_result=True)["result"] is None
-
-
-def test_final_source_pin_gate_rejects_change_before_persistence(tmp_path, monkeypatch):
-    price, ledger, request = _setup(tmp_path, monkeypatch)
-    identifier = ledger.enqueue(request)["id"]
-    original = worker.ModelJobSupervisor._source_is_current
-    changed = False
-
-    def mutate_before_store(req):
-        nonlocal changed
-        if not changed:
-            changed = True
-            with sqlite3.connect(price) as conn:
-                conn.execute(
-                    "UPDATE index_daily_closes SET close='888' WHERE index_code='SP500' "
-                    "AND session_date='2026-09-04'"
-                )
-        return original(req)
-
-    monkeypatch.setattr(
-        worker.ModelJobSupervisor, "_source_is_current", staticmethod(mutate_before_store)
+def test_changed_source_before_running_fails_closed(local_storage):
+    market_db, jobs_db = local_storage
+    seed_market(market_db)
+    source = job_worker.source_snapshot_for_job(
+        code="SP500",
+        start=START,
+        end=END,
+        quality_policy="allow_unverified",
     )
-    supervisor = worker.ModelJobSupervisor(ledger)
-    supervisor.start()
-    try:
-        record = _await_state(ledger, identifier, {"completed", "failed"})
-    finally:
-        supervisor.stop()
-    assert changed
-    assert record["state"] == "failed" and record["error_code"] == "source_changed"
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request(source))["id"]
+    attempt = ledger.claim_next()[2]
+    with sqlite3.connect(market_db) as conn:
+        conn.execute(
+            "UPDATE index_daily_closes SET close='301',"
+            " retrieved_at='2026-11-01T00:00:00+00:00'"
+            " WHERE index_code='SP500' AND session_date='2026-09-08'"
+        )
+    assert job_worker.run_child(identifier, attempt) == 2
+    assert ledger.get(identifier)["state"] == "failed"
+    assert ledger.get(identifier)["error_code"] == "source_changed"
+
+
+def test_changed_source_during_run_never_commits_old_result(local_storage, monkeypatch):
+    market_db, jobs_db = local_storage
+    seed_market(market_db)
+    snapshot = job_worker.source_snapshot_for_job(
+        code="SP500",
+        start=START,
+        end=END,
+        quality_policy="allow_unverified",
+    )
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request(snapshot))["id"]
+    attempt = ledger.claim_next()[2]
+    original = job_worker.evaluate_builtin_indicator
+
+    def revise_during_evaluation(**params):
+        result = original(**params)
+        with sqlite3.connect(market_db) as conn:
+            conn.execute(
+                "UPDATE index_daily_closes SET close='420' "
+                "WHERE index_code='SP500' AND session_date='2026-09-10'"
+            )
+        return result
+
+    monkeypatch.setattr(job_worker, "evaluate_builtin_indicator", revise_during_evaluation)
+    assert job_worker.run_child(identifier, attempt) == 2
     assert ledger.get(identifier, include_result=True)["result"] is None
+    assert ledger.get(identifier)["error_code"] == "source_changed"
 
 
-def test_restart_reconciles_inflight_without_resuming(tmp_path, monkeypatch):
-    _price, ledger, request = _setup(tmp_path, monkeypatch)
-    identifier = ledger.enqueue(request)["id"]
-    assert ledger.claim_next()[2] == 1
-    supervisor = worker.ModelJobSupervisor(ledger)
-    supervisor.start()
-    try:
-        record = _await_state(ledger, identifier, {"failed"})
-    finally:
-        supervisor.stop()
-    assert record["error_code"] == "interrupted"
-    assert record["attempts"] == 1
-    assert ledger.claim_next() is None
+def test_stale_attempt_is_fenced_after_cancel_retry(local_storage):
+    _, jobs_db = local_storage
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request("a" * 64))["id"]
+    first = ledger.claim_next()
+    assert first is not None
+    assert ledger.cancel(identifier) == "cancel_requested"
+    assert ledger.finish_cancelled(identifier, first[2])
     assert ledger.retry(identifier)
-    assert ledger.claim_next()[2] == 2
-    assert not ledger.fail(identifier, 1, "worker_failure")
+    second = ledger.claim_next()
+    assert second is not None and second[2] != first[2]
+    assert ledger.read_claim(identifier, first[2]) is None
+    assert not ledger.fail(identifier, first[2], "worker_failure")
+    assert not ledger.set_progress(identifier, first[2], 50)
+    assert not ledger.finish_cancelled(identifier, first[2])
+    assert ledger.get(identifier)["state"] == "running"
 
 
-class _HangingChild:
-    def __init__(self, *_args, **_kwargs):
-        self.dead = False
-        self.pid = 999999
-        self.spawned.set()
+def test_two_supervisors_cannot_own_same_ledger(local_storage):
+    _, jobs_db = local_storage
+    first = job_worker.ModelJobSupervisor(ModelJobLedger(jobs_db))
+    second = job_worker.ModelJobSupervisor(ModelJobLedger(jobs_db))
+    assert first._acquire_lock()
+    try:
+        assert not second._acquire_lock()
+    finally:
+        first._release_lock()
+    assert second._acquire_lock()
+    second._release_lock()
+
+
+class SimulatedChild:
+    def __init__(self):
+        self.pid = os.getpid()
+        self.terminated = False
+        self.exit_status = None
 
     def poll(self):
-        return -9 if self.dead else None
+        return self.exit_status
 
-    def communicate(self, input=None, timeout=None):
-        if self.dead:
-            return b"", b""
-        time.sleep(min(timeout or 0, 0.01))
-        raise subprocess.TimeoutExpired(cmd="synthetic-fixed-child", timeout=timeout)
+    def terminate(self):
+        self.terminated = True
+        self.exit_status = -15
 
     def kill(self):
-        self.dead = True
+        self.terminated = True
+        self.exit_status = -9
+
+    def wait(self, timeout=None):
+        return self.exit_status
 
 
-def _run_hung_attempt(tmp_path, monkeypatch, *, cancel):
-    _price, ledger, request = _setup(tmp_path, monkeypatch)
-    identifier = ledger.enqueue(request)["id"]
+def test_supervisor_cancels_child_without_orphan_or_late_result(
+    local_storage,
+    monkeypatch,
+):
+    _, jobs_db = local_storage
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request("a" * 64))["id"]
     claim = ledger.claim_next()
     assert claim is not None
-    spawned = threading.Event()
-    monkeypatch.setattr(_HangingChild, "spawned", spawned, raising=False)
-    monkeypatch.setattr(worker.subprocess, "Popen", _HangingChild)
-    # Synthetic children do not own a Windows OS process handle.
-    monkeypatch.setattr(worker, "_limit_windows_worker", lambda _process: None)
-    monkeypatch.setattr(
-        worker.ModelJobSupervisor,
-        "_terminate",
-        staticmethod(lambda process: process.kill() if process else None),
-    )
-    monkeypatch.setattr(worker, "POLL_SECONDS", 0.01)
-    monkeypatch.setattr(worker, "CANCEL_GRACE_SECONDS", 0.04)
-    monkeypatch.setattr(worker, "WALL_TIMEOUT_SECONDS", 0.09)
-    supervisor = worker.ModelJobSupervisor(ledger)
-    thread = threading.Thread(target=supervisor._execute, args=claim)
-    thread.start()
-    assert spawned.wait(timeout=2)
-    if cancel:
-        assert ledger.cancel(identifier) == "cancel_requested"
-        assert ledger.get(identifier)["status"] == "cancel_requested"
-    thread.join(timeout=3)
-    assert not thread.is_alive()
-    return ledger.get(identifier)
+    child = SimulatedChild()
+
+    def spawned(*_args, **_kwargs):
+        ledger.cancel(identifier)
+        return child
+
+    monkeypatch.setattr(job_worker.subprocess, "Popen", spawned)
+    owner = job_worker.ModelJobSupervisor(ledger)
+    owner._run_claim(*claim)
+    assert child.terminated
+    assert ledger.get(identifier)["state"] == "cancelled"
+    assert owner._child is None
 
 
-def test_running_cancel_has_bounded_hard_stop_and_no_late_result(tmp_path, monkeypatch):
-    record = _run_hung_attempt(tmp_path, monkeypatch, cancel=True)
-    assert record["state"] == "cancelled"
-    assert record["attempts"] == 1
-    assert record["output_sha256"] is None
+def test_supervisor_timeout_is_bounded_and_marks_safe_failure(local_storage, monkeypatch):
+    _, jobs_db = local_storage
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request("a" * 64))["id"]
+    claim = ledger.claim_next()
+    child = SimulatedChild()
+    monkeypatch.setattr(job_worker.subprocess, "Popen", lambda *_args, **_kw: child)
+    ticks = iter([0.0, 1000.0])
+    monkeypatch.setattr(job_worker.time, "monotonic", lambda: next(ticks, 1000.0))
+    owner = job_worker.ModelJobSupervisor(ledger)
+    owner._run_claim(*claim)
+    assert child.terminated
+    assert ledger.get(identifier)["state"] == "failed"
+    assert ledger.get(identifier)["error_code"] == "resource_limit"
 
 
-def test_running_timeout_is_safe_resource_failure(tmp_path, monkeypatch):
-    record = _run_hung_attempt(tmp_path, monkeypatch, cancel=False)
-    assert record["state"] == "failed"
-    assert record["error_code"] == "resource_limit"
-    assert record["output_sha256"] is None
+def test_worker_environment_never_passes_provider_keys(local_storage, monkeypatch):
+    _, jobs_db = local_storage
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request("a" * 64))["id"]
+    claim = ledger.claim_next()
+    monkeypatch.setenv("FININTEL_ALPACA_API_KEY", "private-token")
+    monkeypatch.setenv("OPENAI_API_KEY", "private-token")
+    monkeypatch.setenv("FININTEL_PROCESS_TOKEN", TOKEN)
+    captured = {}
+    child = SimulatedChild()
+
+    def spawned(*_args, **kwargs):
+        captured.update(kwargs["env"])
+        child.exit_status = 0
+        return child
+
+    monkeypatch.setattr(job_worker.subprocess, "Popen", spawned)
+    owner = job_worker.ModelJobSupervisor(ledger)
+    owner._run_claim(*claim)
+    assert "FININTEL_ALPACA_API_KEY" not in captured
+    assert "OPENAI_API_KEY" not in captured
+    assert "FININTEL_PROCESS_TOKEN" not in captured
+    assert captured["FININTEL_MODEL_JOBS_DB_PATH"] == str(jobs_db.resolve())
+    assert ledger.get(identifier)["error_code"] == "worker_failure"
 
 
-def test_two_worker_owners_respect_exclusive_lock_and_once_only_claim(tmp_path, monkeypatch):
-    _price, ledger, request = _setup(tmp_path, monkeypatch)
-    identifier = ledger.enqueue(request)["id"]
-    first = worker.ModelJobSupervisor(ledger)
-    second = worker.ModelJobSupervisor(ModelJobLedger(ledger.path))
-    first.start()
-    second.start()
+def test_wrong_worker_attempt_does_not_read_claim(local_storage):
+    _, jobs_db = local_storage
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request("a" * 64))["id"]
+    attempt = ledger.claim_next()[2]
+    assert ledger.read_claim(identifier, attempt) is not None
+    assert ledger.read_claim(identifier, attempt + 1) is None
+    assert job_worker.run_child("not-a-uuid", attempt) == 2
+
+
+def test_idle_supervisor_does_not_open_or_create_lock(local_storage):
+    _, jobs_db = local_storage
+    owner = job_worker.ModelJobSupervisor(ModelJobLedger(jobs_db))
+    assert owner.start()
     try:
-        record = _await_state(ledger, identifier, {"completed", "failed"})
+        time.sleep(0.35)
+        assert not jobs_db.exists()
+        assert not jobs_db.with_name(jobs_db.name + ".worker.lock").exists()
     finally:
-        first.stop()
-        second.stop()
-    assert record["state"] == "completed"
-    assert record["attempts"] == 1
-    assert ledger.claim_next() is None
+        owner.stop()
 
 
-def test_errors_are_safe_codes_not_paths_or_credentials():
-    assert worker._safe_error(RuntimeError("/secret/token=ABC")) == "worker_failure"
-    assert worker._safe_error(MemoryError()) == "resource_limit"
-    assert (
-        worker._safe_error(
-            worker.AnalyticsError("Local source snapshot changed; refresh model inputs")
+def test_supervisor_lazily_takes_ownership_and_recovers_running_job(local_storage):
+    _, jobs_db = local_storage
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request("a" * 64))["id"]
+    assert ledger.claim_next() is not None
+    owner = job_worker.ModelJobSupervisor(ledger)
+    assert owner.start()
+    try:
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            if ledger.get(identifier)["state"] == "failed":
+                break
+            time.sleep(0.05)
+        assert ledger.get(identifier)["state"] == "failed"
+        assert ledger.get(identifier)["error_code"] == "interrupted"
+        assert jobs_db.with_name(jobs_db.name + ".worker.lock").exists()
+    finally:
+        owner.stop()
+
+
+def test_managed_validation_does_not_echo_private_path_or_secret(local_storage, monkeypatch):
+    headers = {"x-finintel-process-token": TOKEN}
+    private_path = "/Users/private/keys/secret-model.py"
+    with TestClient(backend_main.app) as client:
+        response = client.post(
+            "/api/v1/models/jobs",
+            json=job_api_body(module_path=private_path),
+            headers=headers,
         )
-        == "source_changed"
+        assert response.status_code == 422
+        assert private_path not in response.text
+        assert "module_path" not in response.text
+        response = client.post(
+            "/api/v1/models/jobs",
+            json=job_api_body(start="secret-backend-token"),
+            headers=headers,
+        )
+        assert response.status_code == 422
+        assert "secret-backend-token" not in response.text
+        monkeypatch.setattr(job_api, "source_snapshot_for_job", lambda **_kw: "a" * 64)
+        response = client.post(
+            "/api/v1/models/jobs",
+            json=job_api_body(start="2026-10-05", end="2026-09-01"),
+            headers=headers,
+        )
+        assert response.status_code == 422
+        assert response.json() == {"detail": "Invalid local model-job request"}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Object regression")
+def test_windows_worker_is_assigned_to_memory_limited_job():
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(4)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
+    job_handle = None
+    try:
+        job_handle = REAL_WINDOWS_JOB_LIMIT(process)
+        assert isinstance(job_handle, int) and job_handle > 0
+        assert process.poll() is None
+    finally:
+        job_worker._stop_process(process)
+        job_worker._close_windows_job(job_handle)
 
 
-def test_supervisor_recovers_after_transient_ledger_error(tmp_path, monkeypatch):
-    _price, ledger, request = _setup(tmp_path, monkeypatch)
-    identifier = ledger.enqueue(request)["id"]
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS resident-memory watchdog")
+def test_macos_worker_rss_limit_terminates_child(local_storage, monkeypatch):
+    _, jobs_db = local_storage
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request("a" * 64))["id"]
+    claim = ledger.claim_next()
+    assert claim is not None
+    child = SimulatedChild()
+    monkeypatch.setattr(job_worker.subprocess, "Popen", lambda *_args, **_kw: child)
+    monkeypatch.setattr(
+        job_worker,
+        "_macos_rss_bytes",
+        lambda _pid: job_worker.MAX_WORKER_MEMORY_BYTES + 1,
+    )
+    owner = job_worker.ModelJobSupervisor(ledger)
+    owner._run_claim(*claim)
+    assert child.terminated
+    assert ledger.get(identifier)["state"] == "failed"
+    assert ledger.get(identifier)["error_code"] == "resource_limit"
+
+
+def test_worker_recovers_after_transient_claim_failure(local_storage, monkeypatch):
+    _, jobs_db = local_storage
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request("a" * 64))["id"]
     original_claim = ledger.claim_next
-    failures = 0
+    calls = 0
 
     def flaky_claim():
-        nonlocal failures
-        failures += 1
-        if failures == 1:
-            raise ModelJobStoreError("Synthetic transient ledger outage")
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ModelJobStoreError("Temporary local model-job storage unavailable")
         return original_claim()
 
     monkeypatch.setattr(ledger, "claim_next", flaky_claim)
-    supervisor = worker.ModelJobSupervisor(ledger)
-    supervisor.start()
+    owner = job_worker.ModelJobSupervisor(ledger)
+    monkeypatch.setattr(
+        owner,
+        "_run_claim",
+        lambda job_id, _request, attempt: ledger.fail(job_id, attempt, "worker_failure"),
+    )
+    assert owner.start()
     try:
-        record = _await_state(ledger, identifier, {"completed", "failed"}, timeout=20)
-        assert failures >= 2
-        assert record["state"] == "completed", record
-        assert record["attempts"] == 1
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            if ledger.get(identifier)["state"] == "failed":
+                break
+            time.sleep(0.05)
+        result = ledger.get(identifier)
+        assert calls >= 2
+        assert result["state"] == "failed"
+        assert result["error_code"] == "worker_failure"
+        assert result["attempts"] == 1
     finally:
-        supervisor.stop()
+        owner.stop()
 
 
-def test_waiting_supervisor_takes_over_after_first_owner_exits(tmp_path, monkeypatch):
-    _price, ledger, request = _setup(tmp_path, monkeypatch)
-    identifier = ledger.enqueue(request)["id"]
-    waiting = worker.ModelJobSupervisor(ModelJobLedger(ledger.path))
-    with worker._exclusive_owner(ledger.path) as owned:
-        assert owned
-        waiting.start()
-        time.sleep(0.4)
-        assert ledger.get(identifier)["state"] == "queued"
-    try:
-        completed = _await_state(ledger, identifier, {"completed", "failed"}, timeout=20)
-        assert completed["state"] == "completed", completed
-        assert completed["attempts"] == 1
-    finally:
-        waiting.stop()
+def test_pending_cancellation_status_in_native_api_responses(local_storage):
+    _, jobs_db = local_storage
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request("a" * 64))["id"]
+    claim = ledger.claim_next()
+    assert claim is not None
+    assert ledger.cancel(identifier) == "cancel_requested"
+    detail = ledger.get(identifier)
+    assert detail["state"] == "running"
+    assert detail["cancel_requested"] == 1
+    assert detail["status"] == "cancel_requested"
+    assert ledger.list()["items"][0]["status"] == "cancel_requested"
+    headers = {"x-finintel-process-token": TOKEN}
+    with TestClient(backend_main.app) as client:
+        response = client.get(f"/api/v1/models/jobs/{identifier}", headers=headers)
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancel_requested"
+        response = client.get("/api/v1/models/jobs", headers=headers)
+        assert response.status_code == 200
+        assert response.json()["items"][0]["status"] == "cancel_requested"
+    assert ledger.finish_cancelled(identifier, claim[2])
+    assert ledger.get(identifier)["status"] == "cancelled"
 
 
-def test_worker_environment_excludes_custom_module_paths_and_tokens(tmp_path, monkeypatch):
-    _price, ledger, _request = _setup(tmp_path, monkeypatch)
-    monkeypatch.setenv("PYTHONPATH", "/private/injected/plugins")
-    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-secret")
-    monkeypatch.setenv("FININTEL_PROCESS_TOKEN", TOKEN)
-    env = worker._child_env(ledger)
-    assert "PYTHONPATH" not in env
-    assert "OPENAI_API_KEY" not in env
-    assert "FININTEL_PROCESS_TOKEN" not in env
-    assert env["FININTEL_WORKER_PARENT_PID"] == str(os.getpid())
-
-
-def test_corrupted_persisted_result_never_reaches_api(tmp_path, monkeypatch):
-    price, ledger, request = _setup(tmp_path, monkeypatch)
-    identifier = ledger.enqueue(request)["id"]
-    attempt = ledger.claim_next()[2]
-    evaluated = evaluate_builtin_indicator(
+def test_persisted_result_hashes_are_verified_on_read(local_storage):
+    market_db, jobs_db = local_storage
+    seed_market(market_db)
+    snapshot = job_worker.source_snapshot_for_job(
+        code="SP500", start=START, end=END, quality_policy="allow_unverified"
+    )
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request(snapshot))["id"]
+    claim = ledger.claim_next()
+    assert claim is not None
+    evaluation = evaluate_builtin_indicator(
+        code="SP500",
         start=START,
         end=END,
-        quality_policy=request.quality_policy,
-        expected_snapshot_sha256=request.expected_snapshot_sha256,
-        db=price,
+        parameters=claim[1].parameters,
+        quality_policy="allow_unverified",
+        expected_snapshot_sha256=snapshot,
     )
-    assert ledger.complete(identifier, attempt, evaluated)
+    assert ledger.complete(identifier, claim[2], evaluation)
     original = ledger.get(identifier, include_result=True)["result"]
-    headers = {"x-finintel-process-token": TOKEN}
-    monkeypatch.setenv("FININTEL_PROCESS_TOKEN", TOKEN)
-    with sqlite3.connect(ledger.path) as conn:
-        for location in ("points", "lineage"):
+    assert original["output_sha256"] == ledger.get(identifier)["output_sha256"]
+
+    with sqlite3.connect(jobs_db) as conn:
+        for tampered in ("points", "lineage"):
             altered = json.loads(json.dumps(original))
-            if location == "points":
-                altered["points"][-1]["close"] = "8888"
+            if tampered == "points":
+                altered["points"][-1]["close"] = "9999"
             else:
-                altered["lineage"]["quality_status"] = "fake"
+                altered["lineage"]["quality_status"] = "forged"
             conn.execute(
                 "UPDATE model_jobs SET result_json=? WHERE id=?",
                 (json.dumps(altered), identifier),
@@ -386,12 +591,14 @@ def test_corrupted_persisted_result_never_reaches_api(tmp_path, monkeypatch):
             conn.commit()
             with pytest.raises(ModelJobStoreError, match="integrity"):
                 ledger.get(identifier, include_result=True)
-            response = TestClient(app).get(
-                f"/api/v1/models/jobs/{identifier}/result", headers=headers
-            )
-            assert response.status_code == 503
-            assert "8888" not in response.text
-            assert "fake" not in response.text
+            with TestClient(backend_main.app) as client:
+                response = client.get(
+                    f"/api/v1/models/jobs/{identifier}?include_result=true",
+                    headers={"x-finintel-process-token": TOKEN},
+                )
+                assert response.status_code == 503
+                assert "9999" not in response.text
+                assert "forged" not in response.text
         conn.execute(
             "UPDATE model_jobs SET result_json=? WHERE id=?",
             (json.dumps(original), identifier),
@@ -399,30 +606,25 @@ def test_corrupted_persisted_result_never_reaches_api(tmp_path, monkeypatch):
     assert ledger.get(identifier, include_result=True)["result"] == original
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX parent PID regression")
-def test_original_supervisor_pid_survives_frozen_bootloader(monkeypatch):
-    monkeypatch.setattr(worker.os, "getppid", lambda: 999999)
-    assert worker._parent_alive(os.getpid())
-    assert not worker._parent_alive(999999999)
+@pytest.mark.skipif(os.name == "nt", reason="POSIX packaged parent PID regression")
+def test_worker_accepts_live_supervisor_through_bootloader(monkeypatch):
+    # The immediate PPID belongs to PyInstaller, not the original sidecar.
+    monkeypatch.setattr(job_worker.os, "getppid", lambda: 999999)
+    assert job_worker._parent_alive(os.getpid())
+    assert not job_worker._parent_alive(999999999)
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows job-object regression")
-def test_supervisor_job_object_bounds_windows_worker():
-    process = subprocess.Popen(
-        [sys.executable, "-c", "import time;time.sleep(5)"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+def test_macos_rss_includes_frozen_child_process_tree(monkeypatch):
+    monkeypatch.setattr(job_worker.sys, "platform", "darwin")
+    sample = "100 1 10\n101 100 200\n102 101 300\n103 1 90000\n"
+    result = subprocess.CompletedProcess([], 0, stdout=sample, stderr="")
+    monkeypatch.setattr(job_worker.subprocess, "run", lambda *_a, **_kw: result)
+    assert REAL_MACOS_RSS(100) == (10 + 200 + 300) * 1024
+    assert REAL_MACOS_RSS(999999) is None
+
+
+def test_safe_error_mapping_never_contains_exception_text():
+    assert job_worker._safe_error_code(AnalyticsError("Local source snapshot changed")) == (
+        "source_changed"
     )
-    handle = None
-    try:
-        handle = worker._limit_windows_worker(process)
-        assert isinstance(handle, int) and handle > 0
-        assert process.poll() is None
-    finally:
-        worker._close_windows_job(handle)
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+    assert job_worker._safe_error_code(RuntimeError("private API password")) == "worker_failure"
