@@ -32,7 +32,7 @@ export function DataAcquisitionPage({
               <BarChart3 aria-hidden="true" /> {t("Open Markets")}
             </Button></>} />
 
-      <div className={`grid min-w-0 items-start gap-2 ${mode === "daily" ? "grid-cols-1" : "2xl:grid-cols-[minmax(0,1fr)_300px]"}`}>
+      <div className="grid min-w-0 items-start gap-2 2xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-2">
           {mode === "history" && <>
           <IndexHistoryCard />
