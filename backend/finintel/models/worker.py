@@ -199,7 +199,17 @@ def child_main() -> None:
         response = _evaluate_claim(identifier, attempt, request)
         if len(json.dumps(response, separators=(",", ":")).encode()) > MAX_RESULT_BYTES:
             response = {"kind": "error", "code": "resource_limit"}
-    except Exception as exc:
+    except (
+        AnalyticsError,
+        StorageError,
+        ModelJobStoreError,
+        OSError,
+        MemoryError,
+        ValueError,
+        KeyError,
+        TypeError,
+        RuntimeError,
+    ) as exc:
         response = {"kind": "error", "code": _safe_error(exc)}
     sys.stdout.write(json.dumps(response, separators=(",", ":"), ensure_ascii=True))
     sys.stdout.flush()
