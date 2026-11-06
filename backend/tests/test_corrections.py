@@ -519,7 +519,10 @@ def test_global_correction_search_filters_before_paging(tmp_path, monkeypatch):
         list_corrections(path, code="AAPL", q="test-provider", limit=10, offset=10)["items"]
     ) == 5
     assert list_corrections(path, code="AAPL", q="%", limit=10)["total"] == 0
-    assert list_corrections(path, code="AAPL", q="_", limit=10)["total"] == 0
+    # Underscore is literal: only the original alpaca_sip provider matches.
+    literal_underscore = list_corrections(path, code="AAPL", q="_", limit=10)
+    assert literal_underscore["total"] == 1
+    assert literal_underscore["items"][0]["provider"] == "alpaca_sip"
 
     monkeypatch.setenv("FININTEL_DB_PATH", str(path))
     with TestClient(app) as client:
