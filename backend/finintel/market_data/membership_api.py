@@ -331,8 +331,12 @@ def get_snapshot_trend(
     to_as_of: date,
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0, le=1_000_000),
+    evidence_status: Literal[
+        "verified_snapshot", "source_date_mismatch", "proxy_only", "incomplete", "unverified"
+    ]
+    | None = None,
 ) -> dict:
-    """Historical source snapshots only; never invent intermediate index membership."""
+    """Historical source snapshots only; evidence is filtered before pagination."""
     try:
         return constituent_snapshot_trend(
             code,
@@ -340,6 +344,7 @@ def get_snapshot_trend(
             to_as_of=to_as_of.isoformat(),
             limit=limit,
             offset=offset,
+            evidence_status=evidence_status,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

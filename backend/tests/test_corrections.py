@@ -479,3 +479,74 @@ def test_correction_backup_replace_merge_idempotent_and_conflict_safe(tmp_path):
     with sqlite3.connect(destination) as conn:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_global_correction_search_filters_before_paging(tmp_path, monkeypatch):
+    """Results on later unfiltered pages remain discoverable with an honest total."""
+    path = tmp_path / "filtered-corrections.sqlite3"
+    finding_id, _ = seed(path)
+    review_finding(path, finding_id, "confirmed", "Reviewed")
+    original_id = propose_correction(
+        path,
+        finding_id=finding_id,
+        provider="alpaca_sip",
+        proposed_close="92",
+        rationale="Correction search baseline",
+    )["id"]
+    with sqlite3.connect(path) as conn:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(quality_corrections)")]
+        original = conn.execute(
+            "SELECT * FROM quality_corrections WHERE id=?", (original_id,)
+        ).fetchone()
+        for index in range(15):
+            record = list(original)
+            record[columns.index("id")] = f"search-fixture-{index:02}"
+            record[columns.index("provider")] = f"test-provider-{index:02}"
+            record[columns.index("created_at")] = f"2026-11-01T00:00:{index:02}+00:00"
+            conn.execute(
+                f"INSERT INTO quality_corrections VALUES ({','.join('?' for _ in columns)})",
+                record,
+            )
+    unfiltered = list_corrections(path, code="AAPL", limit=10)
+    assert unfiltered["total"] == 16
+    assert len(unfiltered["items"]) == 10
+    target_provider = "test-provider-00"
+    assert not any(row["provider"] == target_provider for row in unfiltered["items"])
+    matched = list_corrections(path, code="AAPL", q=target_provider, limit=10)
+    assert matched["total"] == 1
+    assert [row["provider"] for row in matched["items"]] == [target_provider]
+    assert (
+        list_corrections(path, code="AAPL", q="test-provider", limit=10, offset=10)["total"] == 15
+    )
+    assert (
+        len(list_corrections(path, code="AAPL", q="test-provider", limit=10, offset=10)["items"])
+        == 5
+    )
+    assert list_corrections(path, code="AAPL", q="%", limit=10)["total"] == 0
+    # Underscore is literal: only the original alpaca_sip provider matches.
+    literal_underscore = list_corrections(path, code="AAPL", q="_", limit=10)
+    assert literal_underscore["total"] == 1
+    assert literal_underscore["items"][0]["provider"] == "alpaca_sip"
+
+    monkeypatch.setenv("FININTEL_DB_PATH", str(path))
+    with TestClient(app) as client:
+        result = client.get(
+            "/api/v1/quality/corrections",
+            params={
+                "code": "AAPL",
+                "q": target_provider,
+                "limit": 10,
+                "offset": 0,
+            },
+        )
+        invalid = client.get(
+            "/api/v1/quality/corrections",
+            params={
+                "code": "AAPL",
+                "q": "x" * 81,
+            },
+        )
+    assert result.status_code == 200, result.text
+    assert result.json()["total"] == 1
+    assert result.json()["items"][0]["provider"] == target_provider
+    assert invalid.status_code == 422

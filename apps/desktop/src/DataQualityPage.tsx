@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "./PageHeader";
+import { TablePager, TABLE_PAGE_SIZE } from "./components/TablePagination";
 import { useLocale } from "./localization";
 import { useNotify } from "./notifications";
 import {
@@ -17,7 +18,7 @@ import {
 } from "./quality-api";
 
 const indexCodes = ["SP500", "DJIA", "NASDAQCOM", "NDX", "VIX"] as const;
-const pageSize = 20;
+const pageSize = TABLE_PAGE_SIZE;
 const selectClass = "h-9 max-w-full rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const inputClass = "h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
@@ -34,6 +35,11 @@ function readableError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** A page change must discard approval state for the previous, now off-page proposal. */
+export function correctionPageTransition(nextPage: number) {
+  return { page: nextPage, selectedCorrection: null, preview: null, approvalChecked: false, correctionNote: "" } as const;
+}
+
 /** A dedicated, source-first investigation screen. No raw market data is edited here. */
 export function DataQualityPage() {
   const { t, language } = useLocale();
@@ -47,6 +53,8 @@ export function DataQualityPage() {
   const [providerFilter, setProviderFilter] = useState("");
   const [reviewFilter, setReviewFilter] = useState("");
   const [page, setPage] = useState(0);
+  const [correctionPage, setCorrectionPage] = useState(0);
+  const [correctionFilter, setCorrectionFilter] = useState("");
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<QualityOverview | null>(null);
@@ -70,6 +78,7 @@ export function DataQualityPage() {
 
   const reload = () => setRevision(value => value + 1);
   useEffect(() => { setPage(0); setSelectedFinding(null); setSelectedCorrection(null); }, [code, typeFilter, providerFilter, reviewFilter]);
+  useEffect(() => { setCorrectionPage(0); setCorrectionFilter(""); }, [code]);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -80,7 +89,8 @@ export function DataQualityPage() {
     };
     Promise.allSettled([
       fetchQualityOverview(code), fetchQualityFindings(filters),
-      fetchQualityCorrections(code), fetchCorporateActions(code), fetchReconciliation(code),
+      fetchQualityCorrections(code, pageSize, correctionPage * pageSize, correctionFilter),
+      fetchCorporateActions(code), fetchReconciliation(code),
     ]).then(results => {
       if (cancelled) return;
       const [summary, rows, proposals, actions, providers] = results;
@@ -93,7 +103,7 @@ export function DataQualityPage() {
       if (errors.length) setLoadError(errors.map(error => readableError(error.reason)).join(" · "));
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [code, typeFilter, providerFilter, reviewFilter, page, revision]);
+  }, [code, typeFilter, providerFilter, reviewFilter, page, correctionPage, correctionFilter, revision]);
 
   useEffect(() => {
     let active = true;
@@ -135,6 +145,18 @@ export function DataQualityPage() {
       setBusy("");
     }
   }
+  const changeCorrectionPage = (nextPage: number) => {
+    const reset = correctionPageTransition(nextPage);
+    setCorrectionPage(reset.page);
+    setSelectedCorrection(reset.selectedCorrection);
+    setPreview(reset.preview);
+    setApprovalChecked(reset.approvalChecked);
+    setCorrectionNote(reset.correctionNote);
+  };
+  const changeCorrectionFilter = (next: string) => {
+    setCorrectionFilter(next.slice(0, 80));
+    changeCorrectionPage(0);
+  };
   const changeScope = (next: "index" | "equity") => {
     setScope(next);
     setTypeFilter(""); setProviderFilter(""); setReviewFilter(""); setPage(0);
@@ -153,7 +175,6 @@ export function DataQualityPage() {
   const scopeDescription = scope === "index"
     ? t("Index levels are examined separately from equity OHLCV and total-return series.")
     : t("Inspect stored equity providers and their daily raw, unadjusted observations.");
-  const pageCount = Math.max(1, Math.ceil((findings?.total ?? 0) / pageSize));
 
   async function exportReport(format: "json" | "csv") {
     if (!overview) return;
@@ -319,13 +340,7 @@ export function DataQualityPage() {
             </table>
             {!loading && !(findings?.items.length) && <p className="p-4 text-sm text-muted-foreground">{t("No matching quality findings.")}</p>}
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span aria-live="polite">{t("Showing")} {findings?.total ? page * pageSize + 1 : 0}–{Math.min((page + 1) * pageSize, findings?.total ?? 0)} {t("of")} {findings?.total ?? 0} · {t("Page")} {page + 1} {t("of")} {pageCount}</span>
-            <div className="flex gap-2">
-              <Button size="sm" variant="secondary" disabled={loading || page === 0} onClick={() => setPage(v => Math.max(0, v - 1))}>{t("Previous")}</Button>
-              <Button size="sm" variant="secondary" disabled={loading || page + 1 >= pageCount} onClick={() => setPage(v => v + 1)}>{t("Next")}</Button>
-            </div>
-          </div>
+          <TablePager page={page} total={findings?.total ?? 0} onPageChange={setPage} disabled={loading} />
           {selectedFinding !== null && <section className="space-y-3 rounded-md border border-border bg-muted/20 p-3" aria-label={t("Finding investigation")}>
             {!history && !historyError && <p className="text-xs">{t("Loading review history…")}</p>}
             {historyError && <p role="alert" className="text-xs text-destructive">{historyError}</p>}
@@ -403,6 +418,12 @@ export function DataQualityPage() {
           <CardDescription>{t("Approval only affects the explicit resolved-close view; original OHLCV and index levels remain unchanged.")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <label className="flex max-w-md flex-col gap-1 text-xs text-muted-foreground">
+            {t("Filter correction proposals")}
+            <input type="search" value={correctionFilter} onChange={event => changeCorrectionFilter(event.target.value)}
+              aria-label={t("Filter correction proposals")} maxLength={80} placeholder={t("Search table values")}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground" />
+          </label>
           {!corrections?.items.length ? <p className="text-sm text-muted-foreground">{t("No correction proposals for this instrument.")}</p> :
             <div className="overflow-x-auto rounded-md border border-border">
               <table className="w-full min-w-[640px] text-left text-xs">
@@ -420,6 +441,8 @@ export function DataQualityPage() {
                 </tr>)}</tbody>
               </table>
             </div>}
+          <TablePager page={correctionPage} total={corrections?.total ?? 0}
+            onPageChange={changeCorrectionPage} disabled={loading} />
           {selectedCorrection && <>
             <div className="rounded-md border border-border p-3 text-xs">
               <h3 className="mb-2 text-sm font-semibold">{t("Correction preview")}</h3>

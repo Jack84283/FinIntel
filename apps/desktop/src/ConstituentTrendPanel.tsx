@@ -9,8 +9,9 @@ import {
   fetchMembershipTrend, type TrendEvidence, type TrendPoint, type TrendQuery, type TrendResult,
 } from "./membership-trend-api";
 import { useLocale } from "./localization";
+import { TablePager, TABLE_PAGE_SIZE } from "./components/TablePagination";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = TABLE_PAGE_SIZE;
 const selectClass = "h-9 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const evidenceDescriptions: Record<TrendEvidence, string> = {
   verified_snapshot: "Verified dated membership snapshot",
@@ -38,6 +39,29 @@ export function SnapshotCountBar({ point, maximum }: { point: TrendPoint; maximu
   );
 }
 
+/** Keep evidence selection available even when the filtered result is empty. */
+export function TrendEvidenceControls({ evidenceFilter, total, onChange }: {
+  evidenceFilter: string; total: number; onChange: (value: string) => void;
+}) {
+  const { t } = useLocale();
+  return <>
+    <label className="flex max-w-xs flex-col gap-1 text-xs text-muted-foreground">
+      {t("Filter by evidence")}
+      <select className={selectClass} value={evidenceFilter}
+        onChange={event => onChange(event.target.value)}>
+        <option value="">{t("All evidence statuses")}</option>
+        {(Object.keys(evidenceDescriptions) as TrendEvidence[]).map(status =>
+          <option key={status} value={status}>{t(trendEvidenceDescription(status))}</option>)}
+      </select>
+    </label>
+    {total === 0 && <p role="status" className="text-sm text-muted-foreground">
+      {t(evidenceFilter
+        ? "No snapshots match the selected evidence filter."
+        : "No imported membership snapshots in this period; unknown is not zero membership.")}
+    </p>}
+  </>;
+}
+
 /** Source-backed snapshots; missing dates are deliberately not plotted or filled. */
 export function ConstituentTrendPanel({
   primaryIndex, analysisStart, analysisEnd,
@@ -51,6 +75,7 @@ export function ConstituentTrendPanel({
   const [overrideEnd, setOverrideEnd] = useState("");
   const [offset, setOffset] = useState(0);
   const [revision, setRevision] = useState(0);
+  const [evidenceFilter, setEvidenceFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<TrendResult | null>(null);
   const [error, setError] = useState("");
@@ -71,7 +96,10 @@ export function ConstituentTrendPanel({
     setResult(null);
     setError("");
     if (!expanded || !code || invalidRange) { setBusy(false); return; }
-    const query: TrendQuery = { code, fromAsOf: start, toAsOf: end, limit: PAGE_SIZE, offset };
+    const query: TrendQuery = {
+      code, fromAsOf: start, toAsOf: end, limit: PAGE_SIZE, offset,
+      evidenceStatus: evidenceFilter ? evidenceFilter as TrendEvidence : undefined,
+    };
     setBusy(true);
     fetchMembershipTrend(query).then(value => {
       if (id === generation.current) setResult(value);
@@ -81,9 +109,10 @@ export function ConstituentTrendPanel({
       if (id === generation.current) setBusy(false);
     });
     return () => { generation.current++; };
-  }, [expanded, code, start, end, invalidRange, offset, revision]);
+  }, [expanded, code, start, end, invalidRange, offset, evidenceFilter, revision]);
 
   const snapshots = result?.snapshots ?? [];
+  // Backend filters before LIMIT/OFFSET; total_snapshots is the real matched count.
   const maximum = Math.max(1, ...snapshots.map(p => p.member_count));
   const total = result?.total_snapshots ?? 0;
   const count = (value: number | null) =>
@@ -144,12 +173,12 @@ export function ConstituentTrendPanel({
         </p>}
         {!busy && !error && result && <>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant="outline">{t("Observed source snapshots")}: {count(total)}</Badge>
+            <Badge variant="outline">{t(evidenceFilter ? "Matching source snapshots" : "Observed source snapshots")}: {count(total)}</Badge>
             <Badge variant="outline">{t("Snapshot-only; no interpolation")}</Badge>
           </div>
-          {total === 0 ? <p role="status" className="text-sm text-muted-foreground">
-            {t("No imported membership snapshots in this period; unknown is not zero membership.")}
-          </p> : <>
+          <TrendEvidenceControls evidenceFilter={evidenceFilter} total={total}
+            onChange={value => { setEvidenceFilter(value); setOffset(0); }} />
+          {total > 0 && <>
             {total < 2 && <p role="status" className="text-xs text-muted-foreground">
               {t("At least two stored snapshots are needed to observe changes.")}
             </p>}
@@ -203,15 +232,8 @@ export function ConstituentTrendPanel({
                 </tbody>
               </table>
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>{count(offset + 1)}–{count(Math.min(offset + snapshots.length, total))} / {count(total)}</span>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" type="button" disabled={offset === 0}
-                  onClick={() => setOffset(n => Math.max(0, n - PAGE_SIZE))}>{t("Previous")}</Button>
-                <Button size="sm" variant="outline" type="button" disabled={offset + PAGE_SIZE >= total}
-                  onClick={() => setOffset(n => n + PAGE_SIZE)}>{t("Next")}</Button>
-              </div>
-            </div>
+            <TablePager page={Math.floor(offset / PAGE_SIZE)} total={total}
+              onPageChange={next => setOffset(next * PAGE_SIZE)} disabled={busy} />
           </>}
           <p className="text-xs text-muted-foreground">
             {t("Observed snapshot changes do not establish when membership changed between imports, and indicative sources must not be used as verified backtests.")}

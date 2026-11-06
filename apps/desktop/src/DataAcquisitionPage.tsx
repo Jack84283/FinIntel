@@ -15,23 +15,27 @@ export type { MarketSelection } from "./market-selection";
 /** Acquisition actions and their completed-import history live outside Markets. */
 export function DataAcquisitionPage({
   onViewMarket,
+  mode = "history",
 }: {
   onViewMarket: (selection?: MarketSelection) => void;
+  mode?: "history" | "daily";
 }) {
   const { t } = useLocale();
   const [latest, setLatest] = useState<EquityMarketSelection | null>(null);
 
   return (
     <section className="min-w-0 space-y-2" aria-labelledby="acquisition-page-title">
-      <PageHeader id="acquisition-page-title" breadcrumb={t("FinIntel / Data Acquisition")} title={t("Data Acquisition")} subtitle={t("Fetch, validate, and store provider data. Review completed import actions separately from market analysis.")} actions={<><Badge variant="outline">{t("Local SQLite")}</Badge>
+      <PageHeader id="acquisition-page-title" breadcrumb={t("FinIntel / Data Acquisition")} title={t(mode === "history" ? "Historical Data" : "Daily & Incremental Data")} subtitle={t(mode === "history"
+        ? "Fetch and store historical index, stock, and ETF observations in local SQLite."
+        : "Monitor scheduled daily updates and run incremental acquisition without downloading full history again.")} actions={<><Badge variant="outline">{t("Local SQLite")}</Badge>
             <Button type="button" variant="secondary" size="sm" onClick={() => onViewMarket(latest ?? undefined)}>
               <BarChart3 aria-hidden="true" /> {t("Open Markets")}
             </Button></>} />
 
       <div className="grid min-w-0 items-start gap-2 2xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-2">
+          {mode === "history" && <>
           <IndexHistoryCard />
-          <DailyAcquisitionPanel />
           <AcquisitionCard
             selectedSymbol=""
             onAcquired={(symbol, provider) => {
@@ -46,9 +50,11 @@ export function DataAcquisitionPage({
               </Button>
             </div>
           )}
+          </>}
+          {mode === "daily" && <DailyAcquisitionPanel />}
         </div>
         <aside className="grid min-w-0 gap-2 sm:grid-cols-2 2xl:grid-cols-1" aria-label={t("Acquisition guidance")}>
-          <Card className="min-w-0">
+          {mode === "history" && <Card className="min-w-0">
             <CardHeader className="gap-y-2">
               <CardTitle className="flex items-center gap-2"><Database aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" /> {t("Local data workflow")}</CardTitle>
             </CardHeader>
@@ -56,7 +62,7 @@ export function DataAcquisitionPage({
               <p>{t("Choose a stock or ETF, select the provider and history window, then fetch the observations into local SQLite.")}</p>
               <p>{t("Manual acquisition on this page is independent of the historical backfill running from your terminal.")}</p>
             </CardContent>
-          </Card>
+          </Card>}
           <Card className="min-w-0">
             <CardHeader className="gap-y-2">
               <CardTitle className="flex items-center gap-2"><ShieldCheck aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" /> {t("Data integrity")}</CardTitle>
@@ -68,7 +74,9 @@ export function DataAcquisitionPage({
           </Card>
           <div className="flex min-w-0 items-start gap-3 rounded-lg border border-border p-4 text-xs leading-6 text-muted-foreground sm:col-span-2 2xl:col-span-1">
             <History aria-hidden="true" className="mt-1 size-4 shrink-0" />
-            <p>{t("Completed imports are available in Action History. This page shows only the most recent manual download result.")}</p>
+            <p>{t(mode === "history"
+              ? "Completed imports are available in Action History. This page shows only the most recent manual download result."
+              : "Daily and incremental job results are available in Action History. Scheduler changes remain local.")}</p>
           </div>
         </aside>
       </div>

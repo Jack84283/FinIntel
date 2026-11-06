@@ -13,6 +13,7 @@ import type { MarketSelection } from "./DataAcquisitionPage";
 import type { AcquisitionProvider } from "./market-acquisition-api";
 import { fetchDailyJob, searchDailyHistory, type DailyJob } from "./daily-acquisition-api";
 import { isCurrentDetailRequest } from "./action-history-state";
+import { LocalDataTable, TablePager, TABLE_PAGE_SIZE } from "./components/TablePagination";
 
 /** Read-only history of successful persisted imports. No events are fabricated. */
 export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?: MarketSelection) => void }) {
@@ -27,7 +28,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
-  const pageSize = 20;
+  const pageSize = TABLE_PAGE_SIZE;
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setPage(0); setSearchTerm(query.trim()); }, 180);
@@ -53,8 +54,6 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
       });
     return () => { cancelled = true; };
   }, [revision, searchTerm, provider, page]);
-
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   return (
     <section className="space-y-2" aria-labelledby="action-history-title">
@@ -110,14 +109,8 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
               </table>
             </div>
           )}
-          <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-            <p className="text-muted-foreground" aria-live="polite">{total ? `${t("Showing")} ${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} ${t("of")} ${total.toLocaleString()} ${t("imports")}` : t("No matching imports")} · {t("Page")} {page + 1} {t("of")} {pageCount}</p>
-            <div className="flex items-center gap-2">
-              <Button type="button" variant="secondary" size="sm" disabled={state !== "ready" || page === 0} onClick={() => setPage((v) => Math.max(0, v - 1))}>{t("Previous")}</Button>
-              <Button type="button" variant="secondary" size="sm" disabled={state !== "ready" || page + 1 >= pageCount} onClick={() => setPage((v) => v + 1)}>{t("Next")}</Button>
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground">{t("Full local SQLite import-history search, 20 records per page. Only successful imports are recorded here.")}</p>
+          <TablePager page={page} total={total} onPageChange={setPage} disabled={state !== "ready"} />
+          <p className="text-xs text-muted-foreground">{t("Full local SQLite import-history search, 10 records per page. Only successful imports are recorded here.")}</p>
         </CardContent>
       </Card>
       <DailyJobHistory />
@@ -141,7 +134,7 @@ function DailyJobHistory() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detail, setDetail] = useState<DailyJob | null>(null);
   const detailRequestRef = useRef(0);
-  const pageSize = 20;
+  const pageSize = TABLE_PAGE_SIZE;
 
   useEffect(() => {
     let cancelled = false;
@@ -183,8 +176,6 @@ function DailyJobHistory() {
       notify(t("Daily acquisition job details could not be loaded."), "error");
     });
   };
-
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   return (
     <Card>
@@ -246,16 +237,15 @@ function DailyJobHistory() {
                 {detail && <div className="space-y-2">
                   {detail.last_error && <p className="text-destructive">{detail.last_error}</p>}
                   {detail.provider_errors.length > 0 && <ul className="space-y-1 text-destructive">{detail.provider_errors.slice(-3).map((error, index) => <li key={index}>{String(error.provider ?? "provider")}: {String(error.message ?? "Unknown error")}</li>)}</ul>}
-                  <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="text-muted-foreground"><tr><th className="py-1 pr-3">{t("Instrument")}</th><th className="py-1 pr-3">{t("Provider")}</th><th className="py-1 pr-3">{t("Status")}</th><th className="py-1">{t("Details")}</th></tr></thead><tbody>{(detail.items ?? []).map((instrument) => <tr key={`${instrument.kind}-${instrument.code}`} className="border-t border-border"><td className="py-1 pr-3 font-medium">{instrument.code}</td><td className="py-1 pr-3">{instrument.provider ?? "—"}</td><td className="py-1 pr-3"><Badge variant={instrument.status === "completed" ? "success" : instrument.status === "failed" || instrument.status === "incomplete" ? "destructive" : "outline"}>{t(instrument.status)}</Badge></td><td className="py-1">{instrument.error_message ?? (instrument.missing_sessions ? `${instrument.missing_sessions} ${t("missing sessions")}` : "—")}</td></tr>)}</tbody></table></div>
+                  <LocalDataTable rows={detail.items ?? []} label={t("Instrument details")}
+                    searchable={row => [row.code, row.provider, row.status, row.error_message].join(" ")}>{visibleInstruments =>
+                  <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="text-muted-foreground"><tr><th className="py-1 pr-3">{t("Instrument")}</th><th className="py-1 pr-3">{t("Provider")}</th><th className="py-1 pr-3">{t("Status")}</th><th className="py-1">{t("Details")}</th></tr></thead><tbody>{visibleInstruments.map((instrument) => <tr key={`${instrument.kind}-${instrument.code}`} className="border-t border-border"><td className="py-1 pr-3 font-medium">{instrument.code}</td><td className="py-1 pr-3">{instrument.provider ?? "—"}</td><td className="py-1 pr-3"><Badge variant={instrument.status === "completed" ? "success" : instrument.status === "failed" || instrument.status === "incomplete" ? "destructive" : "outline"}>{t(instrument.status)}</Badge></td><td className="py-1">{instrument.error_message ?? (instrument.missing_sessions ? `${instrument.missing_sessions} ${t("missing sessions")}` : "—")}</td></tr>)}</tbody></table></div>}</LocalDataTable>
                 </div>}
               </td></tr>}
             </Fragment>)}</tbody>
           </table>
         </div>}
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-          <p className="text-muted-foreground" aria-live="polite">{total ? `${t("Showing")} ${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} ${t("of")} ${total.toLocaleString()} ${t("daily jobs")}` : t("No matching daily jobs")} · {t("Page")} {page + 1} {t("of")} {pageCount}</p>
-          <div className="flex items-center gap-2"><Button type="button" variant="secondary" size="sm" disabled={state !== "ready" || page === 0} onClick={() => setPage((value) => Math.max(0, value - 1))}>{t("Previous")}</Button><Button type="button" variant="secondary" size="sm" disabled={state !== "ready" || page + 1 >= pageCount} onClick={() => setPage((value) => value + 1)}>{t("Next")}</Button></div>
-        </div>
+        <TablePager page={page} total={total} onPageChange={setPage} disabled={state !== "ready"} />
       </CardContent>
     </Card>
   );

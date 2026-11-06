@@ -19,7 +19,7 @@ import { IndexIntelligencePage } from "./IndexIntelligencePage";
 import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
 import { resolveMarketSelection } from "./market-selection";
 
-type Screen = "overview" | "market" | "index-intelligence" | "intelligence" | "data-acquisition" | "data-validation" | "data-quality" | "index-membership" | "action-history" | "portfolio" | "settings";
+type Screen = "overview" | "market" | "index-intelligence" | "intelligence" | "data-acquisition" | "daily-acquisition" | "data-validation" | "data-quality" | "index-membership" | "action-history" | "portfolio" | "settings";
 const groups = [
   { heading: "Workspace", items: [
     { id: "overview", label: "Overview", icon: Activity },
@@ -28,7 +28,8 @@ const groups = [
     { id: "intelligence", label: "Intelligence", icon: BrainCircuit },
   ] },
   { heading: "Data & Operations", items: [
-    { id: "data-acquisition", label: "Data Acquisition", icon: Database },
+    { id: "data-acquisition", label: "Historical Data", icon: Database },
+    { id: "daily-acquisition", label: "Daily & Incremental Data", icon: Download },
     { id: "data-validation", label: "Data Validation", icon: ShieldCheck },
     { id: "data-quality", label: "Data Quality", icon: ShieldCheck },
     { id: "index-membership", label: "Index Constituents", icon: ListFilter },
@@ -104,7 +105,9 @@ export default function App() {
         ) : screen === "index-intelligence" ? (
           <IndexIntelligencePage />
         ) : screen === "data-acquisition" ? (
-          <DataAcquisitionPage onViewMarket={openMarkets} />
+          <DataAcquisitionPage onViewMarket={openMarkets} mode="history" />
+        ) : screen === "daily-acquisition" ? (
+          <DataAcquisitionPage onViewMarket={openMarkets} mode="daily" />
         ) : screen === "data-validation" ? (
           <DataValidationPage />
         ) : screen === "data-quality" ? (

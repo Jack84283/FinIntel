@@ -8,8 +8,9 @@ import {
   fetchMembershipOverlap, validOverlapDate, type OverlapQuery, type OverlapResult, type OverlapSource, type OverlapStatus,
 } from "./membership-overlap-api";
 import { useLocale } from "./localization";
+import { TablePager, TABLE_PAGE_SIZE } from "./components/TablePagination";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = TABLE_PAGE_SIZE;
 export const OVERLAP_SEARCH_MAX_CHARACTERS = 80;
 
 /** Limit Unicode code points, not UTF-16 input units (emoji count as one character). */
@@ -266,17 +267,8 @@ export function ConstituentOverlapPanel({
             {found === 0 && <p role="status" className="text-sm text-muted-foreground">
               {search ? t("No shared members match this filter.") : t("No shared symbols in the compared snapshots.")}
             </p>}
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>{t("Matching shared symbols")}: {count(result.filtered_total)}</span>
-              <div className="flex items-center gap-2">
-                <Button type="button" variant="outline" size="sm" disabled={offset === 0}
-                  onClick={() => setOffset(n => Math.max(0, n - PAGE_SIZE))}>{t("Previous")}</Button>
-                <span className="tabular-nums">{found ? Math.min(offset + 1, found) : 0}–{Math.min(offset + result.items.length, found)}</span>
-                <Button type="button" variant="outline" size="sm"
-                  disabled={offset + PAGE_SIZE >= found || offset + PAGE_SIZE > 1_000_000}
-                  onClick={() => setOffset(n => n + PAGE_SIZE)}>{t("Next")}</Button>
-              </div>
-            </div>
+            <TablePager page={Math.floor(offset / PAGE_SIZE)} total={found}
+              onPageChange={next => setOffset(next * PAGE_SIZE)} disabled={busy} />
           </>}
           {result.status !== "verified_snapshot" && <p className="text-xs text-muted-foreground">
             {t("This comparison is indicative or unavailable, not a verified point-in-time constituent set for backtesting.")}

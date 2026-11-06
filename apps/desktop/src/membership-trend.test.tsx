@@ -4,7 +4,7 @@ import {
   fetchMembershipTrend, parseTrendResult, validateTrendQuery,
   type TrendPoint, type TrendQuery, type TrendResult,
 } from "./membership-trend-api";
-import { ConstituentTrendPanel, SnapshotCountBar, trendEvidenceDescription } from "./ConstituentTrendPanel";
+import { ConstituentTrendPanel, SnapshotCountBar, TrendEvidenceControls, trendEvidenceDescription } from "./ConstituentTrendPanel";
 import { translate } from "./localization";
 
 const native = vi.hoisted(() => ({ enabled: false, invoke: vi.fn() }));
@@ -177,5 +177,75 @@ describe("Bilingual snapshot-only Index Intelligence UI", () => {
       "Underlying source date does not match snapshot date",
       "Observed snapshot changes do not establish when membership changed between imports, and indicative sources must not be used as verified backtests.",
     ]) expect(translate("zh-CN", key)).not.toBe(key);
+  });
+});
+
+
+describe("Zero-result evidence filter recovery", () => {
+  const renderControls = (filter: string, total: number) => renderToStaticMarkup(
+    <TrendEvidenceControls evidenceFilter={filter} total={total} onChange={() => undefined} />,
+  );
+
+  it("keeps the selector and All option visible when a selected status has zero matches", () => {
+    const filtered = renderControls("proxy_only", 0);
+    expect(filtered).toContain('value="proxy_only"');
+    expect(filtered).toContain("All evidence statuses");
+    expect(filtered).toContain("No snapshots match the selected evidence filter.");
+    expect(filtered).not.toContain("No imported membership snapshots in this period");
+
+    // Selecting All restores the unfiltered request (already verified by API tests below).
+    const restored = renderControls("", 3);
+    expect(restored).toContain("All evidence statuses");
+    expect(restored).not.toContain("No snapshots match the selected evidence filter.");
+    expect(restored).not.toContain("No imported membership snapshots in this period");
+  });
+
+  it("distinguishes no stored snapshots from zero evidence matches in both languages", () => {
+    const missing = renderControls("", 0);
+    expect(missing).toContain("No imported membership snapshots in this period");
+    expect(missing).not.toContain("No snapshots match the selected evidence filter.");
+    const label = "No snapshots match the selected evidence filter.";
+    expect(translate("zh-CN", label)).not.toBe(label);
+  });
+});
+
+describe("Global source-evidence filtering", () => {
+  it("validates later-page hits and preserves their actual unfiltered predecessors", () => {
+    const selection: TrendQuery = { ...query, limit: 1, evidenceStatus: "proxy_only" };
+    const proxy = example().snapshots[2];
+    const filtered: TrendResult = {
+      ...example(), limit: 1, total_snapshots: 1, snapshots: [proxy],
+    };
+    expect(parseTrendResult(filtered, selection).snapshots[0].previous_snapshot_as_of).toBe("2026-10-06");
+    expect(parseTrendResult(filtered, selection).snapshots[0].removed_members).toBe(1);
+    const invalidStatus = { ...filtered, snapshots: [example().snapshots[1]] };
+    expect(() => parseTrendResult(invalidStatus, selection)).toThrow();
+    expect(() => validateTrendQuery({ ...selection, evidenceStatus: "fictional" as TrendPoint["evidence_status"] }))
+      .toThrow();
+
+    // Filtered page two is evaluated relative to its real preceding snapshot.
+    const second: TrendQuery = { ...query, limit: 1, offset: 1, evidenceStatus: "verified_snapshot" };
+    const selected: TrendResult = {
+      ...example(), limit: 1, offset: 1, total_snapshots: 2,
+      snapshots: [example().snapshots[1]],
+    };
+    expect(parseTrendResult(selected, second).snapshots[0].previous_snapshot_as_of).toBe("2026-10-01");
+  });
+
+  it("passes evidence status through browser queries and managed native IPC", async () => {
+    const selection: TrendQuery = { ...query, limit: 1, evidenceStatus: "proxy_only" };
+    const filtered: TrendResult = { ...example(), limit: 1, total_snapshots: 1, snapshots: [example().snapshots[2]] };
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => filtered });
+    vi.stubGlobal("fetch", fetcher);
+    expect((await fetchMembershipTrend(selection)).total_snapshots).toBe(1);
+    expect(fetcher.mock.calls[0][0]).toContain("evidence_status=proxy_only");
+
+    native.enabled = true;
+    native.invoke.mockResolvedValue(filtered);
+    expect((await fetchMembershipTrend(selection)).snapshots).toHaveLength(1);
+    expect(native.invoke).toHaveBeenCalledWith("index_membership_trend", {
+      code: "SP500", fromAsOf: query.fromAsOf, toAsOf: query.toAsOf,
+      limit: 1, offset: 0, evidenceStatus: "proxy_only",
+    });
   });
 });

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLocale } from "./localization";
+import { LocalDataTable } from "./components/TablePagination";
 import { MarketDatePicker } from "./components/MarketDatePicker";
 import { INDEX_CODES, type IndexCatalogRecord, type IndexCode } from "./index-history-api";
 import {
@@ -166,7 +167,7 @@ export function IndexBasketPanel({ catalog, catalogError }: {
     });
     return () => { generation.current++; };
   }, [expanded, codes.join(","), start, end, window, qualityPolicy, revision, bounds?.first, bounds?.last]);
-  const shown = result?.points.slice(-20).reverse() ?? [];
+  const shown = result ? [...result.points].reverse() : [];
   const format = (value: string | null) => value === null ? "—" :
     new Intl.NumberFormat(language, { maximumFractionDigits: 5 }).format(Number(value));
   return <Card>
@@ -242,19 +243,22 @@ export function IndexBasketPanel({ catalog, catalogError }: {
             variant={metric === name ? "secondary" : "ghost"} onClick={() => setMetric(name)}>{t(name)}</Button>)}
         </div>
         <BasketChart result={result} metric={metric} />
+        <LocalDataTable key={codes.join(",") + "|" + start + "|" + end + "|" + metric} rows={shown}
+          label={t("Multi-index comparison")}
+          searchable={row => [row.session_date, ...codes.map(code => basketMetricCell(result, metric, row.session_date, code))].join(" ")}>{visible =>
         <div className="max-h-[360px] overflow-auto rounded-md border border-border">
           <table className="w-full border-collapse text-xs tabular-nums">
-            <caption className="px-2 py-2 text-left text-muted-foreground">{t("Latest 20 common-session rows, matching chart calculations")}</caption>
+            <caption className="px-2 py-2 text-left text-muted-foreground">{t("Paginated common-session rows, matching chart calculations")}</caption>
             <thead className="sticky top-0 bg-muted">
               <tr><th className="p-2 text-left" scope="col">{t("Session date")}</th>
                 {codes.map(code => <th key={code} className="p-2 text-right" scope="col">{code} · {t(metric)}</th>)}</tr>
             </thead>
-            <tbody>{shown.map(item => <tr key={item.session_date} className="border-t border-border">
+            <tbody>{visible.map(item => <tr key={item.session_date} className="border-t border-border">
               <th scope="row" className="p-2 text-left font-normal">{item.session_date}</th>
               {codes.map(code => <td key={code} className="p-2 text-right">{format(basketMetricCell(result, metric, item.session_date, code))}</td>)}
             </tr>)}</tbody>
           </table>
-        </div>
+        </div>}</LocalDataTable>
         <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
           <p>{t("Calculation version")}: {result.calculation_version}</p>
           <p>{t("Quality status")}: {result.quality.status}</p>

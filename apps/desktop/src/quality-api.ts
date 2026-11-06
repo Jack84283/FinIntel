@@ -136,8 +136,10 @@ export const fetchQualityFindings = (filters: {
   "findings", Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== undefined && value !== "")) as Record<string, string | number>,
 );
 export const fetchFindingHistory = (id: number) => queryQuality<FindingHistory>("history", {}, String(id));
-export const fetchQualityCorrections = (code: string, limit = 50, offset = 0) =>
-  queryQuality<QualityPage<Correction>>("corrections", { code, limit, offset });
+export const fetchQualityCorrections = (code: string, limit = 50, offset = 0, q = "") =>
+  queryQuality<QualityPage<Correction>>("corrections", {
+    code, limit, offset, ...(q.trim() ? { q: q.trim() } : {}),
+  });
 export const fetchCorrection = (id: string) => queryQuality<Correction>("correction", {}, id);
 export const fetchCorrectionPreview = (id: string) => queryQuality<CorrectionPreview>("preview", {}, id);
 export const fetchCorporateActions = (code: string) => queryQuality<CorporateActions>("corporate-actions", { code });

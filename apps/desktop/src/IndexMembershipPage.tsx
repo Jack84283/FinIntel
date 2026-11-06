@@ -1,4 +1,5 @@
 import { PageHeader } from "./PageHeader";
+import { LocalDataTable } from "./components/TablePagination";
 import { useLocale } from "./localization";
 import { useNotify } from "./notifications";
 import { MarketDatePicker } from "./components/MarketDatePicker";
@@ -342,7 +343,10 @@ export function IndexMembershipPage() {
             <p className="py-6 text-sm text-muted-foreground">{t("No securities match this filter.")}</p>
           )}
           {state === "ready" && snapshot && snapshot.items.length > 0 && (
-            <div className="overflow-x-auto rounded-md border border-border">
+            <LocalDataTable key={selected + "|" + asOf + "|" + search}
+              rows={snapshot.items} label={t("Constituents")}
+              searchable={item => [item.symbol, item.name, item.asset_type, ...item.member_indexes].join(" ")}>
+              {visible => <div className="overflow-x-auto rounded-md border border-border">
               <table className="w-full min-w-[650px] text-left text-xs">
                 <thead className="bg-muted text-muted-foreground">
                   <tr><th scope="col" className="px-3 py-2">{t("Ticker")}</th>
@@ -350,7 +354,7 @@ export function IndexMembershipPage() {
                     <th scope="col" className="px-3 py-2">{t("Type")}</th>
                     <th scope="col" className="px-3 py-2">{t("Indexes")}</th></tr>
                 </thead>
-                <tbody>{snapshot.items.map(item => (
+                <tbody>{visible.map(item => (
                   <tr key={item.symbol} className="border-t border-border">
                     <td className="px-3 py-2 font-semibold">{item.symbol}</td>
                     <td className="px-3 py-2">{item.name}</td>
@@ -363,11 +367,11 @@ export function IndexMembershipPage() {
                   </tr>
                 ))}</tbody>
               </table>
-            </div>
+            </div>}</LocalDataTable>
           )}
           {state === "ready" && snapshot?.snapshot_as_of && (
             <p className="text-xs text-muted-foreground" role="status">
-              {t("Showing all")} {snapshot.total.toLocaleString()} {t("matching securities")}
+              {snapshot.total.toLocaleString()} {t("matching securities")}
               {search ? t(" for the current filter") : ""}.
             </p>
           )}
