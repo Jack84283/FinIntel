@@ -1,3 +1,5 @@
+mod model_jobs;
+
 use std::sync::{atomic::{AtomicBool, AtomicU16, Ordering}, Mutex, OnceLock};
 use std::time::Duration;
 use tauri::Manager;
@@ -1075,7 +1077,7 @@ async fn model_jobs_create(
     {
         return Err("Invalid local model-job request.".into());
     }
-    model_jobs_write("/api/v1/models/jobs", Some(serde_json::json!({
+    let payload = model_jobs_write("/api/v1/models/jobs", Some(serde_json::json!({
         "model_id": "builtin.sma_crossover",
         "model_version": "1.0.0",
         "code": code,
@@ -1084,7 +1086,8 @@ async fn model_jobs_create(
         "quality_policy": quality_policy,
         "parameters": {"fast_window": fast_window, "slow_window": slow_window},
         "expected_snapshot_sha256": expected_snapshot,
-    }))).await
+    }))).await?;
+    model_jobs::validate_summary(payload)
 }
 
 #[tauri::command]
@@ -1092,9 +1095,10 @@ async fn model_jobs_list(limit: u8, offset: u32) -> Result<serde_json::Value, St
     if backend_token().is_empty() || limit == 0 || limit > 100 || offset > 10_000 {
         return Err("Invalid managed model-job pagination.".into());
     }
-    read_backend("/api/v1/models/jobs", &[
+    let payload = read_backend("/api/v1/models/jobs", &[
         ("limit", limit.to_string()), ("offset", offset.to_string()),
-    ]).await
+    ]).await?;
+    model_jobs::validate_list(payload)
 }
 
 #[tauri::command]
@@ -1102,9 +1106,10 @@ async fn model_jobs_get(job_id: String, include_result: bool) -> Result<serde_js
     if backend_token().is_empty() || !valid_model_job_id(&job_id) {
         return Err("Invalid managed model-job identifier.".into());
     }
-    read_backend(&format!("/api/v1/models/jobs/{job_id}"), &[
+    let payload = read_backend(&format!("/api/v1/models/jobs/{job_id}"), &[
         ("include_result", include_result.to_string()),
-    ]).await
+    ]).await?;
+    model_jobs::validate_detail(payload, include_result)
 }
 
 #[tauri::command]
@@ -1112,7 +1117,8 @@ async fn model_jobs_cancel(job_id: String) -> Result<serde_json::Value, String> 
     if !valid_model_job_id(&job_id) {
         return Err("Invalid local model-job identifier.".into());
     }
-    model_jobs_write(&format!("/api/v1/models/jobs/{job_id}/cancel"), None).await
+    let payload = model_jobs_write(&format!("/api/v1/models/jobs/{job_id}/cancel"), None).await?;
+    model_jobs::validate_cancel(payload)
 }
 
 #[tauri::command]
@@ -1120,7 +1126,8 @@ async fn model_jobs_retry(job_id: String) -> Result<serde_json::Value, String> {
     if !valid_model_job_id(&job_id) {
         return Err("Invalid local model-job identifier.".into());
     }
-    model_jobs_write(&format!("/api/v1/models/jobs/{job_id}/retry"), None).await
+    let payload = model_jobs_write(&format!("/api/v1/models/jobs/{job_id}/retry"), None).await?;
+    model_jobs::validate_summary(payload)
 }
 
 /// Read-only, bounded multi-index query with fixed local FRED series.
