@@ -46,7 +46,7 @@ describe("independent desktop navigation and page headers", () => {
 
   it("starts the sticky desktop page header flush against the scroll pane top", () => {
     const source = readFileSync(join(import.meta.dirname, "App.tsx"), "utf8");
-    const main = source.match(/<main\\b[^>]*>/)?.[0] ?? "";
+    const main = source.match(/<main\b[^>]*>/)?.[0] ?? "";
     expect(main).toContain("py-4");
     expect(main).toContain("lg:pt-0 lg:pb-5");
     expect(main).not.toContain("lg:py-5");
