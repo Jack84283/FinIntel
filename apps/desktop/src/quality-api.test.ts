@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   exportQualityCsv, exportQualityJson, redactedEvidence, fetchQualityFindings,
-  fetchQualityOverview, type QualityFinding, type QualityOverview,
+  fetchQualityOverview, fetchQualityCorrections, type QualityFinding, type QualityOverview,
 } from "./quality-api";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -87,5 +87,23 @@ describe("Data Quality local API routing", () => {
       "/api/v1/quality/overview?code=SP500", { cache: "no-store" },
     );
     expect((fetch as ReturnType<typeof vi.fn>).mock.calls[1][0]).toContain("offset=20");
+  });
+});
+
+
+describe("Global correction proposal search routing", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("forwards a bounded filter with the requested server offset", async () => {
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true, json: async () => ({ items: [], total: 3, limit: 10, offset: 10 }),
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const results = await fetchQualityCorrections("SP500", 10, 10, "  fred  ");
+    expect(results.total).toBe(3);
+    expect(fetcher.mock.calls[0][0]).toContain(
+      "/api/v1/quality/corrections?code=SP500&limit=10&offset=10&q=fred",
+    );
+    await fetchQualityCorrections("SP500", 10, 0, "");
+    expect(fetcher.mock.calls[1][0]).not.toContain("&q=");
   });
 });
