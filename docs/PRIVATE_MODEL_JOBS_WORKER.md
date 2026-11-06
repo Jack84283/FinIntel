@@ -23,6 +23,8 @@ backtest, a cloud service, a proprietary-code loader, or a desktop job dashboard
 - Only the owning supervisor can recover interrupted jobs. It holds a
   cross-process OS file lock for startup reconciliation, queue polling and
   child lifetime. A second sidecar cannot claim/recover the same jobs.
+  Packaged Python children monitor their PyInstaller launcher's lifetime and
+  terminate promptly if the launcher is killed, including on Windows.
 - Exactly one model subprocess is launched at a time. The existing 2,000-row
   bound, 32 active-job limit, three-attempt limit and 4 MiB retained-result cap
   remain enforced. A worker receives a 90-second wall-clock limit; cancellation
@@ -30,7 +32,8 @@ backtest, a cloud service, a proprietary-code loader, or a desktop job dashboard
 - Linux restricts child virtual address space to 2 GiB with RLIMIT_AS.
   Windows assigns the process to an OS Job Object with a 2 GiB committed-memory
   ceiling and kill-on-job-close, failing closed if assignment is unavailable.
-  macOS polls the child's resident footprint with /bin/ps once per second and
+  macOS polls the packaged launcher and all descendant worker processes' combined
+  resident footprint with /bin/ps once per second and
   terminates it above 2 GiB or if monitoring fails. macOS polling is **not a
   strict kernel-enforced limit**; short-lived spikes between polls are possible.
   The 90-second timeout and 2,000-observation cap apply to all platforms.
