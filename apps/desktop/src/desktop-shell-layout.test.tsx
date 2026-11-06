@@ -32,14 +32,14 @@ describe("independent desktop navigation and page headers", () => {
     expect(app).toContain("[screen]");
   });
 
-  it("makes daily Data Integrity and guidance span the full row below Daily Acquisition", () => {
+  it("keeps full-width Daily guidance when stacked and the historical wide-screen columns", () => {
     const daily = renderToStaticMarkup(
       <DataAcquisitionPage mode="daily" onViewMarket={() => undefined} />,
     );
     const history = renderToStaticMarkup(
       <DataAcquisitionPage mode="history" onViewMarket={() => undefined} />,
     );
-    expect(daily).toContain('class="grid min-w-0 items-start gap-2 grid-cols-1"');
+    expect(daily).toContain('class="grid min-w-0 items-start gap-2 2xl:grid-cols-[minmax(0,1fr)_300px]"');
     expect(daily).toContain('class="grid min-w-0 gap-2 grid-cols-1" aria-label="Acquisition guidance"');
     expect(daily).toContain("Data integrity");
     expect(history).toContain("2xl:grid-cols-[minmax(0,1fr)_300px]");
