@@ -156,12 +156,23 @@ def list_corrections(
         search = (q or "").strip()
         if search:
             # Literal substring matching, not SQL wildcards or interpolated SQL.
-            pattern = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            clauses.append("(" + " OR ".join(
-                f"{column} LIKE ? ESCAPE '\\'" for column in (
-                    "session_date", "provider", "state", "source_close", "proposed_close"
+            pattern = (
+                "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            )
+            clauses.append(
+                "("
+                + " OR ".join(
+                    f"{column} LIKE ? ESCAPE '\\'"
+                    for column in (
+                        "session_date",
+                        "provider",
+                        "state",
+                        "source_close",
+                        "proposed_close",
+                    )
                 )
-            ) + ")")
+                + ")"
+            )
             values.extend([pattern] * 5)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         total = conn.execute("SELECT COUNT(*) FROM quality_corrections" + where, values).fetchone()[
