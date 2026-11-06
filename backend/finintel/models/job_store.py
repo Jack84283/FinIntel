@@ -253,7 +253,9 @@ class ModelJobLedger:
             raise ModelJobStoreError("Stored model-job result failed integrity checks")
         try:
             result = ModelResearchResult.model_validate_json(raw)
-            original = ModelJobRequest.model_validate_json(row["request_json"]).model_dump(mode="json")
+            original = ModelJobRequest.model_validate_json(row["request_json"]).model_dump(
+                mode="json"
+            )
             lineage = result.lineage
             points = [point.model_dump() for point in result.points]
             identity = {
