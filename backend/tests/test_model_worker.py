@@ -405,12 +405,12 @@ def test_idle_supervisor_does_not_open_or_create_lock(local_storage):
 
 def test_supervisor_lazily_takes_ownership_and_recovers_running_job(local_storage):
     _, jobs_db = local_storage
-    owner = job_worker.ModelJobSupervisor(ModelJobLedger(jobs_db))
+    ledger = ModelJobLedger(jobs_db)
+    identifier = ledger.enqueue(request("a" * 64))["id"]
+    assert ledger.claim_next() is not None
+    owner = job_worker.ModelJobSupervisor(ledger)
     assert owner.start()
     try:
-        ledger = ModelJobLedger(jobs_db)
-        identifier = ledger.enqueue(request("a" * 64))["id"]
-        assert ledger.claim_next() is not None
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
             if ledger.get(identifier)["state"] == "failed":
