@@ -201,12 +201,28 @@ def main() -> None:
             _verify_packaged_worker(base, token, market_db)
             print("PASS: packaged sidecar startup, token rejection and shutdown")
         finally:
-            process.terminate()
-            try:
-                process.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=8)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            if os.name == "nt":
+                # The one-file launcher has a separate Python child process.
+                # Its launcher watchdog must close the worker lock on exit.
+                lock = Path(directory) / "finintel-model-jobs.sqlite3.worker.lock"
+                deadline = time.monotonic() + 10
+                while lock.exists():
+                    try:
+                        lock.unlink()
+                        break
+                    except PermissionError:
+                        if time.monotonic() >= deadline:
+                            raise AssertionError(
+                                "Packaged sidecar kept its model-worker lock after termination"
+                            ) from None
+                        time.sleep(0.1)
 
 
 if __name__ == "__main__":
