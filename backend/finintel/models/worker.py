@@ -320,12 +320,28 @@ class ModelJobSupervisor:
             # No exception or user-specific path reaches the API or frontend.
             return
 
+    @staticmethod
+    def _source_is_current(request: ModelJobRequest) -> bool:
+        """Final read-only source pin check immediately before ledger.complete."""
+        current = run_analytics(
+            kind="index",
+            code=request.code,
+            provider="fred",
+            start=request.start,
+            end=request.end,
+            window=20,
+            max_observations=2000,
+            quality_policy=request.quality_policy,
+            db=database_path(),
+        )
+        return current["source"]["snapshot_sha256"] == request.expected_snapshot_sha256
+
     def _execute(self, identifier: str, request: ModelJobRequest, attempt: int) -> None:
         process = None
         reason = "worker_failure"
         try:
             if self._stop.is_set():
-                reason = "interrupted"
+                self.ledger.fail(identifier, attempt, "interrupted")
                 return
             options = {
                 "stdin": subprocess.PIPE,
@@ -340,7 +356,7 @@ class ModelJobSupervisor:
                 options["creationflags"] = subprocess.CREATE_NO_WINDOW
             with self._process_lock:
                 if self._stop.is_set():
-                    reason = "interrupted"
+                    self.ledger.fail(identifier, attempt, "interrupted")
                     return
                 process = subprocess.Popen(_child_command(), **options)
                 self._process = process
@@ -381,6 +397,13 @@ class ModelJobSupervisor:
                     if not isinstance(response, dict):
                         break
                     if response.get("kind") == "completed":
+                        try:
+                            if not self._source_is_current(request):
+                                reason = "source_changed"
+                                break
+                        except (AnalyticsError, StorageError) as exc:
+                            reason = _safe_error(exc)
+                            break
                         if self.ledger.complete(identifier, attempt, response["result"]):
                             return
                     elif response.get("kind") == "error" and response.get("code") in {
