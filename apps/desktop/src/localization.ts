@@ -1038,6 +1038,7 @@ const additionalChinese: Readonly<Record<string, string>> = {
   "absolute difference": "绝对差异",
   "candidate only": "仅供审查",
   "Model Jobs": "模型任务",
+  "Finished": "结束时间",
   "FinIntel / Model Jobs": "FinIntel / 模型任务",
   "Run and inspect source-pinned local research jobs. No trades or backtests.": "执行和检查锁定本地数据快照的研究任务，不进行交易或回测。",
   "Queue built-in model": "提交内置模型任务",
