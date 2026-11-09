@@ -333,9 +333,7 @@ class ModelJobLedger:
         finally:
             conn.close()
 
-    def list(
-        self, *, limit: int = 20, offset: int = 0, status: str | None = None
-    ) -> dict:
+    def list(self, *, limit: int = 20, offset: int = 0, status: str | None = None) -> dict:
         if not 1 <= limit <= MAX_LIST_LIMIT or not 0 <= offset <= 10_000:
             raise ModelJobStoreError("Invalid model-job pagination")
         if status not in {
@@ -362,11 +360,10 @@ class ModelJobLedger:
         if conn is None:
             return {"total": 0, "items": []}
         try:
-            total = conn.execute(
-                "SELECT COUNT(*) FROM model_jobs" + where, params
-            ).fetchone()[0]
+            total = conn.execute("SELECT COUNT(*) FROM model_jobs" + where, params).fetchone()[0]
             items = conn.execute(
-                "SELECT * FROM model_jobs" + where
+                "SELECT * FROM model_jobs"
+                + where
                 + " ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",
                 (*params, limit, offset),
             ).fetchall()
