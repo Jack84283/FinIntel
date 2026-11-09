@@ -25,6 +25,7 @@ describe("Preferences layout", () => {
     expect(leftBackup).toBeLessThan(rightBackend);
     expect(rightBackend).toBeLessThan(rightHistorical);
     expect(rightHistorical).toBeLessThan(rightPrivacy);
-    expect(markup.match(/flex min-w-0 flex-col gap-3/g)).toHaveLength(2);
+    expect(markup).toContain('class="flex min-w-0 flex-col gap-3"><div data-slot="card"');
+    expect(markup).toContain('class="flex min-w-0 flex-col gap-3" aria-label="Workspace information"');
   });
 });
