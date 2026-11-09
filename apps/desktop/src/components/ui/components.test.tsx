@@ -20,6 +20,16 @@ describe("source-owned shadcn/ui primitives", () => {
     expect(markup).toContain("Local API");
   });
 
+
+  it("uses a 12px vertical card gap while allowing local overrides", () => {
+    const regular = renderToStaticMarkup(<Card><CardHeader>Header</CardHeader><CardContent>Content</CardContent></Card>);
+    const compact = renderToStaticMarkup(<Card className="gap-2">Compact</Card>);
+    expect(regular).toMatch(/data-slot="card"[^>]*class="[^"]*gap-3/);
+    expect(regular).not.toContain("gap-5");
+    expect(compact).toMatch(/data-slot="card"[^>]*class="[^"]*gap-2/);
+    expect(compact).not.toContain("gap-3");
+  });
+
   it("renders a Base UI button with its event-safe button semantics", () => {
     const markup = renderToStaticMarkup(<Button type="button" variant="secondary">Retry</Button>);
     expect(markup).toContain('data-slot="button"');
