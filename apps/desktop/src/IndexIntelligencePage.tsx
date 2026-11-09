@@ -167,7 +167,7 @@ export function IndexIntelligencePage() {
   const formatValue = (value: string | null) =>
     value === null ? "—" : new Intl.NumberFormat(language, { maximumFractionDigits: 5 }).format(Number(value));
   return (
-    <section aria-labelledby="index-intelligence-title" className="min-w-0 space-y-3">
+    <section aria-labelledby="index-intelligence-title" className="min-w-0 space-y-2">
       <PageHeader id="index-intelligence-title" breadcrumb={t("FinIntel / Index Intelligence")}
         title={t("Index Intelligence")}
         subtitle={t("Compare locally stored index levels using reproducible, source-backed calculations.")}
