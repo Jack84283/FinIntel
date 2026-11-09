@@ -69,9 +69,8 @@ def list_model_jobs(
     request: Request,
     limit: int = Query(default=10, ge=1, le=100),
     offset: int = Query(default=0, ge=0, le=10_000),
-    status: Literal[
-        "queued", "running", "cancel_requested", "completed", "failed", "cancelled"
-    ] | None = Query(default=None),
+    status: Literal["queued", "running", "cancel_requested", "completed", "failed", "cancelled"]
+    | None = Query(default=None),
 ) -> dict:
     _require_managed(request)
     try:
