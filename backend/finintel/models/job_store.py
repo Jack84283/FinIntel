@@ -339,8 +339,13 @@ class ModelJobLedger:
         if not 1 <= limit <= MAX_LIST_LIMIT or not 0 <= offset <= 10_000:
             raise ModelJobStoreError("Invalid model-job pagination")
         if status not in {
-            None, "queued", "running", "cancel_requested",
-            "completed", "failed", "cancelled",
+            None,
+            "queued",
+            "running",
+            "cancel_requested",
+            "completed",
+            "failed",
+            "cancelled",
         }:
             raise ModelJobStoreError("Invalid model-job status filter")
         # Filter before applying LIMIT so pagination and total reflect *all*
