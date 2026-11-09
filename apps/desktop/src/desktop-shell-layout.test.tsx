@@ -80,10 +80,46 @@ describe("independent desktop navigation and page headers", () => {
     const history = renderToStaticMarkup(
       <DataAcquisitionPage mode="history" onViewMarket={() => undefined} />,
     );
-    expect(daily).toContain('class="grid min-w-0 items-start gap-2 2xl:grid-cols-[minmax(0,1fr)_300px]"');
-    expect(daily).toContain('class="grid min-w-0 gap-2 grid-cols-1" aria-label="Acquisition guidance"');
+    expect(daily).toContain('class="grid min-w-0 items-start gap-x-2 gap-y-3 2xl:grid-cols-[minmax(0,1fr)_300px]"');
+    expect(daily).toContain('class="grid min-w-0 gap-x-2 gap-y-3 grid-cols-1" aria-label="Acquisition guidance"');
     expect(daily).toContain("Data integrity");
     expect(history).toContain("2xl:grid-cols-[minmax(0,1fr)_300px]");
     expect(history).toContain("sm:grid-cols-2 2xl:grid-cols-1");
   });
+
+  it("keeps 12px vertical card spacing across pages without changing card interiors", () => {
+    const pages: Array<[string, string]> = [
+      ["MarketExplorer.tsx", 'className="space-y-3" aria-labelledby="markets-title"'],
+      ["DataAcquisitionPage.tsx", 'className="min-w-0 space-y-3" aria-labelledby="acquisition-page-title"'],
+      ["DataQualityPage.tsx", 'className="min-w-0 space-y-3" aria-labelledby="data-quality-title"'],
+      ["DataValidationPage.tsx", 'className="space-y-3" aria-labelledby="validation-title"'],
+      ["IndexIntelligencePage.tsx", 'aria-labelledby="index-intelligence-title" className="min-w-0 space-y-3"'],
+      ["IndexMembershipPage.tsx", 'className="space-y-3" aria-labelledby="index-membership-title"'],
+      ["PreferencesPage.tsx", 'aria-labelledby="preferences-title" className="min-w-0 space-y-3"'],
+      ["ActionHistoryPage.tsx", 'className="space-y-3" aria-labelledby="action-history-title"'],
+    ];
+    for (const [file, pageStack] of pages) {
+      const source = readFileSync(join(import.meta.dirname, file), "utf8");
+      expect(source, file).toContain(pageStack);
+    }
+
+    const app = readFileSync(join(import.meta.dirname, "App.tsx"), "utf8");
+    expect(app).toContain('className="grid gap-x-2 gap-y-3 xl:grid-cols-2"');
+    expect(app).toContain('className="mt-3 max-w-[820px]"');
+    const market = readFileSync(join(import.meta.dirname, "MarketExplorer.tsx"), "utf8");
+    expect(market.match(/className="grid gap-x-2 gap-y-3 sm:grid-cols-2 xl:grid-cols-4"/g)).toHaveLength(2);
+    const intelligence = readFileSync(join(import.meta.dirname, "IndexIntelligencePage.tsx"), "utf8");
+    expect(intelligence).toContain('className="grid gap-x-2 gap-y-3 sm:grid-cols-2 xl:grid-cols-5"');
+
+    const acquisition = readFileSync(join(import.meta.dirname, "DataAcquisitionPage.tsx"), "utf8");
+    expect(acquisition).toContain('className="min-w-0 space-y-3">');
+    expect(acquisition).toContain('className={`grid min-w-0 gap-x-2 gap-y-3');
+    const preferences = readFileSync(join(import.meta.dirname, "PreferencesPage.tsx"), "utf8");
+    expect(preferences.match(/className="flex min-w-0 flex-col gap-3"/g)).toHaveLength(2);
+    expect(preferences).toContain('className="grid min-w-0 items-start gap-x-2 gap-y-3');
+
+    const card = readFileSync(join(import.meta.dirname, "components/ui/card.tsx"), "utf8");
+    expect(card).toContain("flex flex-col gap-5 rounded-xl");
+  });
+
 });

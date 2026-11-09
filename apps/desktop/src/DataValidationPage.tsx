@@ -84,7 +84,7 @@ export function DataValidationPage() {
     </details>;
   };
   return (
-    <section className="space-y-2" aria-labelledby="validation-title">
+    <section className="space-y-3" aria-labelledby="validation-title">
       <PageHeader id="validation-title" breadcrumb={t("FinIntel / Data & Operations")} title={t("Data Validation")} subtitle={t("Run local quality checks and record reviewable candidates; stored observations are never changed.")} />
       <Card>
         <CardHeader>

@@ -210,7 +210,7 @@ export function DataQualityPage() {
   }
 
   return (
-    <section className="min-w-0 space-y-2" aria-labelledby="data-quality-title">
+    <section className="min-w-0 space-y-3" aria-labelledby="data-quality-title">
       <PageHeader id="data-quality-title" breadcrumb={t("FinIntel / Data & Operations")}
         title={t("Data Quality")}
         subtitle={t("Investigate persisted findings and approve only explicit, reversible corrections. Source prices never change.")}
