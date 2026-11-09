@@ -56,7 +56,7 @@ export function ActionHistoryPage({ onViewMarket }: { onViewMarket: (selection?:
   }, [revision, searchTerm, provider, page]);
 
   return (
-    <section className="space-y-3" aria-labelledby="action-history-title">
+    <section className="space-y-2" aria-labelledby="action-history-title">
       <PageHeader id="action-history-title" breadcrumb={t("FinIntel / Data & Operations")} title={t("Action History")} subtitle={t("Audit successful local ingestion actions separately from market analysis and acquisition controls.")} actions={<Button type="button" variant="secondary" size="sm" disabled={state === "loading"} onClick={() => { setState("loading"); setRevision((value) => value + 1); }}>
           <RefreshCw aria-hidden="true" /> {t("Refresh")}
         </Button>} />

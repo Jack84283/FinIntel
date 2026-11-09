@@ -133,7 +133,7 @@ export default function App() {
         ) : screen !== "overview" ? (
           <section aria-labelledby="placeholder-title">
             <PageHeader id="placeholder-title" breadcrumb={`FinIntel / ${t(placeholders[screen]!.title as TranslationKey)}`} title={t(placeholders[screen]!.title as TranslationKey)} subtitle={t(placeholders[screen]!.description as TranslationKey)} actions={<Badge variant="outline">{t("Not implemented")}</Badge>} />
-            <Card className="mt-3 max-w-[820px]">
+            <Card className="mt-2 max-w-[820px]">
               <CardHeader><CardTitle>{t("Coming in a future milestone")}</CardTitle><CardDescription>{t(placeholders[screen]!.description as TranslationKey)}</CardDescription></CardHeader>
               <CardContent><p className="text-sm text-muted-foreground">{t("This is a navigation placeholder. No live data or actions are available on this page yet.")}</p></CardContent>
             </Card>
@@ -150,7 +150,7 @@ export default function App() {
               <Button type="button" className="mt-5" onClick={() => openMarkets()}><BarChart3 aria-hidden="true" /> {t("Open Market Data Explorer")}</Button>
               <Button type="button" variant="secondary" className="mt-5 ml-2" onClick={() => setScreen("data-acquisition")}><Download aria-hidden="true" /> {t("Open Data Acquisition")}</Button>
             </section>
-            <div className="grid gap-x-2 gap-y-3 xl:grid-cols-2">
+            <div className="grid gap-2 xl:grid-cols-2">
               <Card aria-labelledby="backend-title">
                 <CardHeader>
                   <h3 id="backend-title"><CardTitle>{t("Python backend")}</CardTitle></h3>

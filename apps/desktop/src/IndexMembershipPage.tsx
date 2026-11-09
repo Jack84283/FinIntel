@@ -178,7 +178,7 @@ export function IndexMembershipPage() {
 
   const selectedMeta = catalog.find(item => item.code === selected);
   return (
-    <section className="space-y-3" aria-labelledby="index-membership-title">
+    <section className="space-y-2" aria-labelledby="index-membership-title">
       <PageHeader
         id="index-membership-title"
         breadcrumb={t("FinIntel / Data & Operations")}

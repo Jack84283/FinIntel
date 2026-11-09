@@ -167,7 +167,7 @@ export function IndexIntelligencePage() {
   const formatValue = (value: string | null) =>
     value === null ? "—" : new Intl.NumberFormat(language, { maximumFractionDigits: 5 }).format(Number(value));
   return (
-    <section aria-labelledby="index-intelligence-title" className="min-w-0 space-y-3">
+    <section aria-labelledby="index-intelligence-title" className="min-w-0 space-y-2">
       <PageHeader id="index-intelligence-title" breadcrumb={t("FinIntel / Index Intelligence")}
         title={t("Index Intelligence")}
         subtitle={t("Compare locally stored index levels using reproducible, source-backed calculations.")}
@@ -261,7 +261,7 @@ export function IndexIntelligencePage() {
         {result.unverified_data && <p role="status" className="text-sm text-muted-foreground">
           {t("Unverified observations are displayed for research only. Candidate findings are not confirmed defects.")}
         </p>}
-        <div className="grid gap-x-2 gap-y-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
           <Card><CardHeader className="pb-1"><CardDescription>{t("Observations")}</CardDescription>
             <CardTitle className="text-xl tabular-nums">{counts.toLocaleString(language)}</CardTitle></CardHeader></Card>
           <Card><CardHeader className="pb-1"><CardDescription>{t("Last observed session")}</CardDescription>
