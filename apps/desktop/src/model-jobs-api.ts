@@ -106,7 +106,7 @@ export async function getModelJob(id: string): Promise<ModelJobSummary> {
 }
 export async function getModelJobResult(id: string): Promise<ModelJobWithResult> {
   if (!identifier(id)) throw new Error("Invalid local model job identifier.");
-  const value = object(await nativeInvoke("model_job_detail", {
+  const value = object(await nativeInvoke("model_jobs_get", {
     jobId: id, includeResult: true,
   }));
   const job = parseModelJob(value);
