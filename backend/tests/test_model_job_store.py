@@ -118,6 +118,28 @@ def test_create_queue_claim_complete_and_read_only_history(tmp_path):
     assert ledger.claim_next() is None
 
 
+def test_filtered_job_history_counts_all_matches_before_pagination(tmp_path):
+    ledger = ModelJobLedger(tmp_path / "jobs.sqlite")
+    running = ledger.enqueue(request())["id"]
+    ledger.claim_next()
+    assert ledger.list(status="running")["items"][0]["id"] == running
+    assert ledger.cancel(running) == "cancel_requested"
+    cancelled = ledger.enqueue(request())["id"]
+    assert ledger.cancel(cancelled) == "cancelled"
+    queued = [ledger.enqueue(request())["id"] for _ in range(12)]
+    assert ledger.list(limit=10, status="queued")["total"] == 12
+    assert len(ledger.list(limit=10, status="queued")["items"]) == 10
+    assert len(ledger.list(limit=10, offset=10, status="queued")["items"]) == 2
+    assert ledger.list(status="cancel_requested")["items"][0]["id"] == running
+    assert ledger.list(status="running") == {"total": 0, "items": []}
+    assert ledger.list(status="cancelled")["items"][0]["id"] == cancelled
+    assert ledger.list(status="completed") == {"total": 0, "items": []}
+    assert ledger.list()["total"] == 14
+    assert queued[-1] in [x["id"] for x in ledger.list(limit=20, status="queued")["items"]]
+    with pytest.raises(ModelJobStoreError, match="status"):
+        ledger.list(status="all; DROP TABLE model_jobs")
+
+
 def test_cancel_queued_or_running_is_cooperative_and_blocks_late_completion(tmp_path):
     ledger = ModelJobLedger(tmp_path / "jobs.sqlite")
     queued = ledger.enqueue(request())["id"]

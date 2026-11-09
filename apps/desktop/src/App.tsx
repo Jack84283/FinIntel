@@ -16,10 +16,11 @@ import { DataValidationPage } from "./DataValidationPage";
 import { DataQualityPage } from "./DataQualityPage";
 import { IndexMembershipPage } from "./IndexMembershipPage";
 import { IndexIntelligencePage } from "./IndexIntelligencePage";
+import { ModelJobsPage } from "./ModelJobsPage";
 import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
 import { resolveMarketSelection } from "./market-selection";
 
-type Screen = "overview" | "market" | "index-intelligence" | "intelligence" | "data-acquisition" | "daily-acquisition" | "data-validation" | "data-quality" | "index-membership" | "action-history" | "portfolio" | "settings";
+type Screen = "overview" | "market" | "index-intelligence" | "model-jobs" | "intelligence" | "data-acquisition" | "daily-acquisition" | "data-validation" | "data-quality" | "index-membership" | "action-history" | "portfolio" | "settings";
 const groups = [
   { heading: "Workspace", items: [
     { id: "overview", label: "Overview", icon: Activity },
@@ -33,6 +34,7 @@ const groups = [
     { id: "data-validation", label: "Data Validation", icon: ShieldCheck },
     { id: "data-quality", label: "Data Quality", icon: ShieldCheck },
     { id: "index-membership", label: "Index Constituents", icon: ListFilter },
+    { id: "model-jobs", label: "Model Jobs", icon: BrainCircuit },
     { id: "action-history", label: "Action History", icon: History },
   ] },
   { heading: "Workspace & Preferences", items: [
@@ -111,6 +113,8 @@ export default function App() {
           />
         ) : screen === "index-intelligence" ? (
           <IndexIntelligencePage />
+        ) : screen === "model-jobs" ? (
+          <ModelJobsPage />
         ) : screen === "data-acquisition" ? (
           <DataAcquisitionPage onViewMarket={openMarkets} mode="history" />
         ) : screen === "daily-acquisition" ? (

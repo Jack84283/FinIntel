@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import ValidationError
@@ -68,10 +69,12 @@ def list_model_jobs(
     request: Request,
     limit: int = Query(default=10, ge=1, le=100),
     offset: int = Query(default=0, ge=0, le=10_000),
+    status: Literal["queued", "running", "cancel_requested", "completed", "failed", "cancelled"]
+    | None = Query(default=None),
 ) -> dict:
     _require_managed(request)
     try:
-        return ModelJobLedger().list(limit=limit, offset=offset)
+        return ModelJobLedger().list(limit=limit, offset=offset, status=status)
     except ModelJobStoreError as exc:
         raise _storage_failure(exc) from exc
 
