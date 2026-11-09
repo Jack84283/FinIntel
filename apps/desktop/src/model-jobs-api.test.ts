@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  cancelModelJob, getModelJob, listModelJobs, parseModelJob,
+  cancelModelJob, getModelJob, getModelJobResult, listModelJobs, parseModelJob,
   queueModelJob, retryModelJob,
 } from "./model-jobs-api";
+import { canonicalModelSha256 } from "./model-research-integrity";
+import { type ModelResearchResult } from "./model-research-api";
 
 const native = vi.hoisted(() => ({ enabled: true, invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({
@@ -74,5 +76,74 @@ describe("fixed managed durable-model-job IPC", () => {
     await expect(retryModelJob("http://localhost:8765/evil")).rejects.toThrow();
     native.enabled = false;
     await expect(getModelJob(id)).rejects.toThrow("managed FinIntel desktop");
+  });
+});
+
+async function verifiedCompletedJob(): Promise<Record<string, unknown>> {
+  const points: ModelResearchResult["points"] = Array.from({ length: 25 }, (_, index) => ({
+    session_date: new Date(Date.UTC(2026, 8, index + 1)).toISOString().slice(0, 10),
+    close: "100",
+    fast_sma: index >= 4 ? "100" : null,
+    slow_sma: index >= 19 ? "100" : null,
+    signal_after_close: index >= 19 ? "flat" : null,
+  }));
+  const lineage: ModelResearchResult["lineage"] = {
+    model_id: "builtin.sma_crossover", model_version: "1.0.0",
+    implementation_revision: "sma-crossover-observed-close-v1",
+    parameters: { fast_window: 5, slow_window: 20 },
+    source_identity: {
+      instrument_kind: "index", code: "SP500", provider: "fred",
+      adjustment: "price_index", return_semantics: "price_index",
+      frequency: "daily", units: "index_points",
+    },
+    source_snapshot_sha256: "a".repeat(64),
+    analysis_calculation_version: "index-analytics-v2",
+    requested_start: "2026-09-01", requested_end: "2026-09-30",
+    first_observed_session: points[0].session_date,
+    last_observed_session: points.at(-1)!.session_date,
+    quality_policy: "allow_unverified", quality_status: "verified",
+    quality_verified: true, point_in_time_membership: "not_used",
+    dividends_included: false, corporate_action_adjustment: "none_index_price_level",
+  };
+  const output_sha256 = await canonicalModelSha256(points);
+  const result: ModelResearchResult = {
+    execution_contract: "model-research-evaluation-v1", lineage,
+    reproducibility_sha256: await canonicalModelSha256(lineage),
+    output_sha256, evaluated_at_utc: "2026-11-09T00:00:00+00:00",
+    status: "completed", observations: 25, points, quality_warning: null,
+    read_only: true, no_network: true, no_synthetic_sessions: true,
+    signal_after_close_only: true, backtest_validated: false, persistent_job: false,
+  };
+  return {
+    ...sample(), state: "completed", status: "completed",
+    attempts: 1, source_snapshot_sha256: lineage.source_snapshot_sha256,
+    output_sha256, result,
+  };
+}
+
+describe("completed model job result retrieval", () => {
+  it("uses registered model_jobs_get IPC and validates persisted result lineage", async () => {
+    const payload = await verifiedCompletedJob();
+    native.invoke.mockResolvedValue(payload);
+    const job = await getModelJobResult(id);
+    expect(native.invoke).toHaveBeenCalledExactlyOnceWith("model_jobs_get", {
+      jobId: id, includeResult: true,
+    });
+    expect(job.result.points).toHaveLength(25);
+    expect(job.result.lineage.source_snapshot_sha256).toBe("a".repeat(64));
+  });
+
+  it("refuses non-completed or corrupted results rather than exposing unverified output", async () => {
+    native.invoke.mockResolvedValue({ ...sample(), result: null });
+    await expect(getModelJobResult(id)).rejects.toThrow("no completed result");
+    const valid = await verifiedCompletedJob();
+    native.invoke.mockResolvedValue({ ...valid, output_sha256: "f".repeat(64) });
+    await expect(getModelJobResult(id)).rejects.toThrow("inconsistent");
+    native.invoke.mockResolvedValue({
+      ...valid,
+      result: { ...(valid.result as ModelResearchResult), points: [] },
+    });
+    await expect(getModelJobResult(id)).rejects.toThrow();
+    await expect(getModelJobResult("../private")).rejects.toThrow("identifier");
   });
 });
