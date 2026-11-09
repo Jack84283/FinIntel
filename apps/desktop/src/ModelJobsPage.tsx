@@ -278,7 +278,7 @@ export function ModelJobsPage() {
         {listError && <p role="alert" className="text-sm text-destructive">{t("Model job history unavailable.")} {t(listError)}</p>}
         {managed && !loading && !listError && items.length === 0 &&
           <p role="status" className="py-4 text-sm text-muted-foreground">{t("No matching model jobs.")}</p>}
-        {items.length > 0 && <div className="overflow-x-auto rounded-md border border-border">
+        {!loading && !listError && items.length > 0 && <div className="overflow-x-auto rounded-md border border-border">
           <table className="w-full min-w-[730px] text-left text-xs tabular-nums">
             <thead className="bg-muted text-muted-foreground"><tr>
               <th scope="col" className="p-2">{t("Created")}</th>
@@ -309,7 +309,7 @@ export function ModelJobsPage() {
             </tr>)}</tbody>
           </table>
         </div>}
-        <TablePager page={page} total={visibleTotal} disabled={!managed || loading}
+        <TablePager page={page} total={visibleTotal} disabled={!managed || loading || Boolean(listError)}
           onPageChange={value => { setPage(Math.min(value, 1000)); setLoading(true); }} />
         {total > visibleTotal && <p className="text-xs text-muted-foreground">
           {t("History is limited to the first 10,010 entries; narrow the status filter.")} ({total.toLocaleString(language)})
