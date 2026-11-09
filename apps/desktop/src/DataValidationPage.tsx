@@ -92,16 +92,18 @@ export function DataValidationPage() {
           <CardDescription>{t("Choose checks to run. Historical scans may take several minutes; Markets remains available.")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {options.map((option) => (
-            <label key={option.id} className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
-              <input type="checkbox" className="mt-1 size-4" checked={selected.includes(option.id)}
-                disabled={running}
-                onChange={(event) => setSelected((previous) =>
-                  event.target.checked ? [...previous, option.id] : previous.filter((id) => id !== option.id))} />
-              <span><span className="block text-sm font-medium">{t(option.label)}</span>
-                <span className="block text-xs text-muted-foreground">{t(option.detail)}</span></span>
-            </label>
-          ))}
+          <fieldset className="divide-y divide-border" aria-label={t("Validation checks")}>
+            {options.map((option) => (
+              <label key={option.id} className="flex cursor-pointer items-start gap-3 py-3 first:pt-0 last:pb-0">
+                <input type="checkbox" className="mt-1 size-4" checked={selected.includes(option.id)}
+                  disabled={running}
+                  onChange={(event) => setSelected((previous) =>
+                    event.target.checked ? [...previous, option.id] : previous.filter((id) => id !== option.id))} />
+                <span><span className="block text-sm font-medium">{t(option.label)}</span>
+                  <span className="block text-xs text-muted-foreground">{t(option.detail)}</span></span>
+              </label>
+            ))}
+          </fieldset>
           <Button onClick={() => { void run(); }} disabled={busy || running || selected.length === 0}>
             {running ? t("Validation running…") : busy ? t("Starting…") : t("Run selected checks")}
           </Button>
