@@ -25,6 +25,6 @@ describe("Preferences layout", () => {
     expect(leftBackup).toBeLessThan(rightBackend);
     expect(rightBackend).toBeLessThan(rightHistorical);
     expect(rightHistorical).toBeLessThan(rightPrivacy);
-    expect(markup).toContain("flex min-w-0 flex-col gap-2");
+    expect(markup.match(/flex min-w-0 flex-col gap-3/g)).toHaveLength(2);
   });
 });
