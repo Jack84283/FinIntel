@@ -146,15 +146,18 @@ export function ModelJobsPage() {
     setDetailsBusy(true);
     setDetailsError("");
     try {
-      if (job.state === "completed") {
-        const data = await getModelJobResult(job.id);
+      // Always read the latest ledger state. A queued/running row may have
+      // completed since it was listed; never use a stale row state to decide
+      // whether its independently verified result is retrievable.
+      const detail = await getModelJob(job.id);
+      if (request !== detailSerial.current) return;
+      setSelected(detail);
+      if (detail.state === "completed") {
+        const completed = await getModelJobResult(job.id);
         if (request === detailSerial.current) {
-          setSelected(data);
-          setResult(data.result);
+          setSelected(completed);
+          setResult(completed.result);
         }
-      } else {
-        const data = await getModelJob(job.id);
-        if (request === detailSerial.current) setSelected(data);
       }
     } catch (error) {
       if (request === detailSerial.current) setDetailsError(message(error));
@@ -323,10 +326,14 @@ export function ModelJobsPage() {
           <CardTitle>{t("Model job details")}</CardTitle>
           <CardDescription className="break-all">{selected.id}</CardDescription>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={() => {
-          detailSerial.current++;
-          setSelected(null); setResult(null); setDetailsError("");
-        }}>{t("Close details")}</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="secondary" size="sm" disabled={detailsBusy}
+            onClick={() => { void inspect(selected); }}>{t("Refresh details")}</Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => {
+            detailSerial.current++;
+            setSelected(null); setResult(null); setDetailsError("");
+          }}>{t("Close details")}</Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
         {detailsBusy && <p role="status" className="text-sm text-muted-foreground">{t("Loading model result…")}</p>}
