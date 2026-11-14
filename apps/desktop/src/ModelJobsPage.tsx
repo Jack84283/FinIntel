@@ -53,6 +53,19 @@ export function verifiedJobSnapshot(query: ModelResearchQuery, data: AnalyticsRe
   return data.source.snapshot_sha256;
 }
 
+/** Fetch current ledger status before deciding whether a completed result exists. */
+export async function fetchCurrentModelJobDetails(id: string): Promise<{
+  job: ModelJobSummary;
+  result: ModelResearchResult | null;
+}> {
+  const detail = await getModelJob(id);
+  if (detail.state === "completed") {
+    const completed = await getModelJobResult(id);
+    return { job: completed, result: completed.result };
+  }
+  return { job: detail, result: null };
+}
+
 export function ModelJobsPage() {
   const { t, language } = useLocale();
   const notify = useNotify();
@@ -146,19 +159,12 @@ export function ModelJobsPage() {
     setDetailsBusy(true);
     setDetailsError("");
     try {
-      // Always read the latest ledger state. A queued/running row may have
-      // completed since it was listed; never use a stale row state to decide
-      // whether its independently verified result is retrievable.
-      const detail = await getModelJob(job.id);
+      // Always read fresh durable status, independent of the selected table
+      // row. Keep response generation fencing across both native calls.
+      const details = await fetchCurrentModelJobDetails(job.id);
       if (request !== detailSerial.current) return;
-      setSelected(detail);
-      if (detail.state === "completed") {
-        const completed = await getModelJobResult(job.id);
-        if (request === detailSerial.current) {
-          setSelected(completed);
-          setResult(completed.result);
-        }
-      }
+      setSelected(details.job);
+      setResult(details.result);
     } catch (error) {
       if (request === detailSerial.current) setDetailsError(message(error));
     } finally {
