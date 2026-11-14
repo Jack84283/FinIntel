@@ -1064,6 +1064,7 @@ const additionalChinese: Readonly<Record<string, string>> = {
   "Model job queued for retry.": "模型任务已重新排队等待重试。",
   "Model job operation failed.": "模型任务操作失败。",
   "Model job details": "模型任务详情",
+  "Refresh details": "刷新任务详情",
   "Loading model result…": "正在加载模型结果…",
   "Verified model result unavailable.": "无法获取已核验的模型结果。",
   "Model error code": "模型错误代码",
