@@ -212,6 +212,81 @@ def test_requested_digest_with_missing_columns_is_not_success(tmp_path):
     assert all(d["status"] == "not_run" for d in report["source_digests"].values())
 
 
+
+def test_incomplete_v15_mandatory_query_retains_report_and_exits_nonzero(tmp_path):
+    copy = tmp_path / "incomplete-v15.sqlite3"
+    _fixture(copy)
+    # A matching version marker does not guarantee all mandatory query columns.
+    with sqlite3.connect(copy) as db:
+        db.execute("DROP TABLE data_quality_findings")
+        db.execute("CREATE TABLE data_quality_findings (id INTEGER, code TEXT)")
+        db.execute("INSERT INTO data_quality_findings VALUES (1, 'SP500')")
+    before = copy.read_bytes()
+    output = tmp_path / "incomplete-v15.json"
+
+    assert MODULE.main(["--inspect-db", str(copy), "--output", str(output)]) == 1
+    report = json.loads(output.read_text())
+    assert report["database"]["schema_version_matches"] is True
+    assert report["production_acceptance"] == "unverified"
+    queries = {query["id"]: query for query in report["bounded_queries"]}
+    assert queries["sp500_active_findings_recent"]["status"] == "not_run"
+    assert queries["sp500_active_findings_recent"]["reason"] == "schema_columns_missing"
+    assert queries["sp500_active_findings_recent"]["missing_columns"] == {
+        "data_quality_findings": ["superseded_at"]
+    }
+    assert queries["sp500_index_recent"]["status"] == "measured"
+    assert queries["single_equity_recent"]["status"] == "measured"
+    assert copy.read_bytes() == before
+
+
+@pytest.mark.parametrize("mandatory_status", ["failed", "not_run", "unexpected", None])
+def test_mandatory_query_not_measured_fails_closed(
+    tmp_path, monkeypatch, mandatory_status
+):
+    copy = tmp_path / "detached.sqlite3"
+    _fixture(copy)
+    before = copy.read_bytes()
+    original_measure = MODULE._measure
+
+    def substituted_measure(conn, label, sql, params, **kwargs):
+        if label == "sp500_active_findings_recent":
+            result = {"id": label, "reason": "synthetic_incomplete_measurement"}
+            if mandatory_status is not None:
+                result["status"] = mandatory_status
+            return result
+        return original_measure(conn, label, sql, params, **kwargs)
+
+    monkeypatch.setattr(MODULE, "_measure", substituted_measure)
+    output = tmp_path / "failed-mandatory-query.json"
+    assert MODULE.main(["--inspect-db", str(copy), "--output", str(output)]) == 1
+
+    report = json.loads(output.read_text())
+    assert report["production_acceptance"] == "unverified"
+    queries = {query["id"]: query for query in report["bounded_queries"]}
+    assert queries["sp500_active_findings_recent"].get("status") == mandatory_status
+    assert queries["sp500_index_recent"]["status"] == "measured"
+    assert queries["single_equity_recent"]["status"] == "measured"
+    assert copy.read_bytes() == before
+
+
+def test_unrequested_optional_checks_do_not_block_complete_mandatory_queries(tmp_path):
+    copy = tmp_path / "detached.sqlite3"
+    _fixture(copy)
+    before = copy.read_bytes()
+    output = tmp_path / "optional-not-requested.json"
+
+    assert MODULE.main(["--inspect-db", str(copy), "--output", str(output)]) == 0
+    report = json.loads(output.read_text())
+    assert all(query["status"] == "measured" for query in report["bounded_queries"])
+    assert report["checks"] == {
+        "sqlite_quick_check": "not_run",
+        "foreign_key_check": "not_run",
+    }
+    assert report["source_digests"] == {"status": "not_run"}
+    assert report["production_acceptance"] == "unverified"
+    assert copy.read_bytes() == before
+
+
 def test_direct_inspection_limits_and_hardlinks_are_refused(tmp_path):
     copy = tmp_path / "copy.sqlite3"
     _fixture(copy)
