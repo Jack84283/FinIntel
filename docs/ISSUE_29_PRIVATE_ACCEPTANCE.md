@@ -69,9 +69,13 @@ The script uses read-only SQLite immutable mode, refuses known active DB paths,
 rejects symlinks/sidecars and existing output files, and does not perform scans,
 migrations, restores, provider requests or source updates. Outputs are created with
 private permissions where supported. Exit 1 means a schema/version mismatch, missing core
-table, failed integrity/query check, or unavailable/failed requested source digest.
-The report is retained for investigation; exit 0 means collection succeeded, not
-production sign-off. `version_matches_structure_unverified` explicitly does not
+table, failed or incomplete mandatory bounded query, failed requested integrity
+check, or unavailable/failed requested source digest. All mandatory bounded queries
+must report `measured`; `failed`, `not_run`, missing or unknown query statuses
+are unsuccessful. Optional quick-check, foreign-key-check and source digests
+remain opt-in and do not fail solely because they were not requested.
+The report is retained for investigation; exit 0 means all mandatory bounded
+queries completed and no requested checks failed, not production sign-off. `version_matches_structure_unverified` explicitly does not
 certify the complete schema. Run `quality_acceptance.py --inspect-db` on the same
 detached copy for the separate required-column compatibility probe. Review the
 JSON **locally** before sharing.
