@@ -155,3 +155,78 @@ def test_source_digests_are_stable_and_do_not_export_raw_rows(tmp_path, monkeypa
     assert first["source_digests"]["daily_prices"]["rows_hashed"] == 1
     assert first["source_digests"]["index_daily_closes"]["rows_hashed"] == 1
     assert "private-price-1234" not in json.dumps(first)
+    # A broken source FK must not silently disappear from the streamed digest,
+    # even when the optional foreign-key check was not requested.
+    with sqlite3.connect(remapped) as db:
+        db.execute("UPDATE daily_prices SET series_id=999")
+    orphaned = MODULE.inspect(
+        remapped, repeats=1, sample=10, quick_check=False, foreign_keys=False, source_digests=True
+    )
+    assert orphaned["source_digests"]["daily_prices"]["status"] == "fail"
+    assert orphaned["source_digests"]["daily_prices"]["rows_hashed"] == 0
+
+
+@pytest.mark.parametrize(
+    "version,compatibility", [(14, "migration_required"), (16, "unsupported_version")]
+)
+def test_unsupported_schema_saves_evidence_but_exits_nonzero(tmp_path, version, compatibility):
+    copy = tmp_path / "copy.sqlite3"
+    _fixture(copy)
+    with sqlite3.connect(copy) as db:
+        db.execute(f"PRAGMA user_version={version}")
+    before = copy.read_bytes()
+    output = tmp_path / "evidence.json"
+    assert MODULE.main(["--inspect-db", str(copy), "--output", str(output)]) == 1
+    report = json.loads(output.read_text())
+    assert report["database"]["schema_compatibility"] == compatibility
+    assert report["production_acceptance"] == "unverified"
+    assert copy.read_bytes() == before
+
+
+def test_failed_integrity_is_not_successful_acceptance(tmp_path):
+    copy = tmp_path / "copy.sqlite3"
+    _fixture(copy)
+    with sqlite3.connect(copy) as db:
+        db.execute("CREATE TABLE orphan (series_id INTEGER REFERENCES series(id))")
+        db.execute("INSERT INTO orphan VALUES (999)")
+    before = copy.read_bytes()
+    output = tmp_path / "evidence.json"
+    assert (
+        MODULE.main(["--inspect-db", str(copy), "--output", str(output), "--foreign-key-check"])
+        == 1
+    )
+    report = json.loads(output.read_text())
+    assert report["checks"]["foreign_key_check"] == "fail"
+    assert "orphan" not in output.read_text()
+    assert copy.read_bytes() == before
+
+
+def test_requested_digest_with_missing_columns_is_not_success(tmp_path):
+    copy = tmp_path / "copy.sqlite3"
+    _fixture(copy)
+    output = tmp_path / "evidence.json"
+    assert (
+        MODULE.main(["--inspect-db", str(copy), "--output", str(output), "--source-digests"]) == 1
+    )
+    report = json.loads(output.read_text())
+    assert all(d["status"] == "not_run" for d in report["source_digests"].values())
+
+
+def test_direct_inspection_limits_and_hardlinks_are_refused(tmp_path):
+    copy = tmp_path / "copy.sqlite3"
+    _fixture(copy)
+    for repeats, sample in [(0, 1), (11, 1), (1, 0), (1, 501)]:
+        with pytest.raises(ValueError, match="bounds"):
+            MODULE.inspect(
+                copy, repeats=repeats, sample=sample, quick_check=False, foreign_keys=False
+            )
+    alias = tmp_path / "hardlink.sqlite3"
+    alias.hardlink_to(copy)
+    with pytest.raises(ValueError, match="hard link"):
+        MODULE.inspect(alias, repeats=1, sample=1, quick_check=False, foreign_keys=False)
+
+
+def test_schema_constant_tracks_backend_supported_version():
+    from finintel.storage.db import SCHEMA_VERSION
+
+    assert MODULE.EXPECTED_SCHEMA == SCHEMA_VERSION

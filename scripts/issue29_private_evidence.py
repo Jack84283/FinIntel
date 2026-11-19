@@ -42,10 +42,24 @@ def _detached_copy(path: Path) -> Path:
     if path.is_symlink() or not path.is_file():
         raise ValueError("Use an existing regular SQLite backup copy, not a symlink")
     actual = path.resolve()
+    if actual.stat().st_nlink != 1:
+        raise ValueError("Use a detached backup copy, not a hard link")
     active = Path(os.environ.get("FININTEL_DB_PATH", "data/finintel.sqlite3"))
     if actual in {
         active.expanduser().resolve(),
         Path("data/finintel.sqlite3").resolve(),
+        (
+            Path.home()
+            / "Library/Application Support/app.finintel.desktop/finintel.sqlite3"
+        ).resolve(),
+        (
+            Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
+            / "app.finintel.desktop/finintel.sqlite3"
+        ).resolve(),
+        (
+            Path(os.environ.get("APPDATA", str(Path.home() / "AppData/Roaming")))
+            / "app.finintel.desktop/finintel.sqlite3"
+        ).resolve(),
     }:
         raise ValueError("Refusing to inspect a configured or default active database")
     if any(
@@ -137,6 +151,8 @@ def inspect(
     source_digests: bool = False,
 ) -> dict:
     """Collect numeric-only evidence without writing to the inspected copy."""
+    if not 1 <= repeats <= MAX_REPEAT or not 1 <= sample <= MAX_SAMPLE:
+        raise ValueError("Inspection repeat/sample limits are out of bounds")
     source = _detached_copy(copy)
     initial = source.stat()
     starting = time.perf_counter()
@@ -253,7 +269,7 @@ def inspect(
                         digest.update(b"\n")
                         count += 1
                 digests["daily_prices"] = {
-                    "status": "computed",
+                    "status": "computed" if count == counts["daily_prices"] else "fail",
                     "sha256": digest.hexdigest(),
                     "rows_hashed": count,
                 }
@@ -332,7 +348,11 @@ def inspect(
             ),
         ]
     final = source.stat()
-    if (initial.st_size, initial.st_mtime_ns) != (final.st_size, final.st_mtime_ns):
+    if (initial.st_ino, initial.st_size, initial.st_mtime_ns) != (
+        final.st_ino,
+        final.st_size,
+        final.st_mtime_ns,
+    ):
         raise RuntimeError(
             "Detached database changed during inspection; discard evidence"
         )
@@ -354,6 +374,15 @@ def inspect(
             "schema_version": schema_version,
             "expected_schema_version": EXPECTED_SCHEMA,
             "schema_version_matches": schema_version == EXPECTED_SCHEMA,
+            "schema_compatibility": (
+                "migration_required"
+                if 1 <= schema_version < EXPECTED_SCHEMA
+                else "unsupported_version"
+                if schema_version != EXPECTED_SCHEMA
+                else "schema_incomplete"
+                if required - tables
+                else "version_matches_structure_unverified"
+            ),
             "file_size_bytes": initial.st_size,
             "missing_core_tables": sorted(required - tables),
             "counts": counts,
@@ -439,7 +468,22 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "Issue #29 private inspection written. Production acceptance remains unverified."
     )
-    return 0
+    # Successful evidence collection is not an integrity or schema acceptance.
+    # Preserve the report even when an explicitly requested check fails.
+    failed = (
+        not report["database"]["schema_version_matches"]
+        or bool(report["database"]["missing_core_tables"])
+        or any(value == "fail" for value in report["checks"].values())
+        or any(query["status"] == "failed" for query in report["bounded_queries"])
+        or (
+            args.source_digests
+            and any(
+                digest["status"] != "computed"
+                for digest in report["source_digests"].values()
+            )
+        )
+    )
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

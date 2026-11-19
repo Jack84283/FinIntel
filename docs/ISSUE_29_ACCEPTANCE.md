@@ -44,11 +44,11 @@ The 128-session default has a generous 30-second CI guard; larger synthetic runs
 
 ## Opt-in local metadata inspection — read-only
 
-Prefer a separate backed-up **copy**, not the actively used database:
+Require an owner-prepared detached backed-up **copy**, never the actively used database:
 
     python scripts/quality_acceptance.py --inspect-db /path/to/finintel-copy.sqlite3 --output artifacts/quality-inspection.json
 
-The script uses SQLite mode=ro and query_only=ON, checks schema and counts, performs a scoped SP500 finding-query-plan probe, and records elapsed time. It does not migrate, correct, scan, download or export underlying market observations; never logs credentials. It refuses to overwrite an existing report, the inspected DB, or its SQLite journal/WAL/SHM sidecars.
+The script uses SQLite mode=ro&immutable=1 and query_only=ON, checks schema and counts, performs a scoped SP500 finding-query-plan probe, and records elapsed time. It does not migrate, correct, scan, download or export underlying market observations; never logs credentials. It rejects known active database paths, symlinks, hard links and copies with SQLite sidecars, closes the read connection, and rejects a copy that changes during inspection. It refuses to overwrite an existing report, the inspected DB, or its SQLite journal/WAL/SHM sidecars, including path aliases. New reports use private file permissions. The owner must still confirm that custom paths are detached; immutable mode is unsafe for active WAL databases.
 
 ### Independent acceptance statuses and schema guidance
 

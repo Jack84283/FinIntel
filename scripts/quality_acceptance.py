@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 import tempfile
 import time
+from contextlib import closing
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -436,9 +438,34 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
     """Read-only summary only; never invoke schema upgrades, scans, providers or backups."""
     if not path.is_file() or path.is_symlink():
         raise ValueError("Inspection requires an existing regular SQLite database")
+    path = path.resolve()
+    active_paths = (
+        Path(os.environ.get("FININTEL_DB_PATH", "data/finintel.sqlite3")).expanduser(),
+        Path("data/finintel.sqlite3"),
+        Path.home()
+        / "Library/Application Support/app.finintel.desktop/finintel.sqlite3",
+        Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
+        / "app.finintel.desktop/finintel.sqlite3",
+        Path(os.environ.get("APPDATA", str(Path.home() / "AppData/Roaming")))
+        / "app.finintel.desktop/finintel.sqlite3",
+    )
+    if path.stat().st_nlink != 1 or any(
+        path == active.resolve() or (active.is_file() and path.samefile(active))
+        for active in active_paths
+    ):
+        raise ValueError(
+            "Use a detached backup copy, not an active database or hard link"
+        )
+    if any(
+        Path(str(path) + suffix).exists() for suffix in ("-wal", "-shm", "-journal")
+    ):
+        raise ValueError(
+            "Inspection requires a detached backup without SQLite sidecars"
+        )
+    initial = path.stat()
     start = time.monotonic()
-    with sqlite3.connect(
-        path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5
+    with closing(
+        sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True, timeout=5)
     ) as conn:
         conn.execute("PRAGMA query_only=ON")
         version = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -520,6 +547,15 @@ def _inspect(path: Path) -> tuple[list[dict], dict]:
             ]
         else:
             count, plan = None, []
+    final = path.stat()
+    if (initial.st_ino, initial.st_size, initial.st_mtime_ns) != (
+        final.st_ino,
+        final.st_size,
+        final.st_mtime_ns,
+    ):
+        raise RuntimeError(
+            "Detached database changed during inspection; discard evidence"
+        )
     elapsed = round(time.monotonic() - start, 3)
     checks = [
         _check(
@@ -634,7 +670,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--sessions", type=int, default=DEFAULT_SESSIONS)
     parser.add_argument(
-        "--inspect-db", type=Path, help="Optional existing local database (read-only)"
+        "--inspect-db",
+        type=Path,
+        help="Optional detached SQLite backup copy (read-only)",
     )
     args = parser.parse_args(argv)
     if not 32 <= args.sessions <= MAX_SYNTHETIC_SESSIONS:
@@ -642,13 +680,14 @@ def main(argv: list[str] | None = None) -> int:
     output = args.output.expanduser().absolute()
     if args.inspect_db:
         user_db = args.inspect_db.expanduser().absolute()
-        if output == user_db or output in {
-            Path(str(user_db) + suffix) for suffix in ("-wal", "-shm", "-journal")
+        if output.resolve() == user_db.resolve() or output.resolve() in {
+            Path(str(user_db.resolve()) + suffix)
+            for suffix in ("-wal", "-shm", "-journal")
         }:
             parser.error(
                 "Report output may not overwrite the inspected database or its journals"
             )
-    if output.exists():
+    if output.exists() or output.is_symlink():
         parser.error(
             "Report output already exists; choose a new filename to avoid overwrite"
         )
@@ -667,7 +706,8 @@ def main(argv: list[str] | None = None) -> int:
         local_checks, inspection = _inspect(user_db)
     report = _report(synthetic_checks, synthetic, local_checks, inspection)
     # No user database is ever opened for writing. Output is a new local file.
-    with output.open("x", encoding="utf-8") as stream:
+    fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
         json.dump(report, stream, indent=2, sort_keys=True)
         stream.write("\n")
     print(

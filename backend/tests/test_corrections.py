@@ -481,6 +481,71 @@ def test_correction_backup_replace_merge_idempotent_and_conflict_safe(tmp_path):
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
+@pytest.mark.parametrize("mode", ["merge", "replace"])
+def test_restore_preserves_corporate_evidence_provenance_and_reversed_audit(
+    tmp_path, monkeypatch, mode
+):
+    source = tmp_path / "source.sqlite3"
+    destination = tmp_path / "destination.sqlite3"
+    equity_id, _ = seed(source)
+    monkeypatch.setattr(
+        "finintel.market_data.corrections.verify_events",
+        lambda *_args, **_kwargs: {
+            "symbol": "AAPL",
+            "event_count": 1,
+            "events": [
+                {
+                    "date": "2026-10-21",
+                    "split_factor": "2",
+                    "cash_dividend": "0",
+                    "check": "manual_review",
+                }
+            ],
+        },
+    )
+    assert record_verified_actions(source, "AAPL")["evidence_records"] == 1
+    review_finding(source, equity_id, "confirmed", "Synthetic source review")
+    key = propose_correction(
+        source,
+        finding_id=equity_id,
+        provider="alpaca_sip",
+        proposed_close="92",
+        rationale="Synthetic recovery evidence",
+    )["id"]
+    for action in ("validate", "approve", "reverse"):
+        transition_correction(source, key, action, "Synthetic decision")
+    tables = (
+        "daily_prices",
+        "index_daily_closes",
+        "series",
+        "ingestion_runs",
+        "data_quality_findings",
+        "data_quality_reviews",
+        "corporate_action_evidence",
+        "quality_corrections",
+        "quality_correction_events",
+        "action_events",
+    )
+
+    def stored_rows(path):
+        with sqlite3.connect(path) as db:
+            return {
+                table: db.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
+                for table in tables
+            }
+
+    before = stored_rows(source)
+    snapshot = create_backup(db=source)
+    _write_connection(destination).close()
+    assert restore_backup(snapshot["id"], mode, db=destination)["status"] == "restored"
+    assert stored_rows(source) == before
+    assert stored_rows(destination) == before
+    assert get_correction(destination, key)["state"] == "reversed"
+    with sqlite3.connect(destination) as db:
+        assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
 def test_global_correction_search_filters_before_paging(tmp_path, monkeypatch):
     """Results on later unfiltered pages remain discoverable with an honest total."""
     path = tmp_path / "filtered-corrections.sqlite3"
