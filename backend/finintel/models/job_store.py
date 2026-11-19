@@ -333,17 +333,39 @@ class ModelJobLedger:
         finally:
             conn.close()
 
-    def list(self, *, limit: int = 20, offset: int = 0) -> dict:
+    def list(self, *, limit: int = 20, offset: int = 0, status: str | None = None) -> dict:
         if not 1 <= limit <= MAX_LIST_LIMIT or not 0 <= offset <= 10_000:
             raise ModelJobStoreError("Invalid model-job pagination")
+        if status not in {
+            None,
+            "queued",
+            "running",
+            "cancel_requested",
+            "completed",
+            "failed",
+            "cancelled",
+        }:
+            raise ModelJobStoreError("Invalid model-job status filter")
+        # Filter before applying LIMIT so pagination and total reflect *all*
+        # matching jobs, not merely the currently visible ten rows.
+        if status == "cancel_requested":
+            where, params = " WHERE state='running' AND cancel_requested=1", ()
+        elif status == "running":
+            where, params = " WHERE state='running' AND cancel_requested=0", ()
+        elif status is not None:
+            where, params = " WHERE state=?", (status,)
+        else:
+            where, params = "", ()
         conn = self._open(writable=False)
         if conn is None:
             return {"total": 0, "items": []}
         try:
-            total = conn.execute("SELECT COUNT(*) FROM model_jobs").fetchone()[0]
+            total = conn.execute("SELECT COUNT(*) FROM model_jobs" + where, params).fetchone()[0]
             items = conn.execute(
-                "SELECT * FROM model_jobs ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",
-                (limit, offset),
+                "SELECT * FROM model_jobs"
+                + where
+                + " ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
             ).fetchall()
             return {"total": total, "items": [self._summary(row) for row in items]}
         finally:

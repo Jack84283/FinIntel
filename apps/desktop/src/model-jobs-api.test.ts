@@ -55,6 +55,12 @@ describe("fixed managed durable-model-job IPC", () => {
       limit: 10, offset: 10,
     });
     await expect(listModelJobs(1002)).rejects.toThrow();
+    native.invoke.mockResolvedValue({ total: 1, items: [sample()] });
+    expect((await listModelJobs(1, "queued")).total).toBe(1);
+    expect(native.invoke).toHaveBeenCalledWith("model_jobs_list", {
+      limit: 10, offset: 0, status: "queued",
+    });
+    await expect(listModelJobs(1, "invalid" as "queued")).rejects.toThrow("filter");
     await expect(getModelJob("../private")).rejects.toThrow();
     expect(() => parseModelJob({ ...sample(), model_id: "custom.secret" })).toThrow();
     expect(() => parseModelJob({ ...sample(), status: "completed" })).toThrow();

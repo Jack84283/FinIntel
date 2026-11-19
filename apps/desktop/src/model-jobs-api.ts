@@ -8,6 +8,7 @@ import {
 
 export type ModelJobState = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type ModelJobStatus = ModelJobState | "cancel_requested";
+export type ModelJobFilter = "all" | ModelJobStatus;
 export type ModelJobSummary = {
   id: string;
   state: ModelJobState;
@@ -84,13 +85,18 @@ export async function queueModelJob(query: PinnedJobQuery): Promise<ModelJobSumm
     expectedSnapshot: query.expectedSnapshot,
   }));
 }
-export async function listModelJobs(page = 1): Promise<ModelJobPage> {
+export async function listModelJobs(
+  page = 1, filter: ModelJobFilter = "all",
+): Promise<ModelJobPage> {
   if (!Number.isSafeInteger(page) || page < 1 || page > 1001) {
     throw new Error("Invalid local model job page.");
   }
-  const value = object(await nativeInvoke("model_jobs_list", {
-    limit: 10, offset: (page - 1) * 10,
-  }));
+  if (!["all", ...states, "cancel_requested"].includes(filter)) {
+    throw new Error("Invalid local model job status filter.");
+  }
+  const args: Record<string, unknown> = { limit: 10, offset: (page - 1) * 10 };
+  if (filter !== "all") args.status = filter;
+  const value = object(await nativeInvoke("model_jobs_list", args));
   if (!Number.isSafeInteger(value.total) || (value.total as number) < 0 ||
     !Array.isArray(value.items) || value.items.length > 10 ||
     (value.total as number) < value.items.length) {

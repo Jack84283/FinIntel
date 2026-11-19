@@ -1091,13 +1091,27 @@ async fn model_jobs_create(
 }
 
 #[tauri::command]
-async fn model_jobs_list(limit: u8, offset: u32) -> Result<serde_json::Value, String> {
-    if backend_token().is_empty() || limit == 0 || limit > 100 || offset > 10_000 {
-        return Err("Invalid managed model-job pagination.".into());
+async fn model_jobs_list(
+    limit: u8,
+    offset: u32,
+    status: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if backend_token().is_empty() || limit == 0 || limit > 100 || offset > 10_000
+        || status.as_deref().is_some_and(|value| {
+            !matches!(value,
+                "queued" | "running" | "cancel_requested" | "completed" | "failed" | "cancelled"
+            )
+        })
+    {
+        return Err("Invalid managed model-job pagination or status filter.".into());
     }
-    let payload = read_backend("/api/v1/models/jobs", &[
+    let mut params = vec![
         ("limit", limit.to_string()), ("offset", offset.to_string()),
-    ]).await?;
+    ];
+    if let Some(value) = status {
+        params.push(("status", value));
+    }
+    let payload = read_backend("/api/v1/models/jobs", &params).await?;
     model_jobs::validate_list(payload)
 }
 
