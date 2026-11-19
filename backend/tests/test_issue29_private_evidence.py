@@ -212,7 +212,6 @@ def test_requested_digest_with_missing_columns_is_not_success(tmp_path):
     assert all(d["status"] == "not_run" for d in report["source_digests"].values())
 
 
-
 def test_incomplete_v15_mandatory_query_retains_report_and_exits_nonzero(tmp_path):
     copy = tmp_path / "incomplete-v15.sqlite3"
     _fixture(copy)
