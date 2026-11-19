@@ -84,6 +84,23 @@ none is recorded here.
 | Authorized provider/corporate-action semantics | pass — mocked provider/reconciliation contracts only | not_run — entitled live-provider checks using disposable storage |
 | Final acceptance matrix and sign-off | pass — this scoped matrix and executable procedure prepared | not_run — owner-completed private matrix/sign-off; no waived gates |
 
+
+## P2 follow-up — fail closed on incomplete mandatory query evidence
+
+After the initial review, the collector's CLI exit check was tightened to
+require `status=measured` for every mandatory bounded query. A skipped
+(`not_run`), failed, missing-status or unknown-status query now yields exit 1,
+while retaining the private JSON diagnostics. Optional checks still remain
+opt-in; unrequested `not_run` checks do not cause failure.
+
+New disposable-fixture regressions cover matching-v15 missing columns, failed
+and unexpected mandatory query statuses, report preservation, unchanged
+SQLite bytes and successful collection with unrequested optional checks.
+No production database was read. The automated test counts above describe the
+original PR head; verify updated test counts and CI against the follow-up head
+before merge. This change does not satisfy Issue #29 real-world acceptance.
+
+
 ## Reproduction and disposition
 
 Follow [the private runbook](ISSUE_29_PRIVATE_ACCEPTANCE.md),
