@@ -469,12 +469,13 @@ def main(argv: list[str] | None = None) -> int:
         "Issue #29 private inspection written. Production acceptance remains unverified."
     )
     # Successful evidence collection is not an integrity or schema acceptance.
-    # Preserve the report even when an explicitly requested check fails.
+    # Preserve the report when a requested check fails or a mandatory query
+    # cannot be measured (including unknown/missing statuses).
     failed = (
         not report["database"]["schema_version_matches"]
         or bool(report["database"]["missing_core_tables"])
         or any(value == "fail" for value in report["checks"].values())
-        or any(query["status"] == "failed" for query in report["bounded_queries"])
+        or any(query.get("status") != "measured" for query in report["bounded_queries"])
         or (
             args.source_digests
             and any(
