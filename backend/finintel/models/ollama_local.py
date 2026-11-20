@@ -74,9 +74,7 @@ def discover_local_models(
                 trust_env=False,
                 transport=transport,
             ) as client,
-            client.stream(
-                "GET", "/api/tags", headers={"accept": "application/json"}
-            ) as response,
+            client.stream("GET", "/api/tags", headers={"accept": "application/json"}) as response,
         ):
             if response.status_code != 200:
                 raise LocalOllamaError("Local Ollama model discovery unavailable")
