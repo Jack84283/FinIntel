@@ -27,21 +27,20 @@ def _research(*, closes: list[int] | None = None, skipped: set[int] | None = Non
     omitted = skipped or set()
     points: list[dict] = []
     levels: list[Decimal] = []
-    with pytest.MonkeyPatch.context():
-        for idx, close in enumerate(prices):
-            if idx in omitted:
-                continue
-            levels.append(Decimal(close))
-            fast = sum(levels[-5:], Decimal(0)) / Decimal(5) if len(levels) >= 5 else None
-            slow = sum(levels[-20:], Decimal(0)) / Decimal(20) if len(levels) >= 20 else None
-            signal = ("long" if fast > slow else "flat") if slow is not None else None
-            points.append({
-                "session_date": (START + timedelta(days=idx)).isoformat(),
-                "close": str(close),
-                "fast_sma": format(fast, "f") if fast is not None else None,
-                "slow_sma": format(slow, "f") if slow is not None else None,
-                "signal_after_close": signal,
-            })
+    for idx, close in enumerate(prices):
+        if idx in omitted:
+            continue
+        levels.append(Decimal(close))
+        fast = sum(levels[-5:], Decimal(0)) / Decimal(5) if len(levels) >= 5 else None
+        slow = sum(levels[-20:], Decimal(0)) / Decimal(20) if len(levels) >= 20 else None
+        signal = ("long" if fast > slow else "flat") if slow is not None else None
+        points.append({
+            "session_date": (START + timedelta(days=idx)).isoformat(),
+            "close": str(close),
+            "fast_sma": format(fast, "f") if fast is not None else None,
+            "slow_sma": format(slow, "f") if slow is not None else None,
+            "signal_after_close": signal,
+        })
     lineage = {
         "model_id": "builtin.sma_crossover",
         "model_version": "1.0.0",
@@ -210,8 +209,6 @@ def test_refuses_bad_hashes_tampering_future_signals_and_wrong_semantics():
 
 
 def test_refuses_unobserved_boundary_unsorted_rows_and_inadequate_warmup():
-    with pytest.raises(ValidationError):
-        _request().model_copy(update={"test_start": START + timedelta(days=29)})
     # Construct a freshly validated request with an invalid split.
     with pytest.raises(ValidationError):
         BacktestRequest(
