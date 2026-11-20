@@ -7,20 +7,20 @@ by this phase.
 
 ## Input and source boundary
 
-- Only the allowlisted \`builtin.sma_crossover@1.0.0\` indicator may be used.
+- Only the allowlisted `builtin.sma_crossover@1.0.0` indicator may be used.
   No private/custom source, arbitrary Python module, trading broker, or cloud AI.
 - Input is an existing versioned *verified-quality* research result with SHA-256
-  checks on its points and lineage. \`expected_snapshot_sha256\` must match the
+  checks on its points and lineage. `expected_snapshot_sha256` must match the
   pinned input exactly.
 - Source semantics are restricted to **FRED daily index price levels** for
   SP500, DJIA, NASDAQCOM, and NDX. VIX, adjusted equity prices, total-return
   claims and constituent-derived/survivorship-sensitive inputs are rejected.
-  \`point_in_time_membership=not_used\` means no constituent-selection claims.
+  `point_in_time_membership=not_used` means no constituent-selection claims.
 - The 2C1 engine is **pure**. It validates the supplied result and hashes, but
   does not independently reopen the live price database to verify a pinned
   snapshot or entitlements. **Phase 2C2 must perform live local revision
   fencing before and after durable execution**, and reject changed snapshots.
-- The data-quality contract requires \`quality_verified=true\`. Synthetic
+- The data-quality contract requires `quality_verified=true`. Synthetic
   fixtures intentionally exercise the deterministic engine only; they are not
   evidence that real FRED history has passed quality sign-off.
 
