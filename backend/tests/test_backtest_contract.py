@@ -34,13 +34,15 @@ def _research(*, closes: list[int] | None = None, skipped: set[int] | None = Non
         fast = sum(levels[-5:], Decimal(0)) / Decimal(5) if len(levels) >= 5 else None
         slow = sum(levels[-20:], Decimal(0)) / Decimal(20) if len(levels) >= 20 else None
         signal = ("long" if fast > slow else "flat") if slow is not None else None
-        points.append({
-            "session_date": (START + timedelta(days=idx)).isoformat(),
-            "close": str(close),
-            "fast_sma": format(fast, "f") if fast is not None else None,
-            "slow_sma": format(slow, "f") if slow is not None else None,
-            "signal_after_close": signal,
-        })
+        points.append(
+            {
+                "session_date": (START + timedelta(days=idx)).isoformat(),
+                "close": str(close),
+                "fast_sma": format(fast, "f") if fast is not None else None,
+                "slow_sma": format(slow, "f") if slow is not None else None,
+                "signal_after_close": signal,
+            }
+        )
     lineage = {
         "model_id": "builtin.sma_crossover",
         "model_version": "1.0.0",
@@ -141,8 +143,9 @@ def test_reproducible_outputs_cost_monotonicity_and_benchmark_semantics():
     assert Decimal(costly["metrics"]["cumulative_return"]) < Decimal(
         baseline["metrics"]["cumulative_return"]
     )
-    assert costly["metrics"]["frictionless_benchmark_cumulative_return"] == (
-        baseline["metrics"]["frictionless_benchmark_cumulative_return"]
+    assert (
+        costly["metrics"]["frictionless_benchmark_cumulative_return"]
+        == (baseline["metrics"]["frictionless_benchmark_cumulative_return"])
     )
     assert Decimal(costly["metrics"]["turnover_fraction"]) == Decimal(1)
     assert baseline["metrics"]["max_drawdown"] is not None
@@ -176,9 +179,7 @@ def test_no_future_leakage_and_no_generated_calendar_sessions():
 def test_refuses_bad_hashes_tampering_future_signals_and_wrong_semantics():
     original = _research()
     with pytest.raises(BacktestContractError, match="hash mismatch"):
-        run_sma_backtest(
-            research={**original, "output_sha256": "b" * 64}, request=_request()
-        )
+        run_sma_backtest(research={**original, "output_sha256": "b" * 64}, request=_request())
     forged = _research()
     forged["points"][30]["signal_after_close"] = "flat"
     with pytest.raises(BacktestContractError, match="hash mismatch"):
@@ -219,13 +220,16 @@ def test_refuses_unobserved_boundary_unsorted_rows_and_inadequate_warmup():
             test_end=START + timedelta(days=31),
         )
     with pytest.raises(BacktestContractError, match="adjacent observed"):
-        run_sma_backtest(research=_research(), request=BacktestRequest(
-            index_code="SP500",
-            expected_snapshot_sha256=SOURCE_HASH,
-            training_end=START + timedelta(days=28),
-            test_start=START + timedelta(days=30),
-            test_end=START + timedelta(days=35),
-        ))
+        run_sma_backtest(
+            research=_research(),
+            request=BacktestRequest(
+                index_code="SP500",
+                expected_snapshot_sha256=SOURCE_HASH,
+                training_end=START + timedelta(days=28),
+                test_start=START + timedelta(days=30),
+                test_end=START + timedelta(days=35),
+            ),
+        )
 
     unsorted = _research()
     unsorted["points"][30]["session_date"] = unsorted["points"][29]["session_date"]
@@ -234,13 +238,16 @@ def test_refuses_unobserved_boundary_unsorted_rows_and_inadequate_warmup():
 
     short = _research()
     with pytest.raises(BacktestContractError):
-        run_sma_backtest(research=short, request=BacktestRequest(
-            index_code="SP500",
-            expected_snapshot_sha256=SOURCE_HASH,
-            training_end=START + timedelta(days=18),
-            test_start=START + timedelta(days=19),
-            test_end=START + timedelta(days=21),
-        ))
+        run_sma_backtest(
+            research=short,
+            request=BacktestRequest(
+                index_code="SP500",
+                expected_snapshot_sha256=SOURCE_HASH,
+                training_end=START + timedelta(days=18),
+                test_start=START + timedelta(days=19),
+                test_end=START + timedelta(days=21),
+            ),
+        )
 
 
 def test_contract_forbids_leverage_unsupported_symbols_and_custom_execution():
