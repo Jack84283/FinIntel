@@ -105,9 +105,9 @@ def _repin(result: dict) -> dict:
 
 def test_next_observed_session_close_is_hypothetical_and_never_same_close():
     settings = BacktestAssumptions(
-        initial_capital=Decimal("10000"),
-        commission_bps=Decimal("10"),
-        slippage_bps=Decimal("15"),
+        initial_capital=Decimal(10000),
+        commission_bps=Decimal(10),
+        slippage_bps=Decimal(15),
     )
     result = run_sma_backtest(research=_research(), request=_request(assumptions=settings))
     assert result["contract"] == BACKTEST_CONTRACT
@@ -122,13 +122,13 @@ def test_next_observed_session_close_is_hypothetical_and_never_same_close():
     first = result["rows"][0]
     assert first["session_date"] == (START + timedelta(days=30)).isoformat()
     assert first["executed_from_prior_signal"] == (START + timedelta(days=29)).isoformat()
-    assert Decimal(first["equity_after_cost"]) == Decimal("9975")
-    assert Decimal(first["frictionless_benchmark_equity"]) == Decimal("10000")
-    assert Decimal(result["rows"][1]["equity_after_cost"]) > Decimal("9975")
+    assert Decimal(first["equity_after_cost"]) == Decimal(9975)
+    assert Decimal(first["frictionless_benchmark_equity"]) == Decimal(10000)
+    assert Decimal(result["rows"][1]["equity_after_cost"]) > Decimal(9975)
     assert result["transactions"][0]["signal_as_of_session"] == first["executed_from_prior_signal"]
     assert result["transactions"][0]["hypothetical_fill_session"] == first["session_date"]
     assert result["metrics"]["transactions"] == 1
-    assert Decimal(result["metrics"]["transaction_cost_total"]) == Decimal("25")
+    assert Decimal(result["metrics"]["transaction_cost_total"]) == Decimal(25)
 
 
 def test_reproducible_outputs_cost_monotonicity_and_benchmark_semantics():
@@ -136,7 +136,7 @@ def test_reproducible_outputs_cost_monotonicity_and_benchmark_semantics():
     again = run_sma_backtest(research=_research(), request=_request())
     assert baseline == again
     assert baseline["output_sha256"] == again["output_sha256"]
-    costs = BacktestAssumptions(commission_bps=Decimal("100"))
+    costs = BacktestAssumptions(commission_bps=Decimal(100))
     costly = run_sma_backtest(research=_research(), request=_request(assumptions=costs))
     assert Decimal(costly["metrics"]["cumulative_return"]) < Decimal(
         baseline["metrics"]["cumulative_return"]
@@ -144,7 +144,7 @@ def test_reproducible_outputs_cost_monotonicity_and_benchmark_semantics():
     assert costly["metrics"]["frictionless_benchmark_cumulative_return"] == (
         baseline["metrics"]["frictionless_benchmark_cumulative_return"]
     )
-    assert Decimal(costly["metrics"]["turnover_fraction"]) == Decimal("1")
+    assert Decimal(costly["metrics"]["turnover_fraction"]) == Decimal(1)
     assert baseline["metrics"]["max_drawdown"] is not None
     assert baseline["metrics"]["annualized_volatility"] is not None
     assert baseline["metrics"]["risk_free_rate_annual"] == "0"
@@ -249,7 +249,7 @@ def test_contract_forbids_leverage_unsupported_symbols_and_custom_execution():
     with pytest.raises(ValidationError):
         BacktestAssumptions(execution="same_close")
     with pytest.raises(ValidationError):
-        BacktestAssumptions(commission_bps=Decimal("-1"))
+        BacktestAssumptions(commission_bps=Decimal(-1))
     with pytest.raises(ValidationError):
         BacktestRequest(
             index_code="VIX",
