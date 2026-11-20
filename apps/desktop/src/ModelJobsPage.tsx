@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { TablePager, LocalDataTable, TABLE_PAGE_SIZE } from "./components/TablePagination";
 import { PageHeader } from "./PageHeader";
+import { createModelJobDetailFence } from "./model-job-detail-fence";
 import { useLocale } from "./localization";
 import { useNotify } from "./notifications";
 import { fetchIndexAnalytics, type AnalyticsResult, type QualityPolicy } from "./index-intelligence-api";
@@ -90,7 +91,8 @@ export function ModelJobsPage() {
   const [detailsBusy, setDetailsBusy] = useState(false);
   const [detailsError, setDetailsError] = useState("");
   const [actionBusy, setActionBusy] = useState<string | null>(null);
-  const detailSerial = useRef(0);
+  const detailFence = useRef(createModelJobDetailFence()).current;
+  const listSerial = useRef(0);
 
   const modelQuery: ModelResearchQuery = {
     code, start, end, qualityPolicy, fastWindow, slowWindow,
@@ -100,9 +102,30 @@ export function ModelJobsPage() {
     catch { return false; }
   })();
 
-  // The local ledger is queried page-by-page; status filtering happens in
-  // SQLite *before* LIMIT/OFFSET. Poll only while this page is mounted.
+  function clearDetails() {
+    detailFence.invalidate();
+    setSelected(null);
+    setResult(null);
+    setDetailsBusy(false);
+    setDetailsError("");
+  }
+
+  function switchHistory(filter: ModelJobFilter, nextPage: number) {
+    // Invalidate earlier list and detail responses at the user interaction,
+    // before React commits the new filter/page and cleans up the old effect.
+    listSerial.current++;
+    clearDetails();
+    setStatusFilter(filter);
+    setPage(Math.min(nextPage, 1000));
+    setLoading(true);
+  }
+
+  useEffect(() => () => detailFence.invalidate(), [detailFence]);
+
+  // Filter in SQLite before paging. Fence all asynchronous responses when
+  // the user navigates, polls or unmounts.
   useEffect(() => {
+    const generation = ++listSerial.current;
     if (!managed) { setLoading(false); return; }
     let active = true;
     let request = 0;
@@ -110,21 +133,21 @@ export function ModelJobsPage() {
       const current = ++request;
       try {
         const data = await listModelJobs(page + 1, statusFilter);
-        if (!active || current !== request) return;
+        if (!active || current !== request || generation !== listSerial.current) return;
         const last = Math.max(0, Math.ceil(data.total / TABLE_PAGE_SIZE) - 1);
-        if (page > last) { setPage(Math.min(last, 1000)); return; }
+        if (page > last) { switchHistory(statusFilter, last); return; }
         setItems(data.items);
         setTotal(data.total);
         setListError("");
       } catch (error) {
-        if (active && current === request) setListError(message(error));
+        if (active && current === request && generation === listSerial.current) setListError(message(error));
       } finally {
-        if (active && current === request) setLoading(false);
+        if (active && current === request && generation === listSerial.current) setLoading(false);
       }
     }
     void load();
     const timer = window.setInterval(() => { void load(); }, 5000);
-    return () => { active = false; window.clearInterval(timer); };
+    return () => { active = false; listSerial.current++; window.clearInterval(timer); };
   }, [managed, page, statusFilter, refresh]);
 
   async function queue() {
@@ -142,6 +165,8 @@ export function ModelJobsPage() {
       const expectedSnapshot = verifiedJobSnapshot(query, analytics);
       await queueModelJob({ ...query, expectedSnapshot });
       notify(t("Model job queued locally."), "success");
+      listSerial.current++;
+      clearDetails();
       setPage(0);
       setRefresh(value => value + 1);
     } catch (error) {
@@ -153,7 +178,7 @@ export function ModelJobsPage() {
   }
 
   async function inspect(job: ModelJobSummary) {
-    const request = ++detailSerial.current;
+    const request = detailFence.begin(job.id);
     setSelected(job);
     setResult(null);
     setDetailsBusy(true);
@@ -162,13 +187,13 @@ export function ModelJobsPage() {
       // Always read fresh durable status, independent of the selected table
       // row. Keep response generation fencing across both native calls.
       const details = await fetchCurrentModelJobDetails(job.id);
-      if (request !== detailSerial.current) return;
+      if (!detailFence.isCurrent(job.id, request)) return;
       setSelected(details.job);
       setResult(details.result);
     } catch (error) {
-      if (request === detailSerial.current) setDetailsError(message(error));
+      if (detailFence.isCurrent(job.id, request)) setDetailsError(message(error));
     } finally {
-      if (request === detailSerial.current) setDetailsBusy(false);
+      if (detailFence.isCurrent(job.id, request)) setDetailsBusy(false);
     }
   }
 
@@ -180,12 +205,9 @@ export function ModelJobsPage() {
       if (action === "cancel") await cancelModelJob(job.id);
       else await retryModelJob(job.id);
       notify(t(action === "cancel" ? "Model job cancellation requested." : "Model job queued for retry."), "success");
+      listSerial.current++;
       setRefresh(value => value + 1);
-      if (selected?.id === job.id) {
-        ++detailSerial.current;
-        setSelected(null);
-        setResult(null);
-      }
+      if (selected?.id === job.id) clearDetails();
     } catch (error) {
       setListError(message(error));
       notify(t("Model job operation failed."), "error");
@@ -268,16 +290,12 @@ export function ModelJobsPage() {
           <CardDescription>{t("Persisted local jobs, 10 per page. Status filters cover the entire ledger.")}</CardDescription>
         </div>
         <Button type="button" variant="secondary" size="sm" disabled={!managed}
-          onClick={() => setRefresh(value => value + 1)}>{t("Refresh Status")}</Button>
+          onClick={() => { listSerial.current++; setRefresh(value => value + 1); }}>{t("Refresh Status")}</Button>
       </CardHeader>
       <CardContent className="space-y-3">
         <label className={labelClass + " max-w-[260px]"}>{t("Filter job status")}
           <select className={inputClass} value={statusFilter} disabled={!managed}
-            onChange={event => {
-              setStatusFilter(event.target.value as ModelJobFilter);
-              setPage(0);
-              setLoading(true);
-            }}>
+            onChange={event => switchHistory(event.target.value as ModelJobFilter, 0)}>
             {STATUS_FILTERS.map(status => <option key={status} value={status}>
               {status === "all" ? t("All statuses") : t(status)}
             </option>)}
@@ -319,7 +337,7 @@ export function ModelJobsPage() {
           </table>
         </div>}
         <TablePager page={page} total={visibleTotal} disabled={!managed || loading || Boolean(listError)}
-          onPageChange={value => { setPage(Math.min(value, 1000)); setLoading(true); }} />
+          onPageChange={value => switchHistory(statusFilter, value)} />
         {total > visibleTotal && <p className="text-xs text-muted-foreground">
           {t("History is limited to the first 10,010 entries; narrow the status filter.")} ({total.toLocaleString(language)})
         </p>}
@@ -335,10 +353,7 @@ export function ModelJobsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" variant="secondary" size="sm" disabled={detailsBusy}
             onClick={() => { void inspect(selected); }}>{t("Refresh details")}</Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => {
-            detailSerial.current++;
-            setSelected(null); setResult(null); setDetailsError("");
-          }}>{t("Close details")}</Button>
+          <Button type="button" variant="outline" size="sm" onClick={clearDetails}>{t("Close details")}</Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
