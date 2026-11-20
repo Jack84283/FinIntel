@@ -2,7 +2,10 @@
 
 import importlib.util
 import json
+import runpy
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -42,6 +45,8 @@ def test_disposable_synthetic_acceptance_never_opens_configured_user_db(tmp_path
     assert "https://example.test" not in serialized
     assert "api_key" not in serialized
     assert "price_rows" in serialized
+    if MODULE.os.name != "nt":
+        assert output.stat().st_mode & 0o077 == 0
 
 
 def test_readonly_opt_in_existing_database_remains_unchanged(tmp_path):
@@ -102,6 +107,168 @@ def test_invalid_size_is_rejected_before_creating_any_report(tmp_path):
         with pytest.raises(SystemExit):
             MODULE.main(["--output", str(output), "--sessions", count])
         assert not output.exists()
+
+
+def test_inspection_refuses_active_aliases_and_sidecars(tmp_path, monkeypatch):
+    existing = tmp_path / "active.sqlite3"
+    MODULE._seed(existing, MODULE._sessions(40))
+    before = existing.read_bytes()
+    monkeypatch.setenv("FININTEL_DB_PATH", str(existing))
+    with pytest.raises(ValueError, match="active"):
+        MODULE._inspect(existing)
+    alias = tmp_path / "hardlink.sqlite3"
+    alias.hardlink_to(existing)
+    with pytest.raises(ValueError, match="hard link"):
+        MODULE._inspect(alias)
+    alias.unlink()
+    monkeypatch.setenv("FININTEL_DB_PATH", str(tmp_path / "other.sqlite3"))
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(str(existing) + suffix)
+        sidecar.write_bytes(b"untouched")
+        with pytest.raises(ValueError, match="sidecars"):
+            MODULE._inspect(existing)
+        assert sidecar.read_bytes() == b"untouched"
+        sidecar.unlink()
+    alias.symlink_to(existing)
+    with pytest.raises(ValueError, match="regular"):
+        MODULE._inspect(alias)
+    assert existing.read_bytes() == before
+
+
+def test_output_alias_cannot_create_inspected_database_sidecar(tmp_path):
+    source = tmp_path / "detached.sqlite3"
+    MODULE._seed(source, MODULE._sessions(40))
+    directory_alias = tmp_path / "directory-alias"
+    directory_alias.symlink_to(tmp_path, target_is_directory=True)
+    output = directory_alias / (source.name + "-wal")
+    with pytest.raises(SystemExit):
+        MODULE.main(["--inspect-db", str(source), "--output", str(output)])
+    assert not output.exists()
+    dangling = tmp_path / "dangling.json"
+    destination = tmp_path / "new-target.json"
+    dangling.symlink_to(destination)
+    with pytest.raises(SystemExit):
+        MODULE.main(["--output", str(dangling)])
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("platform", ["macos", "linux", "windows"])
+def test_both_inspectors_refuse_installed_app_paths_without_opening(
+    tmp_path, monkeypatch, platform
+):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
+    monkeypatch.delenv("FININTEL_DB_PATH", raising=False)
+    directories = {
+        "macos": tmp_path / "Library/Application Support",
+        "linux": tmp_path / "xdg",
+        "windows": tmp_path / "roaming",
+    }
+    active = directories[platform] / "app.finintel.desktop/finintel.sqlite3"
+    active.parent.mkdir(parents=True)
+    active.write_bytes(b"active file must never be opened")
+    private = runpy.run_path(str(SCRIPT.with_name("issue29_private_evidence.py")))
+
+    def refuse_connect(*_args, **_kwargs):
+        pytest.fail("An inspector attempted to open the active database")
+
+    monkeypatch.setattr(sqlite3, "connect", refuse_connect)
+    with pytest.raises(ValueError, match="active"):
+        MODULE._inspect(active)
+    with pytest.raises(ValueError, match="active"):
+        private["_detached_copy"](active)
+    assert active.read_bytes() == b"active file must never be opened"
+
+
+def test_inspection_is_immutable_and_rejects_newer_schema(tmp_path, monkeypatch):
+    source = tmp_path / "detached.sqlite3"
+    MODULE._seed(source, MODULE._sessions(40))
+    with sqlite3.connect(source) as db:
+        db.execute(f"PRAGMA user_version={MODULE.SCHEMA_VERSION + 1}")
+    before = source.read_bytes()
+    opened = []
+    original_connect = MODULE.sqlite3.connect
+
+    def connect(db_uri, **kwargs):
+        opened.append(db_uri)
+        return original_connect(db_uri, **kwargs)
+
+    monkeypatch.setattr(MODULE.sqlite3, "connect", connect)
+    checks, evidence = MODULE._inspect(source)
+    assert evidence["schema_compatibility"]["status"] == "unsupported_version"
+    assert checks[0]["status"] == "fail"
+    assert opened == [source.resolve().as_uri() + "?mode=ro&immutable=1"]
+    assert source.read_bytes() == before
+
+
+def test_process_interruption_between_findings_and_checkpoint_recovers(tmp_path):
+    """Abrupt exit after commit must replay safely from the last durable cursor."""
+    source = tmp_path / "disposable.sqlite3"
+    MODULE._seed(source, MODULE._sessions(40))
+    originals = MODULE._original_snapshot(source)
+    first = MODULE.run_quality_scan(source, max_findings=1, as_of=MODULE.REFERENCE_DATE)
+    assert first["truncated"]
+    selected = MODULE.list_findings(source)["items"][0]
+    MODULE.review_finding(source, selected["id"], "confirmed", "Preserve across restart")
+    with sqlite3.connect(source) as db:
+        reviews = db.execute("SELECT * FROM data_quality_reviews ORDER BY id").fetchall()
+    interrupted = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import os, sys
+from datetime import date
+from pathlib import Path
+from finintel.market_data import quality
+original = quality._persist
+def persist(*args, **kwargs):
+    original(*args, **kwargs)
+    os._exit(17)
+quality._persist = persist
+quality.run_quality_scan(Path(sys.argv[1]), max_findings=2, as_of=date(2026, 11, 1))
+""",
+            str(source),
+        ],
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert interrupted.returncode == 17, interrupted.stderr.decode()
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import json, sys
+from datetime import date
+from pathlib import Path
+from finintel.market_data.quality import run_quality_scan
+result = run_quality_scan(Path(sys.argv[1]), max_findings=1000, as_of=date(2026, 11, 1))
+print(json.dumps({'complete': result['complete'], 'resumed': result['resumed']}))
+""",
+            str(source),
+        ],
+        capture_output=True,
+        timeout=30,
+        check=True,
+    )
+    assert json.loads(completed.stdout) == {"complete": True, "resumed": True}
+    assert MODULE._original_snapshot(source) == originals
+    with sqlite3.connect(source) as db:
+        assert db.execute("SELECT * FROM data_quality_reviews ORDER BY id").fetchall() == reviews
+        assert db.execute(
+            "SELECT review_state FROM data_quality_findings WHERE id=?", (selected["id"],)
+        ).fetchone() == ("confirmed",)
+        assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+        recovered = set(db.execute("SELECT fingerprint FROM data_quality_findings"))
+    reference = tmp_path / "full.sqlite3"
+    MODULE._seed(reference, MODULE._sessions(40))
+    assert MODULE.run_quality_scan(reference, as_of=MODULE.REFERENCE_DATE)["complete"]
+    with sqlite3.connect(reference) as db:
+        assert recovered == set(db.execute("SELECT fingerprint FROM data_quality_findings"))
 
 
 def test_synthetic_failure_must_not_be_reported_as_production_success():
