@@ -120,8 +120,13 @@ def _fmt(value: Decimal) -> str:
     return format(+value, "f")
 
 
-def _validated_points(research: dict, request: BacktestRequest) -> tuple[list[dict], list[date], list[Decimal]]:
-    if not isinstance(research, dict) or research.get("execution_contract") != "model-research-evaluation-v1":
+def _validated_points(
+    research: dict, request: BacktestRequest
+) -> tuple[list[dict], list[date], list[Decimal]]:
+    if (
+        not isinstance(research, dict)
+        or research.get("execution_contract") != "model-research-evaluation-v1"
+    ):
         _fail("Unsupported versioned model-result contract")
     if (
         research.get("status") != "completed"
@@ -207,7 +212,11 @@ def _validated_points(research: dict, request: BacktestRequest) -> tuple[list[di
         ctx.prec = 28
         for index, point in enumerate(points):
             if not isinstance(point, dict) or set(point) != {
-                "session_date", "close", "fast_sma", "slow_sma", "signal_after_close"
+                "session_date",
+                "close",
+                "fast_sma",
+                "slow_sma",
+                "signal_after_close",
             }:
                 _fail("Unsupported model-point schema")
             session = _session(point["session_date"])
@@ -227,8 +236,10 @@ def _validated_points(research: dict, request: BacktestRequest) -> tuple[list[di
                 else None
             )
             expected_signal = (
-                "long" if fast > slow else "flat"
-            ) if fast is not None and slow is not None else None
+                ("long" if fast > slow else "flat")
+                if fast is not None and slow is not None
+                else None
+            )
             if point["signal_after_close"] != expected_signal:
                 _fail("Noncausal or inconsistent post-close SMA signal")
             for field, expected in (("fast_sma", fast), ("slow_sma", slow)):
@@ -261,7 +272,8 @@ def run_sma_backtest(*, research: dict, request: BacktestRequest) -> dict:
     if request.training_end not in dates:
         _fail("Training endpoint is not a pinned observed session")
     test_indices = [
-        index for index, session in enumerate(dates)
+        index
+        for index, session in enumerate(dates)
         if request.test_start <= session <= request.test_end
     ]
     if (
@@ -300,18 +312,18 @@ def run_sma_backtest(*, research: dict, request: BacktestRequest) -> dict:
                 else Decimal(0)
             )
             changed = abs(target - exposure)
-            cost = equity * changed * (
-                settings.commission_bps + settings.slippage_bps
-            ) / _BPS
+            cost = equity * changed * (settings.commission_bps + settings.slippage_bps) / _BPS
             if changed:
-                transactions.append({
-                    "signal_as_of_session": preceding["session_date"],
-                    "hypothetical_fill_session": dates[index].isoformat(),
-                    "exposure_before": _fmt(exposure),
-                    "exposure_after": _fmt(target),
-                    "turnover_fraction": _fmt(changed),
-                    "cost": _fmt(cost),
-                })
+                transactions.append(
+                    {
+                        "signal_as_of_session": preceding["session_date"],
+                        "hypothetical_fill_session": dates[index].isoformat(),
+                        "exposure_before": _fmt(exposure),
+                        "exposure_after": _fmt(target),
+                        "turnover_fraction": _fmt(changed),
+                        "cost": _fmt(cost),
+                    }
+                )
                 turnover += changed
                 total_cost += cost
                 equity -= cost
@@ -320,26 +332,27 @@ def run_sma_backtest(*, research: dict, request: BacktestRequest) -> dict:
             drawdown = equity / peak - Decimal(1)
             worst_drawdown = min(worst_drawdown, drawdown)
             daily_returns.append(equity / prior_equity - Decimal(1))
-            rows.append({
-                "session_date": dates[index].isoformat(),
-                "equity_after_cost": _fmt(equity),
-                "frictionless_benchmark_equity": _fmt(benchmark),
-                "exposure_after_close": _fmt(exposure),
-                "transaction_cost": _fmt(cost),
-                "drawdown": _fmt(drawdown),
-                "executed_from_prior_signal": preceding["session_date"],
-            })
+            rows.append(
+                {
+                    "session_date": dates[index].isoformat(),
+                    "equity_after_cost": _fmt(equity),
+                    "frictionless_benchmark_equity": _fmt(benchmark),
+                    "exposure_after_close": _fmt(exposure),
+                    "transaction_cost": _fmt(cost),
+                    "drawdown": _fmt(drawdown),
+                    "executed_from_prior_signal": preceding["session_date"],
+                }
+            )
 
         sessions = len(daily_returns)
         mean = sum(daily_returns, Decimal(0)) / Decimal(sessions)
-        variance = sum(
-            ((value - mean) ** 2 for value in daily_returns), Decimal(0)
-        ) / Decimal(sessions - 1)
-        volatility = variance.sqrt() * _SESSIONS_PER_YEAR.sqrt()
-        risk_free_daily = (
-            (Decimal(1) + settings.risk_free_rate_annual)
-            ** (Decimal(1) / _SESSIONS_PER_YEAR) - Decimal(1)
+        variance = sum(((value - mean) ** 2 for value in daily_returns), Decimal(0)) / Decimal(
+            sessions - 1
         )
+        volatility = variance.sqrt() * _SESSIONS_PER_YEAR.sqrt()
+        risk_free_daily = (Decimal(1) + settings.risk_free_rate_annual) ** (
+            Decimal(1) / _SESSIONS_PER_YEAR
+        ) - Decimal(1)
         sharpe = (
             (mean - risk_free_daily) / variance.sqrt() * _SESSIONS_PER_YEAR.sqrt()
             if variance > 0
