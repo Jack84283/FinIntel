@@ -66,21 +66,25 @@ def discover_local_models(
     if not config.enabled:
         return OllamaDiscovery(status="disabled")
     try:
-        with httpx.Client(
-            base_url=config.endpoint,
-            timeout=config.timeout_seconds,
-            follow_redirects=False,
-            trust_env=False,
-            transport=transport,
-        ) as client:
-            with client.stream("GET", "/api/tags", headers={"accept": "application/json"}) as response:
-                if response.status_code != 200:
-                    raise LocalOllamaError("Local Ollama model discovery unavailable")
-                chunks = bytearray()
-                for block in response.iter_bytes():
-                    if len(chunks) + len(block) > _MAX_RESPONSE_BYTES:
-                        raise LocalOllamaError("Local Ollama model discovery response too large")
-                    chunks.extend(block)
+        with (
+            httpx.Client(
+                base_url=config.endpoint,
+                timeout=config.timeout_seconds,
+                follow_redirects=False,
+                trust_env=False,
+                transport=transport,
+            ) as client,
+            client.stream(
+                "GET", "/api/tags", headers={"accept": "application/json"}
+            ) as response,
+        ):
+            if response.status_code != 200:
+                raise LocalOllamaError("Local Ollama model discovery unavailable")
+            chunks = bytearray()
+            for block in response.iter_bytes():
+                if len(chunks) + len(block) > _MAX_RESPONSE_BYTES:
+                    raise LocalOllamaError("Local Ollama model discovery response too large")
+                chunks.extend(block)
         payload = json.loads(chunks)
         if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
             raise LocalOllamaError("Invalid local Ollama model discovery response")
