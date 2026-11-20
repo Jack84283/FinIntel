@@ -80,6 +80,7 @@ describe("Phase 2B2 native Model Jobs workspace", () => {
     expect(page).toContain("<TablePager page={page}");
     expect(page).toContain("fetchCurrentModelJobDetails(job.id)");
     expect(page).toContain("switchHistory(event.target.value as ModelJobFilter, 0)");
+    expect(page).toContain("if (filter === statusFilter && target === page) return;");
     expect(page).toContain("onPageChange={value => switchHistory(statusFilter, value)}");
     expect(page).toContain("if (page > last) { switchHistory(statusFilter, last); return; }");
     expect(page).toContain("detailFence.isCurrent(job.id, request)");
@@ -114,7 +115,6 @@ describe("Phase 2B2 native Model Jobs workspace", () => {
     jobDetails.getResult.mockRejectedValueOnce(new Error("Output hash mismatch"));
     await expect(fetchCurrentModelJobDetails(jobId)).rejects.toThrow("Output hash mismatch");
   });
-
 
   it("fences in-flight detail results across job switches, pagination, filtering and closure", () => {
     const fence = createModelJobDetailFence();
