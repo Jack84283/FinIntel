@@ -57,10 +57,13 @@ function readSaved(): Config {
     return initial;
   }
 }
-function shiftYears(value: string, amount: number): string {
+/** Use the last valid day of the target month instead of rolling Feb 29 into March. */
+export function shiftYears(value: string, amount: number): string {
   const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(Date.UTC(year - amount, month - 1, day));
-  return date.toISOString().slice(0, 10);
+  const targetYear = year - amount;
+  const lastDay = new Date(Date.UTC(targetYear, month, 0)).getUTCDate();
+  return new Date(Date.UTC(targetYear, month - 1, Math.min(day, lastDay)))
+    .toISOString().slice(0, 10);
 }
 function readableError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -102,7 +105,14 @@ export function IndexIntelligencePage() {
   const [metric, setMetric] = useState<ChartMetric>("normalized");
   const requestGeneration = useRef(0);
   const { code, comparisonCode, start, end, window, qualityPolicy, preset } = config;
-  const patch = (updates: Partial<Config>) => setConfig(current => ({ ...current, ...updates }));
+  const patch = (updates: Partial<Config>) => {
+    // Invalidate old analytics immediately on interaction, before the next
+    // passive effect can clean up the previous native request.
+    requestGeneration.current++;
+    setResult(null);
+    setError("");
+    setConfig(current => ({ ...current, ...updates }));
+  };
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(config)); } catch { /* device-local storage optional */ }
@@ -172,7 +182,12 @@ export function IndexIntelligencePage() {
         title={t("Index Intelligence")}
         subtitle={t("Compare locally stored index levels using reproducible, source-backed calculations.")}
         actions={
-          <Button type="button" variant="outline" size="sm" onClick={() => setRevision(value => value + 1)}>
+          <Button type="button" variant="outline" size="sm" onClick={() => {
+            requestGeneration.current++;
+            setResult(null);
+            setError("");
+            setRevision(value => value + 1);
+          }}>
             <RefreshCw aria-hidden="true" className="size-4" />{t("Reload local data")}
           </Button>
         } />
