@@ -111,12 +111,15 @@ export function ModelJobsPage() {
   }
 
   function switchHistory(filter: ModelJobFilter, nextPage: number) {
+    // A pager "Go" on the current page must not leave loading permanently true.
+    const target = Math.min(nextPage, 1000);
+    if (filter === statusFilter && target === page) return;
     // Invalidate earlier list and detail responses at the user interaction,
     // before React commits the new filter/page and cleans up the old effect.
     listSerial.current++;
     clearDetails();
     setStatusFilter(filter);
-    setPage(Math.min(nextPage, 1000));
+    setPage(target);
     setLoading(true);
   }
 
