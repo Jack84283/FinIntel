@@ -239,9 +239,7 @@ def test_incomplete_v15_mandatory_query_retains_report_and_exits_nonzero(tmp_pat
 
 
 @pytest.mark.parametrize("mandatory_status", ["failed", "not_run", "unexpected", None])
-def test_mandatory_query_not_measured_fails_closed(
-    tmp_path, monkeypatch, mandatory_status
-):
+def test_mandatory_query_not_measured_fails_closed(tmp_path, monkeypatch, mandatory_status):
     copy = tmp_path / "detached.sqlite3"
     _fixture(copy)
     before = copy.read_bytes()
