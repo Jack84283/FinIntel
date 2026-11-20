@@ -39,11 +39,11 @@ class BacktestContractError(ValueError):
 class BacktestAssumptions(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    initial_capital: Decimal = Field(default=Decimal("10000"), gt=0, le=Decimal("1e12"))
-    position_fraction: Decimal = Field(default=Decimal("1"), gt=0, le=1)
-    commission_bps: Decimal = Field(default=Decimal("0"), ge=0, le=1000)
-    slippage_bps: Decimal = Field(default=Decimal("0"), ge=0, le=1000)
-    risk_free_rate_annual: Decimal = Field(default=Decimal("0"), ge=Decimal("-0.99"), le=1)
+    initial_capital: Decimal = Field(default=Decimal(10000), gt=0, le=Decimal("1e12"))
+    position_fraction: Decimal = Field(default=Decimal(1), gt=0, le=1)
+    commission_bps: Decimal = Field(default=Decimal(0), ge=0, le=1000)
+    slippage_bps: Decimal = Field(default=Decimal(0), ge=0, le=1000)
+    risk_free_rate_annual: Decimal = Field(default=Decimal(0), ge=Decimal("-0.99"), le=1)
     execution: Literal["next_observed_session_close"] = "next_observed_session_close"
     sizing: Literal["fixed_fraction_long_or_flat"] = "fixed_fraction_long_or_flat"
     benchmark: Literal["frictionless_same_index_buy_hold"] = "frictionless_same_index_buy_hold"
@@ -316,8 +316,7 @@ def run_sma_backtest(*, research: dict, request: BacktestRequest) -> dict:
                 total_cost += cost
                 equity -= cost
                 exposure = target
-            if equity > peak:
-                peak = equity
+            peak = max(peak, equity)
             drawdown = equity / peak - Decimal(1)
             worst_drawdown = min(worst_drawdown, drawdown)
             daily_returns.append(equity / prior_equity - Decimal(1))
