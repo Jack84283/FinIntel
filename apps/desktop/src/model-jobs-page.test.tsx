@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ModelJobsPage, verifiedJobSnapshot, fetchCurrentModelJobDetails } from "./ModelJobsPage";
+import { createModelJobDetailFence } from "./model-job-detail-fence";
 import { type AnalyticsResult } from "./index-intelligence-api";
 import { type ModelResearchQuery } from "./model-research-api";
 import { translate } from "./localization";
@@ -78,6 +79,12 @@ describe("Phase 2B2 native Model Jobs workspace", () => {
     expect(page).toContain("queueModelJob({ ...query, expectedSnapshot })");
     expect(page).toContain("<TablePager page={page}");
     expect(page).toContain("fetchCurrentModelJobDetails(job.id)");
+    expect(page).toContain("switchHistory(event.target.value as ModelJobFilter, 0)");
+    expect(page).toContain("if (filter === statusFilter && target === page) return;");
+    expect(page).toContain("onPageChange={value => switchHistory(statusFilter, value)}");
+    expect(page).toContain("if (page > last) { switchHistory(statusFilter, last); return; }");
+    expect(page).toContain("detailFence.isCurrent(job.id, request)");
+    expect(page).toContain("generation !== listSerial.current");
     expect(page).toContain('t("Refresh details")');
     expect(page).toContain("cancelModelJob(job.id)");
     expect(page).toContain("retryModelJob(job.id)");
@@ -107,6 +114,33 @@ describe("Phase 2B2 native Model Jobs workspace", () => {
 
     jobDetails.getResult.mockRejectedValueOnce(new Error("Output hash mismatch"));
     await expect(fetchCurrentModelJobDetails(jobId)).rejects.toThrow("Output hash mismatch");
+  });
+
+  it("fences in-flight detail results across job switches, pagination, filtering and closure", () => {
+    const fence = createModelJobDetailFence();
+    const first = "123e4567-e89b-42d3-a456-426614174000";
+    const second = "123e4567-e89b-42d3-a456-426614174001";
+    const requestA = fence.begin(first);
+    expect(fence.isCurrent(first, requestA)).toBe(true);
+
+    // Inspecting another job invalidates the old result even before it resolves.
+    const requestB = fence.begin(second);
+    expect(fence.isCurrent(first, requestA)).toBe(false);
+    expect(fence.isCurrent(second, requestB)).toBe(true);
+
+    // The page calls invalidate on history navigation and unmount/close.
+    fence.invalidate();
+    expect(fence.isCurrent(second, requestB)).toBe(false);
+    const nextPageRequest = fence.begin(second);
+    expect(fence.isCurrent(second, requestB)).toBe(false);
+    expect(fence.isCurrent(second, nextPageRequest)).toBe(true);
+    fence.invalidate();
+    expect(fence.isCurrent(second, nextPageRequest)).toBe(false);
+
+    // Revisiting the same job must not accept an earlier generation.
+    const newRequestA = fence.begin(first);
+    expect(fence.isCurrent(first, requestA)).toBe(false);
+    expect(fence.isCurrent(first, newRequestA)).toBe(true);
   });
 
   it("translates job controls, operation errors, and states into Chinese", () => {
