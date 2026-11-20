@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { IndexIntelligencePage, latestCommonDate } from "./IndexIntelligencePage";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { IndexIntelligencePage, latestCommonDate, shiftYears } from "./IndexIntelligencePage";
 import {
   fetchIndexAnalytics, parseAnalyticsResult, validateAnalyticsQuery,
   type AnalyticsQuery, type AnalyticsResult,
@@ -381,6 +383,21 @@ describe("Index Intelligence UI and exact chart/grid values", () => {
     expect(shownChartLines([{ ...lines[0], values: Array.from({ length: 500 }, (_, i) => ({
       date: "2026-10-20", value: i,
     })) }])[0].values).toHaveLength(450);
+  });
+
+  it("clamps Feb 29 presets to the last valid target-month session date", () => {
+    expect(shiftYears("2024-02-29", 1)).toBe("2023-02-28");
+    expect(shiftYears("2024-02-29", 5)).toBe("2019-02-28");
+    expect(shiftYears("2025-02-28", 1)).toBe("2024-02-28");
+    expect(shiftYears("2026-03-01", 1)).toBe("2025-03-01");
+  });
+
+  it("invalidates analysis responses at selection/reload time, before passive effect cleanup", () => {
+    const page = readFileSync(join(import.meta.dirname, "IndexIntelligencePage.tsx"), "utf8");
+    expect(page).toContain("const patch = (updates: Partial<Config>) => {");
+    expect(page).toContain("requestGeneration.current++;\n    setResult(null);\n    setError(\"\");\n    setConfig");
+    expect(page).toContain("requestGeneration.current++;\n            setResult(null);\n            setError(\"\");\n            setRevision");
+    expect(page).toContain("if (id === requestGeneration.current) { setResult(value); setError(\"\"); }");
   });
 
   it("chooses last actually stored common date, not the computer clock", () => {
