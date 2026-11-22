@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation, localcontext
 from statistics import mean, stdev
+from typing import TypeVar
 
 CALCULATION_VERSION = "index-analytics-v2"
 MAX_OBSERVATIONS = 10_000
@@ -118,6 +119,17 @@ def _sample_stats(values: list[float]) -> tuple[float, float]:
     return mean(values), stdev(values)
 
 
+_Number = TypeVar("_Number", float, Decimal)
+
+
+def sample_covariance(
+    left: list[_Number], right: list[_Number], left_mean: _Number, right_mean: _Number
+) -> _Number:
+    return sum((a - left_mean) * (b - right_mean) for a, b in zip(left, right, strict=True)) / (
+        len(left) - 1
+    )
+
+
 def _period_returns(points: list[Observation], period: str) -> list[dict]:
     if period not in {"week", "month", "year"}:
         raise AnalyticsError("Unsupported return aggregation period")
@@ -145,6 +157,24 @@ def _period_returns(points: list[Observation], period: str) -> list[dict]:
     ]
 
 
+@dataclass
+class DrawdownTracker:
+    """Causal observed-session peak, trough, and latest recovery indices."""
+
+    peak: int = 0
+    trough: int = 0
+
+    def advance(self, observations: list[Observation], index: int) -> tuple[int, int] | None:
+        level = observations[index].close
+        if level >= observations[self.peak].close:
+            recovered = (self.peak, self.trough) if self.trough > self.peak else None
+            self.peak = self.trough = index
+            return recovered
+        if self.trough == self.peak or level < observations[self.trough].close:
+            self.trough = index
+        return None
+
+
 def _drawdown_recovery(
     observations: list[Observation],
 ) -> tuple[list[dict], int | None, int | None]:
@@ -156,43 +186,41 @@ def _drawdown_recovery(
     if len(observations) < 2:
         return [], None, None
     episodes: list[dict] = []
-    peak_index = trough_index = 0
+    tracker = DrawdownTracker()
     longest_completed: int | None = None
     for index in range(1, len(observations)):
-        level = observations[index].close
-        peak = observations[peak_index].close
-        if level >= peak:
-            if trough_index > peak_index:
-                duration = index - peak_index
-                episodes.append(
-                    {
-                        "status": "recovered",
-                        "peak_session_date": observations[peak_index].session_date.isoformat(),
-                        "trough_session_date": observations[trough_index].session_date.isoformat(),
-                        "recovery_session_date": observations[index].session_date.isoformat(),
-                        "trough_drawdown": _decimal(
-                            _simple(peak, observations[trough_index].close)
-                        ),
-                        "underwater_observed_sessions": duration - 1,
-                        "peak_to_recovery_observed_sessions": duration,
-                        "trough_to_recovery_observed_sessions": index - trough_index,
-                    }
-                )
-                longest_completed = max(longest_completed or 0, duration)
-            peak_index = trough_index = index
-        elif trough_index == peak_index or level < observations[trough_index].close:
-            trough_index = index
+        recovered = tracker.advance(observations, index)
+        if recovered is None:
+            continue
+        peak, trough = recovered
+        duration = index - peak
+        episodes.append(
+            {
+                "status": "recovered",
+                "peak_session_date": observations[peak].session_date.isoformat(),
+                "trough_session_date": observations[trough].session_date.isoformat(),
+                "recovery_session_date": observations[index].session_date.isoformat(),
+                "trough_drawdown": _decimal(
+                    _simple(observations[peak].close, observations[trough].close)
+                ),
+                "underwater_observed_sessions": duration - 1,
+                "peak_to_recovery_observed_sessions": duration,
+                "trough_to_recovery_observed_sessions": index - trough,
+            }
+        )
+        longest_completed = max(longest_completed or 0, duration)
     ongoing: int | None = None
-    if trough_index > peak_index:
-        ongoing = len(observations) - 1 - peak_index
+    if tracker.trough > tracker.peak:
+        peak, trough = tracker.peak, tracker.trough
+        ongoing = len(observations) - 1 - peak
         episodes.append(
             {
                 "status": "ongoing",
-                "peak_session_date": observations[peak_index].session_date.isoformat(),
-                "trough_session_date": observations[trough_index].session_date.isoformat(),
+                "peak_session_date": observations[peak].session_date.isoformat(),
+                "trough_session_date": observations[trough].session_date.isoformat(),
                 "recovery_session_date": None,
                 "trough_drawdown": _decimal(
-                    _simple(observations[peak_index].close, observations[trough_index].close)
+                    _simple(observations[peak].close, observations[trough].close)
                 ),
                 "underwater_observed_sessions": ongoing,
                 "peak_to_recovery_observed_sessions": None,
@@ -351,7 +379,7 @@ def compare_series(
         if i >= window and len(x) >= 2:
             mx, sx = _sample_stats(x)
             my, sy = _sample_stats(y)
-            cov = sum((a - mx) * (b - my) for a, b in zip(x, y, strict=True)) / (len(x) - 1)
+            cov = sample_covariance(x, y, mx, my)
             corr = cov / (sx * sy) if sx and sy else None
             beta = cov / (sy * sy) if sy else None
             tracking = stdev([a - b for a, b in zip(x, y, strict=True)]) * math.sqrt(

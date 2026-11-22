@@ -299,11 +299,11 @@ def _decimal_field(
     )
 
 
-def _trend_definition(
+def _proposed_price_index_definition(
     *,
     model: str,
     revision: str,
-    category: Literal["trend", "momentum"],
+    category: Literal["trend", "momentum", "risk"],
     description: str,
     parameters: type[StrictModel],
     fields: tuple[OutputField, ...],
@@ -312,6 +312,7 @@ def _trend_definition(
     min_sources: int = 1,
     max_sources: int = 1,
     signal_availability: Literal["none", "after_observed_close"] = "none",
+    calculation_version: str = CALCULATION_VERSION,
 ) -> ModelDefinition:
     return ModelDefinition(
         metadata=ModelMetadata(
@@ -331,7 +332,7 @@ def _trend_definition(
             execution=ExecutionPolicy(
                 max_worker_runtime_seconds=MAX_RUNTIME_SECONDS, max_result_bytes=MAX_RESULT_BYTES
             ),
-            calculation_version=CALCULATION_VERSION,
+            calculation_version=calculation_version,
             evidence_contract_version="analysis-model-evidence-v1",
         ),
         parameter_type=parameters,
@@ -340,7 +341,7 @@ def _trend_definition(
     )
 
 
-EMA_DEFINITION = _trend_definition(
+EMA_DEFINITION = _proposed_price_index_definition(
     model="ema_trend",
     revision="ema-sma-seed-decimal-v1",
     category="trend",
@@ -374,7 +375,7 @@ EMA_DEFINITION = _trend_definition(
     signal_availability="after_observed_close",
 )
 
-MOMENTUM_DEFINITION = _trend_definition(
+MOMENTUM_DEFINITION = _proposed_price_index_definition(
     model="momentum",
     revision="momentum-trailing-observed-v1",
     category="momentum",
@@ -394,7 +395,7 @@ MOMENTUM_DEFINITION = _trend_definition(
     parameter_minimum=_minimum_momentum_observations,
 )
 
-RELATIVE_STRENGTH_DEFINITION = _trend_definition(
+RELATIVE_STRENGTH_DEFINITION = _proposed_price_index_definition(
     model="relative_strength",
     revision="relative-strength-common-baseline-v1",
     category="momentum",
@@ -423,7 +424,7 @@ RELATIVE_STRENGTH_DEFINITION = _trend_definition(
     max_sources=4,
 )
 
-RSI_DEFINITION = _trend_definition(
+RSI_DEFINITION = _proposed_price_index_definition(
     model="rsi_state",
     revision="rsi-simple-rolling-states-v1",
     category="momentum",
@@ -451,6 +452,80 @@ RSI_DEFINITION = _trend_definition(
 )
 
 
+RISK_MODEL_ID = "builtin.risk_profile"
+MIN_TAIL_RETURNS = 60
+
+
+class RiskParameters(StrictModel):
+    risk_window: int = Field(default=63, ge=2, lt=MAX_MODEL_OBSERVATIONS)
+    tail_window: int = Field(default=252, ge=MIN_TAIL_RETURNS, lt=MAX_MODEL_OBSERVATIONS)
+
+
+RISK_DEFINITION = _proposed_price_index_definition(
+    model=RISK_MODEL_ID.removeprefix("builtin."),
+    revision="historical-risk-linear95-decimal-v1",
+    calculation_version="historical-risk-v1",
+    category="risk",
+    description="Historical price-index risk and optional aligned correlation",
+    parameters=RiskParameters,
+    fields=(
+        _CLOSE,
+        *(
+            _decimal_field(name, "decimal_return")
+            for name in (
+                "simple_return",
+                "comparison_return",
+                "annualized_volatility",
+                "downside_deviation",
+                "var_95",
+                "expected_shortfall_95",
+            )
+        ),
+        _decimal_field("correlation", "ratio"),
+        _decimal_field("current_drawdown", "decimal_return", nullable=False),
+        _decimal_field("maximum_drawdown", "decimal_return", nullable=False),
+        *(
+            OutputField(name=name, kind="date", units="iso_date", nullable=True)
+            for name in (
+                "open_peak_date",
+                "open_trough_date",
+                "maximum_peak_date",
+                "maximum_trough_date",
+                "last_recovered_peak_date",
+                "last_recovered_trough_date",
+                "last_recovery_date",
+            )
+        ),
+        *(
+            OutputField(name=name, kind="integer", units="observed_intervals", nullable=True)
+            for name in (
+                "open_elapsed_intervals",
+                "last_peak_to_recovery_intervals",
+                "last_trough_to_recovery_intervals",
+            )
+        ),
+        OutputField(
+            name="historical_sample_count",
+            kind="integer",
+            units="observed_intervals",
+            nullable=False,
+        ),
+        OutputField(
+            name="historical_tail_count", kind="integer", units="observed_intervals", nullable=True
+        ),
+        OutputField(
+            name="historical_tail_status",
+            kind="enum",
+            units="risk_status",
+            nullable=False,
+            allowed_values=("insufficient_history", "empty_tail", "available"),
+        ),
+    ),
+    observations=ObservationRequirements(minimum=1, maximum=MAX_MODEL_OBSERVATIONS),
+    max_sources=2,
+)
+
+
 # Catalog registration is never an executable dispatch table. Legacy API, worker,
 # and engine still independently allowlist only the original built-in SMA.
 def _index_definitions(
@@ -471,6 +546,7 @@ _DEFINITIONS = _index_definitions(
     MOMENTUM_DEFINITION,
     RELATIVE_STRENGTH_DEFINITION,
     RSI_DEFINITION,
+    RISK_DEFINITION,
 )
 
 

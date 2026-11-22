@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import sqlite3
-from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime
-from decimal import ROUND_HALF_EVEN, Context, Decimal, DecimalException, localcontext
+from datetime import date, datetime
+from decimal import Decimal, DecimalException, localcontext
 from pathlib import Path
 
 from finintel.market_data.analytics import (
@@ -16,19 +14,15 @@ from finintel.market_data.analytics import (
     relative_strength_ratio,
     rolling_rsi,
     shared_session_dates,
-    validated_observations,
 )
-from finintel.market_data.analytics_store import _quality_status, _read_series
-from finintel.models.contracts import (
-    AnalysisEvidence,
-    AnalysisRequest,
-    AnalysisResult,
-    ModelIdentity,
-    ObservationRange,
-    OutputValue,
-    QualityEvidence,
-    SourceEvidence,
-    SourcePin,
+from finintel.models.contracts import AnalysisRequest, AnalysisResult
+from finintel.models.evaluation import (
+    MODEL_DECIMAL_CONTEXT,
+    PinnedInput,
+    Point,
+    build_result,
+    fixed_decimal,
+    read_pinned_inputs,
 )
 from finintel.models.registry import (
     EmaParameters,
@@ -37,36 +31,10 @@ from finintel.models.registry import (
     RsiParameters,
     get_model_definition,
 )
-from finintel.storage.db import StorageError, _read_connection, database_path
-
-Point = dict[str, OutputValue]
-# Bound fixed-point expansion from corrupt local data before formatting, even if
-# SQLite contains a short scientific-notation string for a huge exponent.
-MAX_DECIMAL_CHARACTERS = 256
-_DECIMAL_CONTEXT = Context(prec=28, rounding=ROUND_HALF_EVEN)
-
-
-@dataclass(frozen=True)
-class _Input:
-    pin: SourcePin
-    rows: list[Observation]
-    quality: QualityEvidence
-
-
-def _fixed(value: Decimal | None) -> str | None:
-    if value is None:
-        return None
-    representation = value.as_tuple()
-    digits = len(representation.digits)
-    places = representation.exponent
-    length = max(1, digits + places) + (1 - places if places < 0 else 0)
-    if length + representation.sign > MAX_DECIMAL_CHARACTERS:
-        raise AnalyticsError("Fixed-point model result exceeds the numeric representation limit")
-    return format(value, "f")
 
 
 def _point(row: Observation) -> Point:
-    return {"session_date": row.session_date.isoformat(), "close": _fixed(row.close)}
+    return {"session_date": row.session_date.isoformat(), "close": fixed_decimal(row.close)}
 
 
 def _ema(prices: list[Decimal], window: int) -> list[Decimal | None]:
@@ -107,9 +75,9 @@ def _ema_points(rows: list[Observation], parameters: EmaParameters) -> tuple[Poi
         points.append(
             {
                 **_point(row),
-                "fast_ema": _fixed(fast),
-                "slow_ema": _fixed(slow),
-                "ema_difference": _fixed(difference),
+                "fast_ema": fixed_decimal(fast),
+                "slow_ema": fixed_decimal(slow),
+                "ema_difference": fixed_decimal(difference),
                 "trend_after_close": trend,
                 "crossover_after_close": event,
                 "warmup_complete": difference is not None,
@@ -129,8 +97,10 @@ def _momentum_points(rows: list[Observation], parameters: MomentumParameters) ->
                 "comparison_session_date": comparison.session_date.isoformat()
                 if comparison
                 else None,
-                "comparison_close": _fixed(comparison.close) if comparison else None,
-                "momentum": _fixed(_simple(comparison.close, row.close)) if comparison else None,
+                "comparison_close": fixed_decimal(comparison.close) if comparison else None,
+                "momentum": fixed_decimal(_simple(comparison.close, row.close))
+                if comparison
+                else None,
                 "lookback_sessions": lookback,
                 "warmup_complete": comparison is not None,
             }
@@ -154,7 +124,7 @@ def _rsi_points(rows: list[Observation], parameters: RsiParameters) -> tuple[Poi
         points.append(
             {
                 **_point(row),
-                "rsi": _fixed(rsi),
+                "rsi": fixed_decimal(rsi),
                 "rsi_state": state,
                 "lower_threshold": parameters.lower_threshold,
                 "upper_threshold": parameters.upper_threshold,
@@ -165,7 +135,7 @@ def _rsi_points(rows: list[Observation], parameters: RsiParameters) -> tuple[Poi
 
 
 def _relative_points(
-    inputs: list[_Input], sessions: list[date], output_names: tuple[str, ...]
+    inputs: list[PinnedInput], sessions: list[date], output_names: tuple[str, ...]
 ) -> tuple[Point, ...]:
     levels = {
         source.pin.identity.code.lower(): {row.session_date: row.close for row in source.rows}
@@ -183,65 +153,15 @@ def _relative_points(
         point.update(session_date=session.isoformat(), benchmark=benchmark)
         for code, by_day in levels.items():
             close, seed = by_day[session], by_day[first]
-            point[f"{code}_normalized_100"] = _fixed(normalized_level(close, seed))
-            point[f"{code}_relative_strength"] = _fixed(
+            point[f"{code}_normalized_100"] = fixed_decimal(normalized_level(close, seed))
+            point[f"{code}_relative_strength"] = fixed_decimal(
                 relative_strength_ratio(close, seed, benchmark_close, benchmark_seed)
             )
-            point[f"{code}_return_difference"] = _fixed(_simple(seed, close) - benchmark_return)
+            point[f"{code}_return_difference"] = fixed_decimal(
+                _simple(seed, close) - benchmark_return
+            )
         points.append(point)
     return tuple(points)
-
-
-def _read_inputs(request: AnalysisRequest, db: Path | None, maximum: int) -> list[_Input]:
-    conn = _read_connection(db if db is not None else database_path())
-    if conn is None:
-        raise AnalyticsError("No local stored observations are available")
-    try:
-        inputs = []
-        for pin in request.sources:
-            source = pin.identity
-            identity, rows, provenance = _read_series(
-                conn,
-                kind=source.instrument_kind,
-                code=source.code,
-                provider=source.provider,
-                start=request.window.start,
-                end=request.window.end,
-                max_observations=maximum,
-            )
-            if asdict(identity) != source.model_dump():
-                raise AnalyticsError("Stored identity does not match the pinned price-index source")
-            if provenance["snapshot_sha256"] != pin.snapshot_sha256:
-                raise AnalyticsError("Local source snapshot changed; refresh analysis inputs")
-            quality = _quality_status(conn, [source.code], precise_scan_status=True)
-            if quality["quality_verified"]:
-                evidence = QualityEvidence(status="verified")
-            elif request.quality_policy == "require_complete":
-                raise AnalyticsError("Current complete Data Quality scan required for each source")
-            else:
-                match quality["status"]:
-                    case "not_run":
-                        evidence = QualityEvidence(
-                            status="not_run", warnings=("quality_scan_not_run",)
-                        )
-                    case "partial":
-                        evidence = QualityEvidence(
-                            status="partial", warnings=("quality_scan_partial",)
-                        )
-                    case "complete":
-                        evidence = QualityEvidence(
-                            status="blocked", warnings=("unresolved_quality_findings",)
-                        )
-                    case "stale":
-                        evidence = QualityEvidence(status="stale", warnings=("quality_scan_stale",))
-                    case _:
-                        raise AnalyticsError("Unsupported Data Quality scan status")
-            inputs.append(_Input(pin, validated_observations(rows), evidence))
-        return inputs
-    except sqlite3.Error as exc:
-        raise StorageError("Local trend model query failed") from exc
-    finally:
-        conn.close()
 
 
 def evaluate_trend_model(
@@ -261,7 +181,7 @@ def evaluate_trend_model(
     }:
         raise AnalyticsError("Unsupported Trend & Momentum model")
 
-    inputs = _read_inputs(request, db, model.observations.maximum)
+    inputs = read_pinned_inputs(request, db, model.observations.maximum, family="Trend")
     minimum = (
         definition.parameter_minimum(parameters)
         if definition.parameter_minimum is not None
@@ -275,7 +195,7 @@ def evaluate_trend_model(
 
     rows = inputs[0].rows
     try:
-        with localcontext(_DECIMAL_CONTEXT):
+        with localcontext(MODEL_DECIMAL_CONTEXT):
             match model_id, parameters:
                 case "builtin.ema_trend", EmaParameters():
                     points = _ema_points(rows, parameters)
@@ -292,41 +212,6 @@ def evaluate_trend_model(
     except DecimalException as exc:
         raise AnalyticsError("Trend model calculation is outside the numeric range") from exc
 
-    evidence = AnalysisEvidence(
-        model=ModelIdentity(
-            model_id=model_id,
-            model_version=model.model_version,
-            implementation_revision=model.implementation_revision,
-        ),
-        calculation_version=model.calculation_version,
-        sources=tuple(
-            SourceEvidence(
-                identity=source.pin.identity,
-                snapshot_sha256=source.pin.snapshot_sha256,
-                observed=ObservationRange(
-                    start=source.rows[0].session_date,
-                    end=source.rows[-1].session_date,
-                    count=len(source.rows),
-                ),
-                aligned_count=len(sessions),
-                excluded_count=len(source.rows) - len(sessions),
-                quality=source.quality,
-            )
-            for source in inputs
-        ),
-        requested=request.window,
-        observed_sessions=tuple(sessions),
-        parameters=parameters.model_dump(),
-        output_fields=model.output_fields,
-        quality_policy=request.quality_policy,
-        warnings=("quality_override",) if request.quality_policy == "allow_unverified" else (),
+    return build_result(
+        request, definition, parameters, inputs, sessions, points, evaluated_at_utc, family="Trend"
     )
-    result = AnalysisResult.from_evaluation(
-        evidence=evidence,
-        points=points,
-        evaluated_at_utc=evaluated_at_utc if evaluated_at_utc is not None else datetime.now(UTC),
-    )
-    if len(result.model_dump_json().encode("utf-8")) > model.execution.max_result_bytes:
-        raise AnalyticsError("Trend model result exceeds the output size limit")
-    definition.validate_result(request, result)
-    return result
