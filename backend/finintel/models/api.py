@@ -8,7 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from finintel.market_data.analytics import AnalyticsError
 from finintel.models.engine import evaluate_builtin_indicator
-from finintel.models.registry import MODEL_ID, MODEL_VERSION, ModelParameters, model_registry
+from finintel.models.registry import (
+    MODEL_ID,
+    MODEL_VERSION,
+    ModelParameters,
+    analysis_model_registry,
+    model_registry,
+)
 from finintel.settings.api import _require_managed
 from finintel.storage.db import StorageError
 
@@ -61,6 +67,11 @@ class ModelResearchResult(BaseModel):
 @router.get("/registry")
 def get_model_registry() -> dict:
     return model_registry()
+
+
+@router.get("/registry/v2")
+def get_analysis_model_registry() -> dict:
+    return analysis_model_registry()
 
 
 @router.post("/evaluate", response_model=ModelResearchResult)

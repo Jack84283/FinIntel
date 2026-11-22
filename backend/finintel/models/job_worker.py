@@ -20,11 +20,10 @@ from finintel.market_data.analytics import AnalyticsError
 from finintel.market_data.analytics_store import run_analytics
 from finintel.models.engine import evaluate_builtin_indicator
 from finintel.models.job_store import ModelJobLedger, ModelJobStoreError
-from finintel.models.registry import MAX_MODEL_OBSERVATIONS
+from finintel.models.registry import MAX_MODEL_OBSERVATIONS, MAX_RUNTIME_SECONDS
 from finintel.storage.db import StorageError
 
 POLL_SECONDS = 0.2
-MAX_RUNTIME_SECONDS = 90
 TERMINATE_GRACE_SECONDS = 2
 # Additional worker memory guard: Linux address space, Windows job object,
 # and a macOS RSS watchdog. The latter is polling rather than a hard kernel cap.
