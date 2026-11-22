@@ -112,6 +112,11 @@ def test_registry_lookup_metadata_and_legacy_discovery():
     assert {source["code"] for source in entry["supported_sources"]} == set(
         legacy["input_contract"]["allowed_codes"]
     )
+    assert {field["name"] for field in entry["output_fields"] if field["strictly_positive"]} == {
+        "close",
+        "fast_sma",
+        "slow_sma",
+    }
     entry["supported_sources"].clear()
     assert len(analysis_model_registry()["models"][0]["supported_sources"]) == 4
     with pytest.raises(ValidationError):
@@ -205,7 +210,7 @@ def test_result_round_trip_and_stable_hashes():
     )
     assert (
         result.reproducibility_sha256
-        == "66ba1e9992d68c838fba7fe21fe022c21f255014edd5abd89f76323dec93d871"
+        == "fdc479377d1437a0bef5f3553ab3e20a2ff5a19f7e3940064537ed96a766f089"
     )
     with pytest.raises(ValidationError, match="Output hash|output hash"):
         AnalysisResult(**{**result.model_dump(), "output_sha256": "0" * 64})
@@ -230,6 +235,27 @@ def test_result_round_trip_and_stable_hashes():
 def test_result_points_match_schema_and_observed_dates(point):
     with pytest.raises(ValidationError):
         _result(_evidence(_request()), **point)
+
+
+@pytest.mark.parametrize("field", ["close", "fast_sma", "slow_sma"])
+@pytest.mark.parametrize("value", ["0", "-1", "-0.00"])
+def test_sma_result_rejects_nonpositive_prices(field, value):
+    with pytest.raises(ValidationError, match="Point does not match the declared output schema"):
+        _result(_evidence(_request()), **{field: value})
+
+
+def test_decimal_output_positivity_is_opt_in():
+    field = OutputField(name="drawdown", kind="decimal", units="percent", nullable=False)
+    assert field.accepts("-1.25")
+    assert field.accepts("0")
+    with pytest.raises(ValidationError, match="only supported for decimal"):
+        OutputField(
+            name="session_date",
+            kind="date",
+            units="iso_date",
+            nullable=False,
+            strictly_positive=True,
+        )
 
 
 def test_result_binds_revision_and_parameter_dependent_range():

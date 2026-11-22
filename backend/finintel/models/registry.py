@@ -191,9 +191,27 @@ SMA_DEFINITION = ModelDefinition(
         allows_unverified=True,
         output_fields=(
             OutputField(name="session_date", kind="date", units="iso_date", nullable=False),
-            OutputField(name="close", kind="decimal", units="index_points", nullable=False),
-            OutputField(name="fast_sma", kind="decimal", units="index_points", nullable=True),
-            OutputField(name="slow_sma", kind="decimal", units="index_points", nullable=True),
+            OutputField(
+                name="close",
+                kind="decimal",
+                units="index_points",
+                nullable=False,
+                strictly_positive=True,
+            ),
+            OutputField(
+                name="fast_sma",
+                kind="decimal",
+                units="index_points",
+                nullable=True,
+                strictly_positive=True,
+            ),
+            OutputField(
+                name="slow_sma",
+                kind="decimal",
+                units="index_points",
+                nullable=True,
+                strictly_positive=True,
+            ),
             OutputField(
                 name="signal_after_close",
                 kind="enum",

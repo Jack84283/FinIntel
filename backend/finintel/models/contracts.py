@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from re import fullmatch
 from typing import Annotated, Literal
 
@@ -112,6 +113,7 @@ class OutputField(StrictModel):
     kind: Literal["date", "decimal", "integer", "boolean", "enum", "reason_codes"]
     units: Revision
     nullable: bool
+    strictly_positive: bool = False
     allowed_values: tuple[Revision, ...] = ()
 
     def accepts(self, value: OutputValue) -> bool:
@@ -126,9 +128,11 @@ class OutputField(StrictModel):
                 except ValueError:
                     return False
             case "decimal":
-                return isinstance(value, str) and bool(
-                    fullmatch(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?", value)
-                )
+                if not isinstance(value, str) or not fullmatch(
+                    r"-?(0|[1-9][0-9]*)(\.[0-9]+)?", value
+                ):
+                    return False
+                return not self.strictly_positive or Decimal(value) > 0
             case "integer":
                 return type(value) is int
             case "boolean":
@@ -143,7 +147,9 @@ class OutputField(StrictModel):
                 )
 
     @model_validator(mode="after")
-    def validate_choices(self) -> OutputField:
+    def validate_constraints(self) -> OutputField:
+        if self.strictly_positive and self.kind != "decimal":
+            raise ValueError("Strict positivity is only supported for decimal output fields")
         if (self.kind in {"enum", "reason_codes"}) != bool(self.allowed_values):
             raise ValueError("Enum and reason-code fields require declared allowed values")
         if len(set(self.allowed_values)) != len(self.allowed_values):
