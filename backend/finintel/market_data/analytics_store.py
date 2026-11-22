@@ -102,7 +102,10 @@ def _read_series(
     return identity, rows, provenance
 
 
-def _quality_status(conn: sqlite3.Connection, codes: list[str]) -> dict:
+def _quality_status(
+    conn: sqlite3.Connection, codes: list[str], *, precise_scan_status: bool = False
+) -> dict:
+    """Keep the legacy analytics status unless model evidence needs the scan lifecycle."""
     tables = {
         row[0]
         for row in conn.execute(
@@ -111,7 +114,11 @@ def _quality_status(conn: sqlite3.Connection, codes: list[str]) -> dict:
         )
     }
     if len(tables) < 3:
-        return {"status": "unknown", "quality_verified": False, "active_unresolved_errors": None}
+        return {
+            "status": "not_run" if precise_scan_status else "unknown",
+            "quality_verified": False,
+            "active_unresolved_errors": None,
+        }
     scan = conn.execute(
         "SELECT status,stale,source_data_version_end,validation_reference_date "
         "FROM data_quality_scan_progress WHERE scan_key='all'"
@@ -129,16 +136,25 @@ def _quality_status(conn: sqlite3.Connection, codes: list[str]) -> dict:
     ).fetchone()
     bad = unresolved["errors"] or 0
     current = datetime.now(UTC).date().isoformat()
-    complete = bool(
+    scan_current = bool(
         scan is not None
         and source is not None
-        and scan["status"] == "completed"
+        and scan["status"] != "stale"
         and not scan["stale"]
         and scan["source_data_version_end"] == source["source_version"]
         and scan["validation_reference_date"] == current
     )
+    complete = scan_current and scan["status"] == "completed"
+    status = "complete" if complete else "stale_or_partial"
+    if precise_scan_status and not complete:
+        if scan is None:
+            status = "not_run"
+        elif scan_current:
+            status = "partial"
+        else:
+            status = "stale"
     return {
-        "status": "complete" if complete else "stale_or_partial",
+        "status": status,
         "quality_verified": complete and unresolved["total"] == 0,
         "active_unresolved_errors": bad,
         "active_unresolved_findings": unresolved["total"],

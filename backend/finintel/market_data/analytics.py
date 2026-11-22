@@ -81,6 +81,33 @@ def _simple(left: Decimal, right: Decimal) -> Decimal:
         return right / left - Decimal(1)
 
 
+def rolling_rsi(prices: list[Decimal], index: int, window: int) -> Decimal | None:
+    """Simple rolling gains and losses over actual observed price changes."""
+    if index < window:
+        return None
+    differences = [prices[j] - prices[j - 1] for j in range(index - window + 1, index + 1)]
+    gains = sum((max(value, Decimal(0)) for value in differences), Decimal(0))
+    losses = sum((-min(value, Decimal(0)) for value in differences), Decimal(0))
+    return Decimal(50) if gains + losses == 0 else Decimal(100) * gains / (gains + losses)
+
+
+def normalized_level(level: Decimal, initial: Decimal) -> Decimal:
+    return level / initial * 100
+
+
+def relative_strength_ratio(
+    level: Decimal, initial: Decimal, benchmark: Decimal, benchmark_initial: Decimal
+) -> Decimal:
+    return (level / initial) / (benchmark / benchmark_initial)
+
+
+def shared_session_dates(series: list[list[Observation]]) -> list[date]:
+    shared = {point.session_date for point in series[0]}
+    for observations in series[1:]:
+        shared.intersection_update(point.session_date for point in observations)
+    return sorted(shared)
+
+
 def _log(left: Decimal, right: Decimal) -> float:
     return math.log(float(right / left))
 
@@ -226,17 +253,12 @@ def compute_series(
         roll = [float(v) for v in returns[i - window : i]] if i >= window else []
         ma = sum(prices[i - window + 1 : i + 1]) / window if i + 1 >= window else None
         momentum = _simple(prices[i - window], level) if i >= window else None
-        rsi = None
-        if i >= window:
-            differences = [prices[j] - prices[j - 1] for j in range(i - window + 1, i + 1)]
-            gains = sum((max(value, Decimal(0)) for value in differences), Decimal(0))
-            losses = sum((-min(value, Decimal(0)) for value in differences), Decimal(0))
-            rsi = Decimal(50) if gains + losses == 0 else Decimal(100) * gains / (gains + losses)
+        rsi = rolling_rsi(prices, i, window)
         points.append(
             {
                 "session_date": day,
                 "close": _decimal(level),
-                "normalized_100": _decimal(level / prices[0] * 100) if prices else None,
+                "normalized_100": _decimal(normalized_level(level, prices[0])) if prices else None,
                 "simple_return": _decimal(returns[i - 1]) if allowed and i else None,
                 "log_return": _decimal(log_returns[i - 1]) if allowed and i else None,
                 "cumulative_return": _decimal(_simple(prices[0], level)) if allowed else None,
@@ -338,11 +360,13 @@ def compare_series(
         points.append(
             {
                 "session_date": day.isoformat(),
-                "left_normalized_100": _decimal(lvals[i] / lvals[0] * 100),
-                "right_normalized_100": _decimal(rvals[i] / rvals[0] * 100),
+                "left_normalized_100": _decimal(normalized_level(lvals[i], lvals[0])),
+                "right_normalized_100": _decimal(normalized_level(rvals[i], rvals[0])),
                 "left_return": _decimal(left_r[i - 1]) if i else None,
                 "right_return": _decimal(right_r[i - 1]) if i else None,
-                "relative_strength": _decimal((lvals[i] / lvals[0]) / (rvals[i] / rvals[0])),
+                "relative_strength": _decimal(
+                    relative_strength_ratio(lvals[i], lvals[0], rvals[i], rvals[0])
+                ),
                 "rolling_correlation": _decimal(corr) if corr is not None else None,
                 "rolling_covariance": _decimal(cov) if cov is not None else None,
                 "rolling_beta": _decimal(beta) if beta is not None else None,
