@@ -90,6 +90,13 @@ def test_reproducible_model_outputs_and_close_only_signal_order(tmp_path):
     assert first["execution_contract"] == "model-research-evaluation-v1"
     assert first["reproducibility_sha256"] == again["reproducibility_sha256"]
     assert first["output_sha256"] == again["output_sha256"]
+    # Fixed on the pre-AL-01 evaluator against the same synthetic snapshot.
+    assert first["reproducibility_sha256"] == (
+        "bf28a9c175654d85d182224f373e63c0c84c5d508b09c240f609069830126ce2"
+    )
+    assert first["output_sha256"] == (
+        "47c08dc355e727ca1a54e14c153f992c411852fe5c77e9fde9a9a027be55b923"
+    )
     assert first["points"] == again["points"]
     assert first["read_only"] and first["no_network"] and first["no_synthetic_sessions"]
     assert first["signal_after_close_only"] and not first["backtest_validated"]

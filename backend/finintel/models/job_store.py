@@ -23,6 +23,7 @@ from finintel.models.api import ModelResearchResult
 from finintel.models.registry import (
     IMPLEMENTATION_REVISION,
     MAX_MODEL_OBSERVATIONS,
+    MAX_RESULT_BYTES,
     MODEL_ID,
     MODEL_VERSION,
     ModelParameters,
@@ -31,7 +32,6 @@ from finintel.storage.db import database_path
 
 JOB_SCHEMA_VERSION = 1
 MAX_ACTIVE_JOBS = 32
-MAX_RESULT_BYTES = 4 * 1024 * 1024
 MAX_ATTEMPTS = 3
 MAX_LIST_LIMIT = 100
 
