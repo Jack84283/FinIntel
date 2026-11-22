@@ -10,7 +10,7 @@ from collections.abc import Callable
 from types import MappingProxyType
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from finintel.market_data.analytics import CALCULATION_VERSION
 from finintel.models.contracts import (
@@ -35,6 +35,19 @@ MAX_RUNTIME_SECONDS = 90
 MAX_RESULT_BYTES = 4 * 1024 * 1024
 
 SUPPORTED_CODES = ("SP500", "DJIA", "NASDAQCOM", "NDX")
+
+PRICE_INDEX_SOURCES = tuple(
+    SourceIdentity(
+        instrument_kind="index",
+        code=code,
+        provider="fred",
+        adjustment="price_index",
+        return_semantics="price_index",
+        frequency="daily",
+        units="index_points",
+    )
+    for code in SUPPORTED_CODES
+)
 
 
 class ModelParameters(StrictModel):
@@ -173,18 +186,7 @@ SMA_DEFINITION = ModelDefinition(
         implementation_revision=IMPLEMENTATION_REVISION,
         category="trend",
         description="Trailing SMA crossover signal (research only)",
-        supported_sources=tuple(
-            SourceIdentity(
-                instrument_kind="index",
-                code=code,
-                provider="fred",
-                adjustment="price_index",
-                return_semantics="price_index",
-                frequency="daily",
-                units="index_points",
-            )
-            for code in SUPPORTED_CODES
-        ),
+        supported_sources=PRICE_INDEX_SOURCES,
         observations=ObservationRequirements(
             minimum=4, maximum=MAX_MODEL_OBSERVATIONS, parameter_minimum="slow_window + 1"
         ),
@@ -234,6 +236,221 @@ SMA_DEFINITION = ModelDefinition(
 )
 
 
+class EmaParameters(StrictModel):
+    fast_window: int = Field(default=12, ge=1, le=MAX_MODEL_OBSERVATIONS - 1)
+    slow_window: int = Field(default=26, ge=2, le=MAX_MODEL_OBSERVATIONS)
+
+    @model_validator(mode="after")
+    def validate_order(self) -> EmaParameters:
+        if self.fast_window >= self.slow_window:
+            raise ValueError("Fast window must be less than slow window")
+        return self
+
+
+class MomentumParameters(StrictModel):
+    lookback_sessions: Literal[21, 63, 126, 252] = 63
+
+    @field_validator("lookback_sessions", mode="before")
+    @classmethod
+    def require_integer_lookback(cls, value: object) -> object:
+        if type(value) is not int:
+            raise ValueError("Momentum lookback must be an integer")
+        return value
+
+
+class RelativeStrengthParameters(StrictModel):
+    """The first pinned source is the benchmark."""
+
+
+class RsiParameters(StrictModel):
+    window: int = Field(default=14, ge=1, le=MAX_MODEL_OBSERVATIONS - 1)
+    lower_threshold: int = Field(default=30, ge=0, le=100)
+    upper_threshold: int = Field(default=70, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def validate_thresholds(self) -> RsiParameters:
+        if self.lower_threshold >= self.upper_threshold:
+            raise ValueError("Lower RSI threshold must be less than upper threshold")
+        return self
+
+
+def _minimum_ema_observations(parameters: StrictModel) -> int:
+    assert isinstance(parameters, EmaParameters)
+    return parameters.slow_window
+
+
+def _minimum_momentum_observations(parameters: StrictModel) -> int:
+    assert isinstance(parameters, MomentumParameters)
+    return parameters.lookback_sessions + 1
+
+
+_SESSION = OutputField(name="session_date", kind="date", units="iso_date", nullable=False)
+_CLOSE = OutputField(
+    name="close", kind="decimal", units="index_points", nullable=False, strictly_positive=True
+)
+_WARMUP = OutputField(name="warmup_complete", kind="boolean", units="flag", nullable=False)
+
+
+def _decimal_field(
+    name: str, units: str, *, nullable: bool = True, positive: bool = False
+) -> OutputField:
+    return OutputField(
+        name=name, kind="decimal", units=units, nullable=nullable, strictly_positive=positive
+    )
+
+
+def _trend_definition(
+    *,
+    model: str,
+    revision: str,
+    category: Literal["trend", "momentum"],
+    description: str,
+    parameters: type[StrictModel],
+    fields: tuple[OutputField, ...],
+    observations: ObservationRequirements,
+    parameter_minimum: Callable[[StrictModel], int] | None = None,
+    min_sources: int = 1,
+    max_sources: int = 1,
+    signal_availability: Literal["none", "after_observed_close"] = "none",
+) -> ModelDefinition:
+    return ModelDefinition(
+        metadata=ModelMetadata(
+            model_id=f"builtin.{model}",
+            model_version="1.0.0",
+            implementation_revision=revision,
+            category=category,
+            description=description,
+            supported_sources=PRICE_INDEX_SOURCES,
+            min_sources=min_sources,
+            max_sources=max_sources,
+            observations=observations,
+            allows_unverified=True,
+            output_fields=(_SESSION, *fields),
+            signal_availability=signal_availability,
+            calculation_timing="after_observed_close",
+            execution=ExecutionPolicy(
+                max_worker_runtime_seconds=MAX_RUNTIME_SECONDS, max_result_bytes=MAX_RESULT_BYTES
+            ),
+            calculation_version=CALCULATION_VERSION,
+            evidence_contract_version="analysis-model-evidence-v1",
+        ),
+        parameter_type=parameters,
+        availability="proposed",
+        parameter_minimum=parameter_minimum,
+    )
+
+
+EMA_DEFINITION = _trend_definition(
+    model="ema_trend",
+    revision="ema-sma-seed-decimal-v1",
+    category="trend",
+    description="SMA-seeded EMA trend and crossover after the observed close",
+    parameters=EmaParameters,
+    fields=(
+        _CLOSE,
+        _decimal_field("fast_ema", "index_points", positive=True),
+        _decimal_field("slow_ema", "index_points", positive=True),
+        _decimal_field("ema_difference", "index_points"),
+        OutputField(
+            name="trend_after_close",
+            kind="enum",
+            units="state",
+            nullable=True,
+            allowed_values=("above", "flat", "below"),
+        ),
+        OutputField(
+            name="crossover_after_close",
+            kind="enum",
+            units="event",
+            nullable=True,
+            allowed_values=("above", "none", "below"),
+        ),
+        _WARMUP,
+    ),
+    observations=ObservationRequirements(
+        minimum=2, maximum=MAX_MODEL_OBSERVATIONS, parameter_minimum="slow_window"
+    ),
+    parameter_minimum=_minimum_ema_observations,
+    signal_availability="after_observed_close",
+)
+
+MOMENTUM_DEFINITION = _trend_definition(
+    model="momentum",
+    revision="momentum-trailing-observed-v1",
+    category="momentum",
+    description="Historical FRED price-index change over observed sessions, excluding dividends",
+    parameters=MomentumParameters,
+    fields=(
+        _CLOSE,
+        OutputField(name="comparison_session_date", kind="date", units="iso_date", nullable=True),
+        _decimal_field("comparison_close", "index_points", positive=True),
+        _decimal_field("momentum", "decimal_return"),
+        OutputField(name="lookback_sessions", kind="integer", units="sessions", nullable=False),
+        _WARMUP,
+    ),
+    observations=ObservationRequirements(
+        minimum=22, maximum=MAX_MODEL_OBSERVATIONS, parameter_minimum="lookback_sessions + 1"
+    ),
+    parameter_minimum=_minimum_momentum_observations,
+)
+
+RELATIVE_STRENGTH_DEFINITION = _trend_definition(
+    model="relative_strength",
+    revision="relative-strength-common-baseline-v1",
+    category="momentum",
+    description="Historical price-index performance on common sessions against the first pinned source",
+    parameters=RelativeStrengthParameters,
+    fields=(
+        OutputField(
+            name="benchmark",
+            kind="enum",
+            units="index_code",
+            nullable=False,
+            allowed_values=tuple(code.lower() for code in SUPPORTED_CODES),
+        ),
+        *(
+            field
+            for code in SUPPORTED_CODES
+            for field in (
+                _decimal_field(f"{code.lower()}_normalized_100", "index_base_100", positive=True),
+                _decimal_field(f"{code.lower()}_relative_strength", "ratio", positive=True),
+                _decimal_field(f"{code.lower()}_return_difference", "decimal_return_difference"),
+            )
+        ),
+    ),
+    observations=ObservationRequirements(minimum=2, maximum=MAX_MODEL_OBSERVATIONS),
+    min_sources=2,
+    max_sources=4,
+)
+
+RSI_DEFINITION = _trend_definition(
+    model="rsi_state",
+    revision="rsi-simple-rolling-states-v1",
+    category="momentum",
+    description="Descriptive RSI with simple rolling gains and losses",
+    parameters=RsiParameters,
+    fields=(
+        _CLOSE,
+        _decimal_field("rsi", "oscillator_0_100"),
+        OutputField(
+            name="rsi_state",
+            kind="enum",
+            units="state",
+            nullable=True,
+            allowed_values=("low", "neutral", "high"),
+        ),
+        OutputField(
+            name="lower_threshold", kind="integer", units="oscillator_0_100", nullable=False
+        ),
+        OutputField(
+            name="upper_threshold", kind="integer", units="oscillator_0_100", nullable=False
+        ),
+        _WARMUP,
+    ),
+    observations=ObservationRequirements(minimum=1, maximum=MAX_MODEL_OBSERVATIONS),
+)
+
+
 # Catalog registration is never an executable dispatch table. Legacy API, worker,
 # and engine still independently allowlist only the original built-in SMA.
 def _index_definitions(
@@ -248,7 +465,13 @@ def _index_definitions(
     return MappingProxyType(indexed)
 
 
-_DEFINITIONS = _index_definitions(SMA_DEFINITION)
+_DEFINITIONS = _index_definitions(
+    SMA_DEFINITION,
+    EMA_DEFINITION,
+    MOMENTUM_DEFINITION,
+    RELATIVE_STRENGTH_DEFINITION,
+    RSI_DEFINITION,
+)
 
 
 def get_model_definition(key: ModelKey) -> ModelDefinition:

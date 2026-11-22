@@ -12,6 +12,7 @@ from finintel.market_data.analytics import (
     AnalyticsError,
     compare_series,
     compute_series,
+    shared_session_dates,
     validated_observations,
 )
 from finintel.market_data.analytics_store import _quality_status, _read_series
@@ -60,10 +61,7 @@ def run_index_basket(
                 "rerun validation or explicitly allow_unverified"
             )
         observations = [validated_observations(rows) for _, rows, _ in inputs]
-        shared = {p.session_date for p in observations[0]}
-        for series in observations[1:]:
-            shared.intersection_update(p.session_date for p in series)
-        dates = sorted(shared)
+        dates = shared_session_dates(observations)
         if len(dates) < 2:
             raise AnalyticsError("At least two shared observed sessions are required")
         aligned = []

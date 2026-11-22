@@ -99,7 +99,9 @@ def _result(evidence, now=TIMESTAMP, **point_overrides):
 def test_registry_lookup_metadata_and_legacy_discovery():
     definition = get_model_definition(ModelKey(model_id=MODEL_ID, model_version=MODEL_VERSION))
     metadata = definition.metadata
-    (entry,) = analysis_model_registry()["models"]
+    entry = next(
+        item for item in analysis_model_registry()["models"] if item["model_id"] == MODEL_ID
+    )
     (legacy,) = model_registry()["models"]
     assert entry["model_id"] == legacy["model_id"] == MODEL_ID
     assert entry["parameter_schema"] == legacy["parameter_schema"]
