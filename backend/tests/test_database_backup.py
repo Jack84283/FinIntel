@@ -114,6 +114,7 @@ def test_merge_preserves_newer_prices_and_adds_missing_instruments(tmp_path):
 
 
 def test_merge_imports_quality_findings_reviews_and_scan_metadata(tmp_path):
+    as_of = date(2026, 10, 21)
     target = tmp_path / "main.sqlite3"
     source = tmp_path / "source.sqlite3"
     seed(source, "AAPL", "90", "2026-10-20T00:00:00")
@@ -136,7 +137,7 @@ def test_merge_imports_quality_findings_reviews_and_scan_metadata(tmp_path):
                 ingestion_id,
             ),
         )
-    scan = run_quality_scan(source)
+    scan = run_quality_scan(source, as_of=as_of)
     finding = list_findings(source, limit=1)["items"][0]
     review_finding(source, finding["id"], "confirmed", "Reviewed in source backup")
     snapshot = create_backup(db=source)
@@ -175,7 +176,7 @@ def test_merge_imports_quality_findings_reviews_and_scan_metadata(tmp_path):
     assert merged_report["complete"] is False
     assert merged_report["scan_completeness"]["stale"] is True
 
-    run_quality_scan(target)
+    run_quality_scan(target, as_of=as_of)
     with sqlite3.connect(target) as db:
         assert db.execute("SELECT COUNT(*) FROM data_quality_findings").fetchone()[0] == len(
             finding_rows
