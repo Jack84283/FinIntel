@@ -8,16 +8,18 @@ import sqlite3
 import subprocess
 import sys
 import time
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
 from finintel import main as backend_main
 from finintel.market_data.analytics import AnalyticsError
-from finintel.models import job_api, job_worker
+from finintel.models import job_api, job_worker, managed_analysis
+from finintel.models.contracts import AnalysisRequest, DateRange, SourcePin
 from finintel.models.engine import evaluate_builtin_indicator
 from finintel.models.job_store import ModelJobLedger, ModelJobRequest, ModelJobStoreError
+from finintel.models.registry import PRICE_INDEX_SOURCES
 from finintel.storage.db import _write_connection
 
 REAL_WINDOWS_JOB_LIMIT = job_worker._limit_windows_worker
@@ -628,3 +630,278 @@ def test_safe_error_mapping_never_contains_exception_text():
         "source_changed"
     )
     assert job_worker._safe_error_code(RuntimeError("private API password")) == "worker_failure"
+
+
+def analysis_request(*, model_id="builtin.risk_profile", codes=("SP500",), parameters=None):
+    return AnalysisRequest(
+        model_id=model_id,
+        model_version="1.0.0",
+        window=DateRange(start=START, end=END),
+        sources=tuple(
+            SourcePin(
+                identity=next(
+                    identity for identity in PRICE_INDEX_SOURCES if identity.code == code
+                ),
+                snapshot_sha256=job_worker.source_snapshot_for_job(
+                    code=code, start=START, end=END, quality_policy="allow_unverified"
+                ),
+            )
+            for code in codes
+        ),
+        parameters=parameters or {},
+        quality_policy="allow_unverified",
+    )
+
+
+@pytest.mark.parametrize(
+    ("model_id", "parameters", "codes"),
+    [
+        ("builtin.ema_trend", {}, ("SP500",)),
+        ("builtin.momentum", {"lookback_sessions": 21}, ("SP500",)),
+        ("builtin.relative_strength", {}, ("NDX", "SP500")),
+        ("builtin.rsi_state", {}, ("SP500",)),
+        ("builtin.risk_profile", {}, ("NDX", "SP500")),
+        ("builtin.market_regime", {}, ("SP500",)),
+    ],
+)
+def test_real_child_executes_each_approved_analysis_model(
+    local_storage, model_id, parameters, codes
+):
+    market, jobs = local_storage
+    seed_market(market)
+    if "NDX" in codes:
+        with sqlite3.connect(market) as conn:
+            conn.execute(
+                "INSERT INTO index_daily_closes "
+                "(index_code,provider,session_date,close,retrieved_at,source_url) "
+                "SELECT 'NDX',provider,session_date,close,retrieved_at,source_url "
+                "FROM index_daily_closes WHERE index_code='SP500'"
+            )
+    spec = analysis_request(model_id=model_id, codes=codes, parameters=parameters)
+    ledger = ModelJobLedger(jobs)
+    identifier = job_worker.enqueue_analysis_job(spec)["id"]
+    claimed = ledger.claim_next()
+    assert claimed is not None and claimed[0] == identifier and claimed[2] == 1
+    assert list(claimed[1].sources) == list(spec.sources)
+    assert all(claimed[1].parameters[key] == value for key, value in parameters.items())
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "finintel.models.job_worker", "--child", identifier, "1"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=40,
+        check=False,
+    )
+    assert completed.returncode == 0, "Isolated analysis worker failed"
+    finished = ledger.get(identifier, include_result=True)
+    assert finished["state"] == "completed"
+    assert finished["result"]["evidence"]["model"]["model_id"] == model_id
+    assert [
+        source["identity"]["code"] for source in finished["result"]["evidence"]["sources"]
+    ] == list(codes)
+    assert finished["result"]["output_sha256"] == finished["output_sha256"]
+    assert ledger.get(identifier, legacy_only=True) is None
+    assert not ledger.retry(identifier, legacy_only=False)
+
+
+def test_analysis_attempt_rechecks_source_and_retry_keeps_original_pin(local_storage, monkeypatch):
+    market, jobs = local_storage
+    seed_market(market)
+    spec = analysis_request()
+    ledger = ModelJobLedger(jobs)
+    identifier = job_worker.enqueue_analysis_job(spec)["id"]
+    _, claimed, first_attempt = ledger.claim_next()
+    evaluate = managed_analysis._MANAGED_EVALUATORS[(spec.model_id, spec.model_version)]
+
+    def evaluate_then_revise(request, *, db=None):
+        result = evaluate(request, db=db)
+        with sqlite3.connect(market) as conn:
+            conn.execute(
+                "UPDATE index_daily_closes SET close='999' WHERE session_date=?",
+                (START.isoformat(),),
+            )
+        return result
+
+    monkeypatch.setattr(
+        managed_analysis,
+        "_MANAGED_EVALUATORS",
+        {(spec.model_id, spec.model_version): evaluate_then_revise},
+    )
+    assert job_worker.run_child(identifier, first_attempt) == 2
+    failed = ledger.get(identifier, include_result=True)
+    assert failed["error_code"] == "source_changed"
+    assert failed["result"] is None
+    assert ledger.retry(identifier, legacy_only=False)
+    _, retried, second_attempt = ledger.claim_next()
+    assert retried == claimed
+    assert second_attempt == first_attempt + 1
+    assert job_worker.run_child(identifier, first_attempt) == 0
+    assert ledger.get(identifier)["state"] == "running"
+    assert job_worker.run_child(identifier, second_attempt) == 2
+    assert ledger.get(identifier)["error_code"] == "source_changed"
+
+
+def test_analysis_preflight_rejects_missing_history_and_unknown_approval(
+    local_storage, monkeypatch
+):
+    market, jobs = local_storage
+    seed_market(market)
+    spec = analysis_request(model_id="builtin.momentum")
+    with pytest.raises(AnalyticsError, match="64 shared observed sessions"):
+        job_worker.enqueue_analysis_job(spec)
+    eligible = analysis_request()
+    with pytest.raises(AnalyticsError, match="Unsupported managed analysis model or version"):
+        job_worker.enqueue_analysis_job(eligible.model_copy(update={"model_version": "2.0.0"}))
+    monkeypatch.setattr(
+        managed_analysis,
+        "MANAGED_ANALYSIS_REVISIONS",
+        {(eligible.model_id, eligible.model_version): "unapproved-revision"},
+    )
+    with pytest.raises(
+        AnalyticsError, match="Unsupported managed analysis implementation revision"
+    ):
+        job_worker.enqueue_analysis_job(eligible)
+    assert not jobs.exists()
+
+
+def test_corrupt_queued_analysis_request_does_not_starve_legacy_jobs(local_storage):
+    market, jobs = local_storage
+    seed_market(market)
+    ledger = ModelJobLedger(jobs)
+    identifier = job_worker.enqueue_analysis_job(analysis_request())["id"]
+    following = ledger.enqueue(request("a" * 64))["id"]
+    with sqlite3.connect(jobs) as conn:
+        conn.execute("UPDATE model_jobs SET request_sha256=? WHERE id=?", ("b" * 64, identifier))
+    assert ledger.claim_next() is None
+    assert ledger.get(identifier)["error_code"] == "invalid_input"
+    assert ledger.claim_next()[0] == following
+
+
+def test_analysis_rejects_quality_change_with_unchanged_snapshot(local_storage, monkeypatch):
+    market, jobs = local_storage
+    seed_market(market)
+    spec = analysis_request()
+    identifier = job_worker.enqueue_analysis_job(spec)["id"]
+    ledger = ModelJobLedger(jobs)
+    _, _, attempt = ledger.claim_next()
+    evaluate = managed_analysis._MANAGED_EVALUATORS[(spec.model_id, spec.model_version)]
+
+    def evaluate_then_change_quality(request, *, db=None):
+        result = evaluate(request, db=db)
+        now = datetime.now(UTC)
+        with sqlite3.connect(market) as conn:
+            conn.execute(
+                "INSERT INTO data_quality_scan_progress "
+                "(scan_key,source_identity,source_data_version_start,source_data_version_end,"
+                "cursor_start,cursor_next,max_findings,findings_examined,findings_stored,"
+                "total_known_findings,persisted_findings_total,status,stale,updated_at,"
+                "validation_reference_date) "
+                "SELECT 'all','fixture',source_version,source_version,0,0,1,0,0,0,0,"
+                "'partial',0,?,? FROM data_quality_source_state WHERE id=1",
+                (now.isoformat(), now.date().isoformat()),
+            )
+        return result
+
+    monkeypatch.setattr(
+        managed_analysis,
+        "_MANAGED_EVALUATORS",
+        {(spec.model_id, spec.model_version): evaluate_then_change_quality},
+    )
+    assert job_worker.run_child(identifier, attempt) == 2
+    failed = ledger.get(identifier, include_result=True)
+    assert failed["error_code"] == "quality_blocked"
+    assert failed["result"] is None
+    assert (
+        job_worker.source_snapshot_for_job(
+            code="SP500", start=START, end=END, quality_policy="allow_unverified"
+        )
+        == spec.sources[0].snapshot_sha256
+    )
+
+
+def test_analysis_cancelled_and_interrupted_attempts_cannot_complete(local_storage, monkeypatch):
+    market, jobs = local_storage
+    seed_market(market)
+    spec = analysis_request()
+    ledger = ModelJobLedger(jobs)
+    cancelled = job_worker.enqueue_analysis_job(spec)["id"]
+    _, _, first_attempt = ledger.claim_next()
+    evaluate = job_worker.evaluate_analysis_job
+
+    def evaluate_then_cancel(request):
+        result = evaluate(request)
+        assert ledger.cancel(cancelled) == "cancel_requested"
+        return result
+
+    monkeypatch.setattr(job_worker, "evaluate_analysis_job", evaluate_then_cancel)
+    assert job_worker.run_child(cancelled, first_attempt) == 0
+    finished = ledger.get(cancelled, include_result=True)
+    assert finished["state"] == "cancelled" and finished["result"] is None
+
+    interrupted = job_worker.enqueue_analysis_job(spec)["id"]
+    _, _, disposed = ledger.claim_next()
+    pending = job_worker.enqueue_analysis_job(spec)["id"]
+    assert ledger.reconcile_interrupted() == 1
+    assert ledger.get(interrupted)["error_code"] == "interrupted"
+    assert ledger.get(pending)["state"] == "queued"
+    assert job_worker.run_child(interrupted, disposed) == 0
+    assert ledger.get(interrupted, include_result=True)["result"] is None
+
+
+@pytest.mark.parametrize("journal_mode", ["delete", "wal"])
+def test_source_writer_is_excluded_through_ledger_commit(local_storage, monkeypatch, journal_mode):
+    market, jobs = local_storage
+    seed_market(market)
+    with sqlite3.connect(market) as conn:
+        assert conn.execute(f"PRAGMA journal_mode={journal_mode}").fetchone()[0] == journal_mode
+    spec = analysis_request()
+    ledger = ModelJobLedger(jobs)
+    identifier = job_worker.enqueue_analysis_job(spec)["id"]
+    _, _, attempt = ledger.claim_next()
+    complete = ModelJobLedger.complete_analysis
+
+    def complete_with_competing_source_writer(self, identifier, attempt, result):
+        with (
+            sqlite3.connect(market, timeout=0) as writer,
+            pytest.raises(sqlite3.OperationalError, match="locked"),
+        ):
+            writer.execute(
+                "UPDATE index_daily_closes SET close='999' WHERE session_date=?",
+                (START.isoformat(),),
+            )
+        return complete(self, identifier, attempt, result)
+
+    monkeypatch.setattr(ModelJobLedger, "complete_analysis", complete_with_competing_source_writer)
+    assert job_worker.run_child(identifier, attempt) == 0
+    finished = ledger.get(identifier, include_result=True)
+    assert finished["state"] == "completed"
+    with sqlite3.connect(market, timeout=0) as writer:
+        writer.execute(
+            "UPDATE index_daily_closes SET close='999' WHERE session_date=?", (START.isoformat(),)
+        )
+    assert ledger.get(identifier, include_result=True) == finished
+
+
+def test_source_commit_lock_contention_fails_closed_and_retry_releases_lock(local_storage):
+    market, jobs = local_storage
+    seed_market(market)
+    spec = analysis_request()
+    ledger = ModelJobLedger(jobs)
+    identifier = job_worker.enqueue_analysis_job(spec)["id"]
+    _, _, attempt = ledger.claim_next()
+    with sqlite3.connect(market) as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute(
+            "UPDATE index_daily_closes SET close='999' WHERE session_date=?", (START.isoformat(),)
+        )
+        assert job_worker.run_child(identifier, attempt) == 2
+        failed = ledger.get(identifier, include_result=True)
+        assert failed["error_code"] == "storage_unavailable"
+        assert failed["result"] is None
+        writer.rollback()
+
+    assert ledger.retry(identifier, legacy_only=False)
+    _, _, retry = ledger.claim_next()
+    assert retry == attempt + 1
+    assert job_worker.run_child(identifier, retry) == 0
+    assert ledger.get(identifier, include_result=True)["state"] == "completed"

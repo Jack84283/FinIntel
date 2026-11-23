@@ -1,7 +1,6 @@
 """Versioned, allowlisted research model registry for Issue #32.
 
-The only executable is a built-in deterministic indicator. Private custom
-model modules are deliberately not loaded, imported or discovered.
+Private custom model modules are deliberately not loaded, imported or discovered.
 """
 
 from __future__ import annotations
@@ -25,6 +24,7 @@ from finintel.models.contracts import (
     StrictModel,
     canonical_sha256,
 )
+from finintel.models.managed_approvals import MANAGED_ANALYSIS_REVISIONS
 
 MODEL_ID = "builtin.sma_crossover"
 MODEL_VERSION = "1.0.0"
@@ -299,7 +299,7 @@ def _decimal_field(
     )
 
 
-def _proposed_price_index_definition(
+def _price_index_definition(
     *,
     model: str,
     revision: str,
@@ -336,12 +336,16 @@ def _proposed_price_index_definition(
             evidence_contract_version="analysis-model-evidence-v1",
         ),
         parameter_type=parameters,
-        availability="proposed",
+        availability=(
+            "released"
+            if MANAGED_ANALYSIS_REVISIONS.get((f"builtin.{model}", "1.0.0")) == revision
+            else "proposed"
+        ),
         parameter_minimum=parameter_minimum,
     )
 
 
-EMA_DEFINITION = _proposed_price_index_definition(
+EMA_DEFINITION = _price_index_definition(
     model="ema_trend",
     revision="ema-sma-seed-decimal-v1",
     category="trend",
@@ -375,7 +379,7 @@ EMA_DEFINITION = _proposed_price_index_definition(
     signal_availability="after_observed_close",
 )
 
-MOMENTUM_DEFINITION = _proposed_price_index_definition(
+MOMENTUM_DEFINITION = _price_index_definition(
     model="momentum",
     revision="momentum-trailing-observed-v1",
     category="momentum",
@@ -395,7 +399,7 @@ MOMENTUM_DEFINITION = _proposed_price_index_definition(
     parameter_minimum=_minimum_momentum_observations,
 )
 
-RELATIVE_STRENGTH_DEFINITION = _proposed_price_index_definition(
+RELATIVE_STRENGTH_DEFINITION = _price_index_definition(
     model="relative_strength",
     revision="relative-strength-common-baseline-v1",
     category="momentum",
@@ -424,7 +428,7 @@ RELATIVE_STRENGTH_DEFINITION = _proposed_price_index_definition(
     max_sources=4,
 )
 
-RSI_DEFINITION = _proposed_price_index_definition(
+RSI_DEFINITION = _price_index_definition(
     model="rsi_state",
     revision="rsi-simple-rolling-states-v1",
     category="momentum",
@@ -461,7 +465,7 @@ class RiskParameters(StrictModel):
     tail_window: int = Field(default=252, ge=MIN_TAIL_RETURNS, lt=MAX_MODEL_OBSERVATIONS)
 
 
-RISK_DEFINITION = _proposed_price_index_definition(
+RISK_DEFINITION = _price_index_definition(
     model=RISK_MODEL_ID.removeprefix("builtin."),
     revision="historical-risk-linear95-decimal-v1",
     calculation_version="historical-risk-v1",
@@ -549,7 +553,7 @@ class RegimeParameters(StrictModel):
         return self
 
 
-REGIME_DEFINITION = _proposed_price_index_definition(
+REGIME_DEFINITION = _price_index_definition(
     model=REGIME_MODEL_ID.removeprefix("builtin."),
     revision="market-regime-two-axis-v1",
     calculation_version="market-regime-v1",

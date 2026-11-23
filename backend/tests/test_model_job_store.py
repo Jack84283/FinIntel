@@ -706,15 +706,12 @@ def test_analysis_read_fails_closed_on_stored_corruption(tmp_path, analysis_fixt
         ledger.get(identifier, include_result=True)
 
 
-def test_production_sma_queue_neither_accepts_nor_claims_analysis_requests(
-    tmp_path, analysis_fixture
-):
+def test_legacy_queue_entry_point_does_not_accept_analysis_requests(tmp_path, analysis_fixture):
     _, spec = analysis_fixture
     ledger = ModelJobLedger(tmp_path / "jobs.sqlite3")
     with pytest.raises(ModelJobStoreError, match="Invalid typed model job request"):
         ledger.enqueue(spec)
     identifier = _insert_analysis_attempt(ledger, spec, state="queued")
-    assert ledger.claim_next() is None
     assert ledger.cancel(identifier, legacy_only=True) is None
     assert ledger.list(legacy_only=True) == {"total": 0, "items": []}
     assert ledger.cancel(identifier) == "cancelled"
@@ -742,7 +739,8 @@ def test_each_approved_analysis_identity_fits_the_ledger(
     ledger = ModelJobLedger(tmp_path / "jobs.sqlite3")
     identifier = _insert_analysis_attempt(ledger, spec)
     assert ledger.get(identifier)["model_id"] == model_id
-    assert ledger.read_claim(identifier, 1) is None
+    claim = ledger.read_claim(identifier, 1)
+    assert claim is not None and claim.model_id == model_id
 
 
 def test_legacy_managed_routes_exclude_internal_analysis_jobs(
