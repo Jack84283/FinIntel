@@ -67,6 +67,7 @@ export function BacktestJobDetail({ initial, selectionGeneration, workspaceGener
   const [result, setResult] = useState<BacktestJobResult>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [refreshRequired, setRefreshRequired] = useState(false);
   const focus = useRef<HTMLElement>(null);
   const gate = useRef({ mounted: false, serial: 0, pending: null as "poll" | "action" | null });
 
@@ -92,18 +93,22 @@ export function BacktestJobDetail({ initial, selectionGeneration, workspaceGener
       setError("");
       setResult(undefined);
     }
+    let terminalCancellationRace = false;
     try {
       if (action === "cancel") {
         const ack = await cancelBacktestJob(id);
         if (!current()) return;
         if (ack.id !== id) throw new AnalysisJobError("invalid_response");
-        // Acknowledge the durable transition even if the subsequent read fails.
-        setJob(previous => ({
-          ...previous,
-          state: ack.status === "cancel_requested" ? "running" : ack.status,
-          status: ack.status,
-          cancel_requested: ack.status === "cancel_requested" || ack.status === "cancelled" ? 1 : 0,
-        }));
+        const { status } = ack;
+        terminalCancellationRace = status === "completed" || status === "failed";
+        if (status === "cancel_requested" || status === "cancelled") {
+          setJob(previous => ({
+            ...previous,
+            state: status === "cancel_requested" ? "running" : "cancelled",
+            status,
+            cancel_requested: 1,
+          }));
+        }
         onChanged();
       } else if (action === "retry") {
         const retry = checked(await retryBacktestJob(id));
@@ -124,10 +129,14 @@ export function BacktestJobDetail({ initial, selectionGeneration, workspaceGener
       const latest = checked(await getBacktestJob(id));
       if (!current()) return;
       setJob(latest);
+      setRefreshRequired(false);
       if (latest.state !== "completed") setResult(undefined);
       setError("");
     } catch (reason) {
-      if (current()) setError(backtestError(reason));
+      if (current()) {
+        if (terminalCancellationRace) setRefreshRequired(true);
+        else setError(backtestError(reason));
+      }
     } finally {
       if (current()) {
         scope.pending = null;
@@ -173,10 +182,11 @@ export function BacktestJobDetail({ initial, selectionGeneration, workspaceGener
       <div><dt className="text-muted-foreground">{t("Test period")}</dt><dd>{simulation.test_start} – {simulation.test_end}</dd></div>
       <div><dt className="text-muted-foreground">{t("Source job ID")}</dt><dd className="break-all">{job.request.source_job_id}</dd></div>
     </dl>
+    {refreshRequired && <p role="alert" className="text-destructive">{t("The backtest finished before cancellation. Refresh details to see its final status and results.")}</p>}
     {job.error_code && <p role="status">{t(backtestError(job.error_code))}</p>}
     <div className="flex flex-wrap gap-2">
-      {canCancel && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void run("cancel")}>{t("Cancel job")}</Button>}
-      {canRetry && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void run("retry")}>{t("Retry original request")}</Button>}
+      {!refreshRequired && canCancel && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void run("cancel")}>{t("Cancel job")}</Button>}
+      {!refreshRequired && canRetry && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void run("retry")}>{t("Retry original request")}</Button>}
       {job.state === "completed" && job.output_sha256 &&
         <Button type="button" size="sm" disabled={busy} onClick={() => void run("result")}>{t("View result")}</Button>}
     </div>

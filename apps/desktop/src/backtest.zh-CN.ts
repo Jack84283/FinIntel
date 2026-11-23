@@ -66,6 +66,7 @@ export const backtestChinese: Readonly<Record<string, string>> = {
   "Loading backtest history…": "正在加载回测历史…",
   "No matching backtests.": "没有符合条件的回测。",
   "Backtest history pages": "回测历史分页",
+  "The backtest finished before cancellation. Refresh details to see its final status and results.": "回测在取消前已结束。请刷新详情以查看最终状态和结果。",
   "Backtest details": "回测详情",
   "Loading backtest details…": "正在加载回测详情…",
   "Verified backtest result": "完整性已核验的回测结果",

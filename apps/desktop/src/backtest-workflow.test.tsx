@@ -283,6 +283,34 @@ describe("mounted backtest lifecycle", () => {
     expect(host.textContent).not.toContain("Verified backtest result");
   });
 
+  it.each(["completed", "failed"] as const)("waits for a full summary when cancellation races with %s", async status => {
+    history = { total: 1, items: [running] };
+    detail = running;
+    await mount(<BacktestWorkspace />);
+    await click("Inspect backtest");
+    const previous = ipc.getMockImplementation()!;
+    let refreshFails = true;
+    ipc.mockImplementation((name, args) => {
+      if (name === "backtest_jobs_cancel") return Promise.resolve({ state: status });
+      if (name === "backtest_jobs_get" && refreshFails) return Promise.reject("backend_unavailable");
+      return previous(name, args);
+    });
+    await click("Cancel job");
+    const section = host.querySelector('[aria-label="Backtest details"]')!;
+    expect(section.querySelector('[role="status"] strong')?.textContent).toBe("running");
+    expect(section.querySelector('[role="alert"]')?.textContent).toContain("Refresh details to see its final status and results.");
+    expect(section.textContent).not.toContain("View result");
+    expect(section.textContent).not.toContain("Retry original request");
+    expect(section.textContent).not.toContain("Cancel job");
+
+    refreshFails = false;
+    detail = status === "completed" ? archivedSummary : { ...running, state: "failed", status: "failed", error_code: "worker_failure" };
+    await click("Refresh details", section);
+    expect(section.querySelector('[role="status"] strong')?.textContent).toBe(status);
+    expect(section.querySelector('[role="alert"]')).toBeNull();
+    expect(button(status === "completed" ? "View result" : "Retry original request", section)).toBeTruthy();
+  });
+
   it("polls active jobs, cancels queued work and enforces retry eligibility and attempt limits", async () => {
     vi.useFakeTimers();
     history = { total: 1, items: [queued] };
