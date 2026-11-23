@@ -85,11 +85,11 @@ export function datePosition(date: string, first: string, last: string): number 
   return (utcDay(date) - utcDay(first)) / Math.max(1, utcDay(last) - utcDay(first));
 }
 
-export function continuousSegments(rows: readonly Observation[], column: ResultColumn) {
+export function continuousSegments(rows: readonly Observation[], column: ResultColumn, convert = chartNumber) {
   const segments: { date: string; value: number }[][] = [];
   let segment: { date: string; value: number }[] = [];
   for (const row of rows) {
-    const value = chartNumber(cell(row, column.field.name), column.field.units);
+    const value = convert(cell(row, column.field.name), column.field.units);
     if (value === null) {
       if (segment.length) segments.push(segment);
       segment = [];

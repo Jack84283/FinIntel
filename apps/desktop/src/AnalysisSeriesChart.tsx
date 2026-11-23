@@ -37,18 +37,26 @@ function DateLabels({ rows }: { rows: readonly Observation[] }) {
   </g>;
 }
 
-export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventField }: {
+export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventField, markers, step, nonPositive, plotting }: {
   title: string;
   rows: readonly Observation[];
   columns: readonly ResultColumn[];
   range?: readonly [number, number];
   zero?: boolean;
   eventField?: string;
+  step?: boolean;
+  nonPositive?: boolean;
+  plotting?: { convert: typeof chartNumber; omittedMessage: string };
+  markers?: { dates: ReadonlySet<string>; label: string };
 }) {
   const { t, language } = useLocale();
   const descriptionId = useId();
   const [inspected, setInspected] = useState<number>();
-  const segments = useMemo(() => columns.map(column => continuousSegments(rows, column)), [columns, rows]);
+  const segments = useMemo(() => columns.map(column => continuousSegments(rows, column, plotting?.convert)), [columns, rows, plotting]);
+  const omitted = useMemo(() => plotting && columns.some(column => rows.some(row => {
+    const value = cell(row, column.field.name);
+    return value != null && plotting.convert(value, column.field.units) === null;
+  })), [columns, rows, plotting]);
   const extent = useMemo(() => {
     let low = zero ? 0 : Infinity;
     let high = zero ? 0 : -Infinity;
@@ -61,8 +69,8 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
     if (range) return { low: range[0], high: range[1], available };
     if (!available) return { low: 0, high: 1, available };
     const padding = high === low ? Math.max(Math.abs(high) * 0.04, 0.0001) : (high - low) * 0.06;
-    return { low: low - padding, high: high + padding, available };
-  }, [segments, range, zero]);
+    return { low: low - padding, high: nonPositive && high <= 0 ? 0 : high + padding, available };
+  }, [segments, range, zero, nonPositive]);
 
   const first = rows[0]?.session_date;
   const last = rows.at(-1)?.session_date;
@@ -72,17 +80,18 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
     const y = (value: number) => BOTTOM - (value - extent.low) / (extent.high - extent.low) * (BOTTOM - TOP);
     return segments.map(series => ({
       strokes: series.filter(segment => segment.length > 1).map(segment => segment.map((point, j) =>
-        `${j ? "L" : "M"}${x(point.date).toFixed(2)},${y(point.value).toFixed(2)}`).join(" ")).join(" "),
+        j && step ? `H${x(point.date).toFixed(2)}V${y(point.value).toFixed(2)}` :
+                `${j ? "L" : "M"}${x(point.date).toFixed(2)},${y(point.value).toFixed(2)}`).join(" ")).join(" "),
       dots: series.filter(segment => segment.length === 1).map(([point]) => ({
         date: point.date, x: x(point.date), y: y(point.value),
       })),
     }));
-  }, [first, last, extent, segments]);
+  }, [first, last, extent, segments, step]);
 
   if (!first || !last || !extent.available) return <figure className="space-y-2">
     <figcaption className="font-medium">{title}</figcaption>
     <p role="status" className="rounded-md border p-4 text-sm text-muted-foreground">
-      {t("No calculated values in the selected range.")}
+      {omitted ? t(plotting!.omittedMessage) : t("No calculated values in the selected range.")}
     </p>
   </figure>;
 
@@ -92,12 +101,17 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
   const index = Math.min(inspected ?? rows.length - 1, rows.length - 1);
   const selection = rows[index];
   const ticks = Array.from({ length: 5 }, (_, i) => extent.low + (extent.high - extent.low) * i / 4);
-  const formatAxis = new Intl.NumberFormat(language, { maximumSignificantDigits: 5 });
+  const formatAxis = new Intl.NumberFormat(language, {
+    maximumSignificantDigits: 5,
+    notation: plotting && Math.max(Math.abs(extent.low), Math.abs(extent.high)) >= 1e6 ? "scientific" : "standard",
+  });
   const hasEvents = eventField && rows.some(row => ["above", "below"].includes(String(cell(row, eventField))));
 
   return <figure className="min-w-0 space-y-2">
     <figcaption className="font-medium">{title} <span className="text-xs font-normal text-muted-foreground">· {unitLabel(unit, t)}</span></figcaption>
     <Legend labels={columns.map(column => column.label)} />
+    {omitted && <p className="text-xs text-muted-foreground">{t(plotting!.omittedMessage)}</p>}
+    {markers && markers.dates.size > 0 && <p className="text-xs text-muted-foreground">{markers.label}</p>}
     {hasEvents && <p className="text-xs text-muted-foreground">{t("Triangles mark post-close crossover events.")}</p>}
     <div className="overflow-x-auto rounded-md border bg-muted/30 p-2">
       <svg viewBox="0 0 840 250" role="img" aria-label={title + " · " + unitLabel(unit, t)}
@@ -114,6 +128,10 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
           </path>}
           {dots.map(dot => <circle key={dot.date} cx={dot.x} cy={dot.y} r="2.5" className={COLORS[i]} />)}
         </g>)}
+        {markers && [...markers.dates].map(date => <path key={date} data-transaction-session={date}
+          d={`M${x(date)},${TOP}V${BOTTOM}`} stroke="currentColor" strokeDasharray="1 4" opacity=".65">
+          <title>{markers.label + " · " + observedDate(date, language)}</title>
+        </path>)}
         {eventField && rows.map(row => {
           const event = cell(row, eventField);
           const level = chartNumber(cell(row, "fast_ema"), unit);
