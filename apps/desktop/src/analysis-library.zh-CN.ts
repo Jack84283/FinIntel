@@ -76,6 +76,7 @@ export const analysisLibraryChinese: Readonly<Record<string, string>> = {
   "Shared observed sessions": "共同观测交易日",
   "Insufficient shared history. Extend the date range or select other local sources.": "共同历史数据不足。请扩大日期范围或选择其他本地来源。",
   "Queue analysis job": "提交分析任务",
+  "Run again": "再次运行",
   "Legacy SMA Jobs": "旧版 SMA 任务",
   "Analysis Library Jobs": "分析模型库任务",
   "Analysis Library job details": "分析模型库任务详情",

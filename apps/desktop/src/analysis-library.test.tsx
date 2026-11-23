@@ -155,6 +155,38 @@ describe("mounted Analysis Library workflow", () => {
     expect(open).toHaveBeenCalledWith("queued-id");
   });
 
+  it("queues a second job with unchanged inputs only after obtaining fresh source pins", async () => {
+    const first = source("SP500");
+    const freshPin = "d".repeat(64);
+    api.analytics.mockResolvedValueOnce(first)
+      .mockResolvedValueOnce({ ...first, source: { ...first.source, snapshot_sha256: freshPin } });
+    api.queue.mockResolvedValueOnce(job("first-job")).mockResolvedValueOnce(job("second-job"));
+    const open = vi.fn();
+    await mount(<AnalysisLibraryPanel primary="SP500" {...requestWindow} catalog={catalog} catalogLoaded onOpenJob={open} />);
+    await type("Fast EMA window", "8");
+    await click("Validate local sources");
+    await click("Queue analysis job");
+    await click("Open job details");
+    expect(open).toHaveBeenCalledWith("first-job");
+
+    await click("Run again");
+    expect(host.textContent).not.toContain("first-job");
+    expect(host.textContent).not.toContain("Queue analysis job");
+    expect(control("Fast EMA window").value).toBe("8");
+    expect(api.analytics).toHaveBeenCalledOnce();
+    expect(api.queue).toHaveBeenCalledOnce();
+
+    await click("Validate local sources");
+    expect(api.analytics.mock.calls[1]).toEqual(api.analytics.mock.calls[0]);
+    await click("Queue analysis job");
+    const [firstRequest] = api.queue.mock.calls[0];
+    expect(api.queue).toHaveBeenCalledTimes(2);
+    expect(api.queue).toHaveBeenLastCalledWith({
+      ...firstRequest, sources: [{ identity: first.identity, snapshot_sha256: freshPin }],
+    });
+    expect(host.textContent).toContain("second-job");
+  });
+
   it("submits contract parameters and blocks strict quality until an explicit override", async () => {
     api.analytics.mockResolvedValue(source("SP500", { verified: false }));
     api.queue.mockResolvedValue(job("queued-id"));

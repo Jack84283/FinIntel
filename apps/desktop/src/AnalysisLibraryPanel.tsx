@@ -251,6 +251,13 @@ function AnalysisPreview({ model, draft, parameters, minimum, enabled, onOpenJob
     return () => { scope.alive = false; };
   }, []);
 
+  function startAnotherAnalysis() {
+    generation.current++;
+    setJob(undefined);
+    setPreview(undefined);
+    setError("");
+  }
+
   async function run(action: "preview" | "queue") {
     const scope = gate.current;
     if (scope.pending || !scope.alive || !enabled || !native) return;
@@ -303,7 +310,10 @@ function AnalysisPreview({ model, draft, parameters, minimum, enabled, onOpenJob
       <Button type="button" disabled={!eligible || busy || Boolean(job)} onClick={() => void run("queue")}>{t("Queue analysis job")}</Button>
     </section>}
     {job && <>
-      <p role="status" className="text-sm">{t("Model job queued locally.")}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p role="status" className="text-sm">{t("Model job queued locally.")}</p>
+        <Button type="button" variant="outline" onClick={startAnotherAnalysis}>{t("Run again")}</Button>
+      </div>
       <AnalysisJobDetail id={job.id} initial={job} onOpenJob={onOpenJob} selectionGeneration={generation} />
     </>}
   </div>;
