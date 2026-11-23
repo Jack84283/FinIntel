@@ -150,6 +150,7 @@ describe("mounted Analysis Library workflow", () => {
     });
     expect(host.textContent).toContain("queued-id");
     expect(host.textContent).not.toContain("Verified research result");
+    expect(host.querySelector("[data-series]")).toBeNull();
     expect(api.get).not.toHaveBeenCalledWith("queued-id", true);
     await click("Open job details");
     expect(open).toHaveBeenCalledWith("queued-id");
@@ -330,10 +331,11 @@ describe("mounted Analysis Library job history", () => {
     expect(api.get).toHaveBeenLastCalledWith("archived", true);
     expect(host.textContent).toContain("Verified research result");
     expect(host.textContent).toContain(result.reproducibility_sha256);
-    expect(host.textContent).toContain(result.points[0].session_date);
+    expect(host.querySelector(`[data-session="${result.points[0].session_date}"]`)).not.toBeNull();
     api.get.mockRejectedValueOnce(new AnalysisJobError("invalid_response"));
     await click("View result");
     expect(host.textContent).not.toContain("Verified research result");
+    expect(host.querySelector("[data-series]")).toBeNull();
     expect(host.textContent).toContain("failed integrity validation");
   });
 
@@ -353,5 +355,6 @@ describe("mounted Analysis Library job history", () => {
     if (change === "unmount") await mount(<div>Other view</div>);
     await act(async () => pending.resolve({ ...original, result }));
     expect(host.textContent).not.toContain("Verified research result");
+    expect(host.querySelector("[data-series]")).toBeNull();
   });
 });
