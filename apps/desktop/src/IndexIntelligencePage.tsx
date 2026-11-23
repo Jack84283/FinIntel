@@ -16,6 +16,7 @@ import { IndexMetricChart, metricCell, metricRows, type ChartMetric } from "./In
 import { IndexBasketPanel } from "./IndexBasketPanel";
 import { ConstituentOverlapPanel } from "./ConstituentOverlapPanel";
 import { ConstituentTrendPanel } from "./ConstituentTrendPanel";
+import { AnalysisLibraryPanel } from "./AnalysisLibraryPanel";
 import { ModelResearchPanel } from "./ModelResearchPanel";
 
 const STORAGE_KEY = "finintel.index-intelligence.v1";
@@ -92,7 +93,10 @@ function presetDates(catalog: IndexCatalogRecord[], code: IndexCode, benchmark: 
 const selectClass = "h-9 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const labelClass = "grid min-w-0 gap-1 text-xs font-medium text-muted-foreground";
 
-export function IndexIntelligencePage() {
+export function IndexIntelligencePage({ onOpenAnalysisJob, onOpenAcquisition }: {
+  onOpenAnalysisJob?: (id: string) => void;
+  onOpenAcquisition?: () => void;
+} = {}) {
   const { t, language } = useLocale();
   const [config, setConfig] = useState<Config>(readSaved);
   const [catalog, setCatalog] = useState<IndexCatalogRecord[]>([]);
@@ -360,6 +364,9 @@ export function IndexIntelligencePage() {
           </CardContent>
         </Card>
       </>}
+      <AnalysisLibraryPanel primary={code} start={start} end={end} catalog={catalog}
+        catalogLoaded={catalogLoaded && !catalogError} catalogUnavailable={Boolean(catalogError)} onOpenJob={onOpenAnalysisJob}
+        onOpenAcquisition={onOpenAcquisition} />
       <IndexBasketPanel catalog={catalog} catalogError={catalogError} />
       <ConstituentOverlapPanel primaryIndex={code} analysisEnd={end} />
       <ConstituentTrendPanel primaryIndex={code} analysisStart={start} analysisEnd={end} />

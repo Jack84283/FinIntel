@@ -16,7 +16,7 @@ import { DataValidationPage } from "./DataValidationPage";
 import { DataQualityPage } from "./DataQualityPage";
 import { IndexMembershipPage } from "./IndexMembershipPage";
 import { IndexIntelligencePage } from "./IndexIntelligencePage";
-import { ModelJobsPage } from "./ModelJobsPage";
+import { ModelJobsWorkspace } from "./ModelJobsWorkspace";
 import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
 import { resolveMarketSelection } from "./market-selection";
 
@@ -49,6 +49,7 @@ const placeholders: Partial<Record<Screen, { title: string; description: string 
 };
 export default function App() {
   const [screen, setScreen] = useState<Screen>("overview");
+  const [openedAnalysisJob, setOpenedAnalysisJob] = useState<string>();
   const [language, setLanguage] = useState<AppLanguage>(currentLanguage);
   const t = (key: string) => translate(language, key);
   const [marketSelection, setMarketSelection] = useState<MarketSelection | null>(null);
@@ -61,6 +62,11 @@ export default function App() {
   useEffect(() => {
     if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
   }, [screen]);
+
+  const navigate = (next: Screen) => {
+    if (next === "model-jobs") setOpenedAnalysisJob(undefined);
+    setScreen(next);
+  };
 
   const openMarkets = (selection?: MarketSelection) => {
     setMarketSelection((current) => resolveMarketSelection(current, selection));
@@ -87,7 +93,7 @@ export default function App() {
             <div key={t(group.heading)} className="mb-3 flex flex-col gap-1">
               <span className="mb-1 px-3 text-sm font-bold tracking-[0.16em] text-[#146B82] [html[data-theme=dark]_&]:text-[#73D5E8] uppercase">{t(group.heading)}</span>
               {group.items.map(({ id, label, icon: Icon }) => (
-                <button key={id} type="button" aria-current={screen === id ? "page" : undefined} onClick={() => id === "market" ? openMarkets() : setScreen(id)} className={(screen === id ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-2 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
+                <button key={id} type="button" aria-current={screen === id ? "page" : undefined} onClick={() => id === "market" ? openMarkets() : navigate(id)} className={(screen === id ? "bg-secondary font-semibold text-secondary-foreground " : "text-muted-foreground hover:bg-accent hover:text-foreground ") + "flex items-center gap-2 rounded-md px-3 py-2 text-left focus-visible:ring-2 focus-visible:ring-ring"}>
                   <Icon aria-hidden="true" className="size-4" /> {t(label)}
                 </button>
               ))}
@@ -100,7 +106,7 @@ export default function App() {
       <main ref={mainScrollRef} tabIndex={0} aria-label={t("Main content")} className="w-full min-w-0 px-3 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-4 lg:h-dvh lg:min-h-0 lg:overflow-y-auto lg:overscroll-y-contain lg:pt-0 lg:pb-5">
         <nav aria-label={t("Mobile sections")} className="mb-5 flex gap-2 overflow-x-auto pb-2 lg:hidden">
           {allSections.map(({ id, label, icon: Icon }) => (
-            <Button key={id} type="button" className="shrink-0" variant={screen === id ? "secondary" : "ghost"} onClick={() => id === "market" ? openMarkets() : setScreen(id)} aria-current={screen === id ? "page" : undefined}>
+            <Button key={id} type="button" className="shrink-0" variant={screen === id ? "secondary" : "ghost"} onClick={() => id === "market" ? openMarkets() : navigate(id)} aria-current={screen === id ? "page" : undefined}>
               <Icon aria-hidden="true" /> {t(label)}
             </Button>
           ))}
@@ -112,9 +118,10 @@ export default function App() {
             onOpenAcquisition={() => setScreen("data-acquisition")}
           />
         ) : screen === "index-intelligence" ? (
-          <IndexIntelligencePage />
+          <IndexIntelligencePage onOpenAcquisition={() => setScreen("data-acquisition")}
+            onOpenAnalysisJob={id => { setOpenedAnalysisJob(id); setScreen("model-jobs"); }} />
         ) : screen === "model-jobs" ? (
-          <ModelJobsPage />
+          <ModelJobsWorkspace key={openedAnalysisJob ?? "history"} initialJobId={openedAnalysisJob} />
         ) : screen === "data-acquisition" ? (
           <DataAcquisitionPage onViewMarket={openMarkets} mode="history" />
         ) : screen === "daily-acquisition" ? (
