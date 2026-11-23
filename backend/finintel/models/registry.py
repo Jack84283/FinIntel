@@ -303,7 +303,7 @@ def _proposed_price_index_definition(
     *,
     model: str,
     revision: str,
-    category: Literal["trend", "momentum", "risk"],
+    category: Literal["trend", "momentum", "risk", "regime"],
     description: str,
     parameters: type[StrictModel],
     fields: tuple[OutputField, ...],
@@ -526,6 +526,87 @@ RISK_DEFINITION = _proposed_price_index_definition(
 )
 
 
+REGIME_MODEL_ID = "builtin.market_regime"
+
+
+class RegimeParameters(StrictModel):
+    short_window: int = Field(default=50, ge=1, lt=MAX_MODEL_OBSERVATIONS)
+    long_window: int = Field(default=200, ge=2, le=MAX_MODEL_OBSERVATIONS)
+    neutrality_band: str = Field(
+        default="0.02",
+        pattern=r"^(?:0(?:\.[0-9]{1,6})?|1(?:\.0{1,6})?)$",
+        description="Fixed-point fraction from zero through one",
+    )
+    volatility_window: int = Field(default=63, ge=2, le=MAX_MODEL_OBSERVATIONS - 2)
+    calibration_window: int = Field(default=756, ge=1, le=MAX_MODEL_OBSERVATIONS - 3)
+
+    @model_validator(mode="after")
+    def validate_windows(self) -> RegimeParameters:
+        if self.short_window >= self.long_window:
+            raise ValueError("Short SMA window must be less than long SMA window")
+        if self.volatility_window + self.calibration_window >= MAX_MODEL_OBSERVATIONS:
+            raise ValueError("Volatility and calibration windows exceed the observation cap")
+        return self
+
+
+REGIME_DEFINITION = _proposed_price_index_definition(
+    model=REGIME_MODEL_ID.removeprefix("builtin."),
+    revision="market-regime-two-axis-v1",
+    calculation_version="market-regime-v1",
+    category="regime",
+    description="Independent historical price trend and realized-volatility classifications",
+    parameters=RegimeParameters,
+    fields=(
+        _CLOSE,
+        _decimal_field("sma50", "index_points", positive=True),
+        _decimal_field("sma200", "index_points", positive=True),
+        _decimal_field("close_distance", "decimal_return"),
+        _decimal_field("sma_distance", "decimal_return"),
+        OutputField(
+            name="trend_state",
+            kind="enum",
+            units="trend_state",
+            nullable=False,
+            allowed_values=("uptrend", "downtrend", "sideways", "unknown"),
+        ),
+        _decimal_field("realized_volatility", "decimal_return"),
+        _decimal_field("volatility_p25", "decimal_return"),
+        _decimal_field("volatility_p75", "decimal_return"),
+        OutputField(
+            name="volatility_calibration_count",
+            kind="integer",
+            units="observations",
+            nullable=False,
+        ),
+        OutputField(
+            name="volatility_state",
+            kind="enum",
+            units="volatility_state",
+            nullable=False,
+            allowed_values=("low", "normal", "high", "unknown"),
+        ),
+        OutputField(
+            name="reason_codes",
+            kind="reason_codes",
+            units="classification_reasons",
+            nullable=False,
+            allowed_values=(
+                "trend_above_band",
+                "trend_below_band",
+                "trend_mixed",
+                "trend_insufficient_history",
+                "vol_below_p25",
+                "vol_above_p75",
+                "vol_normal_range",
+                "vol_calibration_insufficient",
+                "quality_unverified",
+            ),
+        ),
+    ),
+    observations=ObservationRequirements(minimum=1, maximum=MAX_MODEL_OBSERVATIONS),
+)
+
+
 # Catalog registration is never an executable dispatch table. Legacy API, worker,
 # and engine still independently allowlist only the original built-in SMA.
 def _index_definitions(
@@ -547,6 +628,7 @@ _DEFINITIONS = _index_definitions(
     RELATIVE_STRENGTH_DEFINITION,
     RSI_DEFINITION,
     RISK_DEFINITION,
+    REGIME_DEFINITION,
 )
 
 

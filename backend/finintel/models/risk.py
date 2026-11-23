@@ -15,6 +15,7 @@ from finintel.market_data.analytics import (
     DrawdownTracker,
     Observation,
     _simple,
+    linear_empirical_quantile,
     sample_covariance,
     shared_session_dates,
 )
@@ -46,9 +47,7 @@ def _historical_tail(returns: list[Decimal], window: int) -> Point:
             "expected_shortfall_95": None,
         }
     losses = sorted(-value for value in returns)
-    rank = _CONFIDENCE * (len(losses) - 1)
-    lower = int(rank)
-    quantile = losses[lower] + (losses[lower + 1] - losses[lower]) * (rank - lower)
+    quantile = linear_empirical_quantile(losses, _CONFIDENCE)
     threshold = max(_ZERO, quantile)
     tail = [loss for loss in losses if loss >= threshold]
     return {

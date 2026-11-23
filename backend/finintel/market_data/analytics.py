@@ -82,6 +82,21 @@ def _simple(left: Decimal, right: Decimal) -> Decimal:
         return right / left - Decimal(1)
 
 
+def trailing_sma(levels: list[Decimal], end: int, window: int) -> Decimal:
+    """Calculate an arithmetic mean ending at a fully warmed observed session."""
+    with localcontext() as context:
+        context.prec = 28
+        return +(sum(levels[end + 1 - window : end + 1], Decimal(0)) / Decimal(window))
+
+
+def linear_empirical_quantile(ordered: list[Decimal], percentile: Decimal) -> Decimal:
+    """Interpolate at zero-based rank p × (N−1) in a nonempty sorted sample."""
+    rank = percentile * (len(ordered) - 1)
+    lower = int(rank)
+    upper = min(lower + 1, len(ordered) - 1)
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * (rank - lower)
+
+
 def rolling_rsi(prices: list[Decimal], index: int, window: int) -> Decimal | None:
     """Simple rolling gains and losses over actual observed price changes."""
     if index < window:

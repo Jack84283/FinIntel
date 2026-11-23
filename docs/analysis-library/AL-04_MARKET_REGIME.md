@@ -1,0 +1,26 @@
+# AL-04 · Historical market regime
+
+`builtin.market_regime@1.0.0` describes historical trend and volatility for one pinned FRED SP500, DJIA, NASDAQCOM, or NDX daily price index. It is research-only. The two independent labels describe observed conditions, with no forecast, trade recommendation, or automatic backtest eligibility.
+
+| Parameter | Default | v1 limits |
+| --- | --- | --- |
+| `short_window` | 50 observed closes | Integer 1–1,999, less than `long_window`. |
+| `long_window` | 200 observed closes | Integer 2–2,000. |
+| `neutrality_band` | `"0.02"` | Fixed-point fraction string between zero and one inclusive, with up to six fractional digits. |
+| `volatility_window` | 63 observed returns | Integer 2–1,998. |
+| `calibration_window` | 756 prior realized volatilities | Integer 1–1,997. Combined volatility and calibration windows must leave room for an initial close within the 2,000-observation cap. |
+
+The implementation revision is `market-regime-two-axis-v1`, and the calculation version is `market-regime-v1`. Thresholds are versioned research conventions.
+
+## Calculation and outputs
+
+- **Trend.** Compute both trailing arithmetic mean levels from actual observed closes using the existing SMA arithmetic. The regime evaluator preserves the exact level of a constant window so sums rounded at 28 digits cannot create artificial distances in a flat series. The `sma50` and `sma200` fields are the short and long levels with windows set by the actual parameters. Each is null until its own window fills. When the long level is available, `close_distance` is close divided by the long SMA minus one, and `sma_distance` is the short SMA divided by the long SMA minus one. Both distances strictly greater than the positive band produce `uptrend` with `trend_above_band`. Both strictly less than the negative band produce `downtrend` with `trend_below_band`. Other available pairs, including threshold equality, produce `sideways` with `trend_mixed`. Missing trend history produces `unknown` with `trend_insufficient_history`.
+- **Volatility.** Compute simple returns between consecutive observed closes and multiply the trailing return sample standard deviation (divisor N−1) by √252. `realized_volatility` is null until the return window fills. At each session, use the last full calibration window of valid volatility samples strictly before that session. `volatility_calibration_count` is the number available in the bounded baseline before the current sample is inserted. For sorted values and percentile fraction p, use zero-based rank p × (N−1) with linear interpolation between surrounding ranks (Type 7). `volatility_p25` and `volatility_p75` stay null until the full baseline exists. A current value strictly below P25 gives `low` with `vol_below_p25`, and strictly above P75 gives `high` with `vol_above_p75`. Equality and values between thresholds give `normal` with `vol_normal_range`. Missing features produce `unknown` with `vol_calibration_insufficient`. Zero volatility is a valid sample. Under defaults, the first realized volatility appears at close 64 and the first classified volatility at close 820, with exactly 756 prior samples.
+- **Quality.** The default `require_complete` policy enforces a current verified scan. Every explicit `allow_unverified` request retains the actual source scan status and a result-level `quality_override` warning. Raw numerical features remain available subject to warm-up, and both labels are `unknown` with `quality_unverified` in the typed reason list. Applicable warm-up reasons remain visible. A bypassed gate cannot produce a verified-looking regime label.
+- **Units and evidence.** `session_date` is an ISO observed date. Close and available SMAs are positive index points. Distances and annualized volatility and thresholds are fixed-point fractions, with 0.02 representing 2%. Arithmetic uses 28 significant Decimal digits and round-half-to-even. `reason_codes` is an ordered array of declared codes. Shared AL-01 evidence records the full source identity, selected-row snapshot SHA-256, requested and actual dates, resolved parameters, quality status, schema, and calculation revision. Reproducibility and output hashes exclude the evaluation clock.
+
+Each output row uses its own trailing windows. The evaluator reads a single pinned read-only SQLite snapshot, retains original sessions and price levels, and never fills missing dates. The calibration baseline excludes the current session. Appending future price data leaves prior rows unchanged for identical input history and quality policy.
+
+## Verification and later integration
+
+Synthetic fixtures cover directional trends, exact boundaries, a constant series with zero volatility, volatility shocks, Type 7 interpolation, the default 820-close boundary, irregular sessions, strict request and quality handling, resource limits, and prefix equality. The AL-04 evaluator is internal and metadata is proposed. AL-05 can approve dispatch through the existing local worker after revalidating the snapshot and quality gate and enforcing existing result limits. AL-06 should show both axes and their reasons, null warm-up features, and the quality warning distinctly. Packaged desktop and private-data acceptance are separate gates.
