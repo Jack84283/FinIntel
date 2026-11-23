@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
-import { LocalDataTable } from "./components/TablePagination";
+import { AnalysisResultVisualization } from "./AnalysisResultVisualization";
 import { useLocale } from "./localization";
 import {
   cancelAnalysisJob, getAnalysisJob, retryAnalysisJob, type AnalysisJobSummary, type AnalysisResult,
@@ -28,54 +28,13 @@ function Hash({ label, value }: { label: string; value: string }) {
   </div>;
 }
 
-function ResultObservations({ result }: { result: AnalysisResult }) {
-  const { language, t } = useLocale();
-  const fields = result.evidence.output_fields.filter(field => field.name !== "session_date");
-  const [selectedName, setSelectedName] = useState(fields[0]?.name);
-  const field = fields.find(candidate => candidate.name === selectedName);
-  const label = (key: string) => {
-    const translated = t(key);
-    return translated === key ? key.replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase()) : translated;
-  };
-  const format = (value: unknown): string => {
-    if (value === null || value === undefined) return t("Unavailable");
-    if (typeof value === "boolean") return t(value ? "Yes" : "No");
-    if (typeof value === "number") return value.toLocaleString(language);
-    if (Array.isArray(value)) return value.map(item => label(String(item))).join(" · ");
-    return field?.kind === "enum" ? label(String(value)) : String(value);
-  };
-  return <div className="space-y-2">
-    <label className="grid max-w-sm gap-1">{t("Result field")}
-      <select className="h-9 rounded-md border border-input bg-background px-2" value={selectedName}
-        onChange={event => setSelectedName(event.target.value)}>
-        {fields.map(option => <option key={option.name} value={option.name}>{label(option.name)}</option>)}
-      </select>
-    </label>
-    <LocalDataTable<{ session_date: string }> rows={result.points} searchable={point => point.session_date} label={t("Observed sessions")}>
-      {points => <table className="w-full text-left">
-        <thead className="border-b"><tr>
-          <th scope="col" className="p-2">{t("Observed sessions")}</th>
-          {field && <th scope="col" className="p-2 text-right">{label(field.name)} · {label(field.units)}</th>}
-        </tr></thead>
-        <tbody>{points.map(point => <tr key={point.session_date} className="border-b">
-          <td className="p-2 tabular-nums">{point.session_date}</td>
-          {field && <td className="break-all p-2 text-right tabular-nums">{format(Object.getOwnPropertyDescriptor(point, field.name)?.value)}</td>}
-        </tr>)}</tbody>
-      </table>}
-    </LocalDataTable>
-  </div>;
-}
-
 function Evidence({ result }: { result: AnalysisResult }) {
   const { t, language } = useLocale();
   const { evidence } = result;
-  const unverified = evidence.sources.some(source => source.quality.status !== "verified");
   return <section aria-label={t("Verified research result")} className="space-y-3 border-t pt-3">
     <h3 className="font-semibold">{t("Verified research result")}</h3>
     <p className="text-muted-foreground">{t("Research only. Archived results retain their original evidence even if local data has changed.")}</p>
-    {(unverified || evidence.quality_policy === "allow_unverified") &&
-      <p role="status" className="rounded-md border bg-muted p-2">{t(unverified
-        ? "Result uses unverified source evidence." : "Unverified evidence is allowed for this historical research.")}</p>}
+    {evidence.warnings.map(warning => <p key={warning} className="text-muted-foreground">{t(warning)}</p>)}
     <dl className="grid gap-2 sm:grid-cols-2">
       <div><dt className="text-muted-foreground">{t("Model")}</dt><dd>{evidence.model.model_id} · {evidence.model.model_version}</dd></div>
       <div><dt className="text-muted-foreground">{t("Implementation revision")}</dt><dd className="break-words">{evidence.model.implementation_revision}</dd></div>
@@ -89,7 +48,7 @@ function Evidence({ result }: { result: AnalysisResult }) {
     <ol className="list-decimal space-y-1 pl-5">
       {evidence.sources.map(source => <li key={source.identity.code}>
         {t(SOURCE_NAMES[source.identity.code])} · {source.identity.code} · FRED · {source.observed.start} – {source.observed.end} · {t(source.quality.status)}
-        <div className="text-muted-foreground">{t("Observations")} {source.observed.count.toLocaleString(language)} · {t("Excluded observations")} {source.excluded_count.toLocaleString(language)}
+        <div className="text-muted-foreground">{t("Observations")} {source.observed.count.toLocaleString(language)} · {t("Aligned observations")} {source.aligned_count.toLocaleString(language)} · {t("Excluded observations")} {source.excluded_count.toLocaleString(language)}
           {source.quality.warnings.map(warning => <span key={warning}> · {t(warning)}</span>)}</div>
       </li>)}
     </ol>
@@ -99,7 +58,7 @@ function Evidence({ result }: { result: AnalysisResult }) {
       <Hash label={t("Output SHA-256")} value={result.output_sha256} />
       <Hash label={t("Reproducibility SHA-256")} value={result.reproducibility_sha256} />
     </details>
-    <ResultObservations key={result.output_sha256} result={result} />
+
   </section>;
 }
 
@@ -141,7 +100,7 @@ export function AnalysisJobDetail({ id, initial, onClose, onChanged, onOpenJob, 
         if (action === "result") {
           const detail = await getAnalysisJob(id, true);
           if (!current()) return;
-          if (detail.id !== id || detail.request_sha256 !== job?.request_sha256 || !detail.result) {
+          if (detail.state !== "completed" || detail.id !== id || detail.request_sha256 !== job?.request_sha256 || !detail.result) {
             setError("Result or source evidence failed integrity validation.");
             return;
           }
@@ -217,6 +176,9 @@ export function AnalysisJobDetail({ id, initial, onClose, onChanged, onOpenJob, 
       </div>
     </>}
     {error && <p role="alert" className="text-destructive">{t(error)}</p>}
-    {result && <Evidence result={result} />}
+    {result && job?.id === id && job.state === "completed" && <div className="min-w-0 space-y-4" key={id + ":" + job.request_sha256 + ":" + result.output_sha256}>
+      <AnalysisResultVisualization result={result} />
+      <Evidence result={result} />
+    </div>}
   </section>;
 }
