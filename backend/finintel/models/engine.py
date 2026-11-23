@@ -10,10 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, date, datetime
-from decimal import Decimal, localcontext
+from decimal import Decimal
 from pathlib import Path
 
-from finintel.market_data.analytics import AnalyticsError
+from finintel.market_data.analytics import AnalyticsError, trailing_sma
 from finintel.market_data.analytics_store import run_analytics
 from finintel.models.registry import (
     IMPLEMENTATION_REVISION,
@@ -30,10 +30,7 @@ def _sha256(payload: object) -> str:
 
 
 def _sma(levels: list[Decimal], end: int, window: int) -> str:
-    with localcontext() as context:
-        context.prec = 28
-        average = sum(levels[end + 1 - window : end + 1], Decimal(0)) / Decimal(window)
-        return format(+average, "f")
+    return format(trailing_sma(levels, end, window), "f")
 
 
 def evaluate_builtin_indicator(
