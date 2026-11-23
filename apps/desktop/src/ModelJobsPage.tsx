@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { TablePager, LocalDataTable, TABLE_PAGE_SIZE } from "./components/TablePagination";
 import { PageHeader } from "./PageHeader";
 import { createModelJobDetailFence } from "./model-job-detail-fence";
+import { sourceEligibility } from "./backtest-workflow";
+import type { SmaBacktestSelection } from "./BacktestForm";
 import { useLocale } from "./localization";
 import { useNotify } from "./notifications";
 import { fetchIndexAnalytics, type AnalyticsResult, type QualityPolicy } from "./index-intelligence-api";
@@ -67,7 +69,7 @@ export async function fetchCurrentModelJobDetails(id: string): Promise<{
   return { job: detail, result: null };
 }
 
-export function ModelJobsPage() {
+export function ModelJobsPage({ onCreateBacktest }: { onCreateBacktest?: (source: SmaBacktestSelection) => void } = {}) {
   const { t, language } = useLocale();
   const notify = useNotify();
   const managed = typeof window !== "undefined" && isTauri();
@@ -191,6 +193,10 @@ export function ModelJobsPage() {
       // row. Keep response generation fencing across both native calls.
       const details = await fetchCurrentModelJobDetails(job.id);
       if (!detailFence.isCurrent(job.id, request)) return;
+      if (details.job.id !== job.id || details.job.request_sha256 !== job.request_sha256) {
+        setDetailsError("The completed SMA source failed integrity verification.");
+        return;
+      }
       setSelected(details.job);
       setResult(details.result);
     } catch (error) {
@@ -378,6 +384,10 @@ export function ModelJobsPage() {
             <dd className="break-all">{selected.output_sha256 ?? "—"}</dd>
           </div>
         </dl>
+        {!detailsBusy && !detailsError && result && onCreateBacktest && !sourceEligibility(selected, result) &&
+          <Button type="button" size="sm" onClick={() => onCreateBacktest({ id: selected.id, request_sha256: selected.request_sha256 })}>
+            {t("Create Backtest")}
+          </Button>}
         {result && <>
           <div className="grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-4">
             <div><p className="text-muted-foreground">{t("Source index")}</p>

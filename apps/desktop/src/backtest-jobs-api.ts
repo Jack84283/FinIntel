@@ -123,6 +123,17 @@ const assumptionBounds = {
 const decimal = (v: unknown): v is string =>
   typeof v === "string" && v.length <= 512 && /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(v) && v.trim() === v;
 
+export type BacktestDecimalField = keyof typeof assumptionBounds;
+
+export function validBacktestDecimal(key: BacktestDecimalField, value: unknown): boolean {
+  if (!decimal(value) || value.length > 20) return false;
+  const [whole, fraction = ""] = value.split(".");
+  if (fraction.length > 6) return false;
+  const scaled = BigInt(whole + fraction.padEnd(6, "0"));
+  const [min, max] = assumptionBounds[key];
+  return scaled >= min && scaled <= max;
+}
+
 function checkedRequest(value: unknown): BacktestJobRequest {
   const v = object(value, requestKeys);
   requireValid(v.contract_version === "backtest-job-request-v1" && identifier(v.source_job_id) &&
@@ -137,12 +148,8 @@ function checkedRequest(value: unknown): BacktestJobRequest {
     s.training_end < s.test_start && s.test_start < s.test_end && s.source_semantics === "fred_price_index_level" &&
     s.point_in_time_membership === "not_used");
   const assumptions = object(s.assumptions, Object.keys(defaultBacktestAssumptions));
-  for (const [key, [min, max]] of Object.entries(assumptionBounds)) {
-    const val = assumptions[key];
-    requireValid(decimal(val) && val.length <= 20 && (val.split(".")[1]?.length ?? 0) <= 6);
-    const [whole, fraction = ""] = val.split(".");
-    const scaled = BigInt(whole + fraction.padEnd(6, "0"));
-    requireValid(scaled >= min && scaled <= max);
+  for (const key of Object.keys(assumptionBounds) as BacktestDecimalField[]) {
+    requireValid(validBacktestDecimal(key, assumptions[key]));
   }
   for (const [key, val] of Object.entries(defaultBacktestAssumptions)) {
     if (!Object.hasOwn(assumptionBounds, key)) requireValid(assumptions[key] === val);

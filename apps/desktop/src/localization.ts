@@ -1,3 +1,4 @@
+import { backtestChinese } from "./backtest.zh-CN";
 import { analysisLibraryChinese } from "./analysis-library.zh-CN";
 import { useSyncExternalStore } from "react";
 import { readWorkspacePreferences, type AppLanguage } from "./workspace-preferences";
@@ -1087,7 +1088,7 @@ const additionalChinese: Readonly<Record<string, string>> = {
 export type TranslationKey = keyof typeof translations.en;
 export function translate(language: AppLanguage, key: string): string {
   if (language === "zh-CN") {
-    const translated = analysisLibraryChinese[key] ?? additionalChinese[key];
+    const translated = backtestChinese[key] ?? analysisLibraryChinese[key] ?? additionalChinese[key];
     if (translated) return translated;
   }
   const catalog: Readonly<Record<string, string>> = translations[language];
