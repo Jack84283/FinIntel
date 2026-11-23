@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { AnalysisResultVisualization } from "./AnalysisResultVisualization";
+import { EvidenceHash } from "./components/EvidenceHash";
 import { useLocale } from "./localization";
 import {
   cancelAnalysisJob, getAnalysisJob, retryAnalysisJob, type AnalysisJobSummary, type AnalysisResult,
@@ -8,25 +9,6 @@ import {
 import { analysisErrorMessage, MODELS, PARAMETERS, SOURCE_NAMES } from "./analysis-workflow";
 
 const isActive = (job: AnalysisJobSummary) => job.state === "queued" || job.state === "running";
-
-function Hash({ label, value }: { label: string; value: string }) {
-  const { t } = useLocale();
-  const [status, setStatus] = useState("");
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setStatus("Copied");
-    } catch {
-      setStatus("Clipboard unavailable. Select the hash to copy it.");
-    }
-  };
-  return <div className="grid gap-1 border-t py-2">
-    <span>{label}</span>
-    <code className="select-all break-all">{value}</code>
-    <div><Button type="button" size="sm" variant="outline" onClick={() => void copy()}>{t("Copy hash")}</Button>
-      <span className="ml-2" role="status">{status && t(status)}</span></div>
-  </div>;
-}
 
 function qualityWarningLabel(code: string): string {
   switch (code) {
@@ -65,9 +47,9 @@ function Evidence({ result }: { result: AnalysisResult }) {
     </ol>
     <details className="rounded-md border px-3 py-2">
       <summary className="cursor-pointer font-medium">{t("Evidence hashes")}</summary>
-      {evidence.sources.map(source => <Hash key={source.identity.code} label={source.identity.code + " · " + t("Source snapshot SHA-256")} value={source.snapshot_sha256} />)}
-      <Hash label={t("Output SHA-256")} value={result.output_sha256} />
-      <Hash label={t("Reproducibility SHA-256")} value={result.reproducibility_sha256} />
+      {evidence.sources.map(source => <EvidenceHash key={source.identity.code} label={source.identity.code + " · " + t("Source snapshot SHA-256")} value={source.snapshot_sha256} />)}
+      <EvidenceHash label={t("Output SHA-256")} value={result.output_sha256} />
+      <EvidenceHash label={t("Reproducibility SHA-256")} value={result.reproducibility_sha256} />
     </details>
 
   </section>;
