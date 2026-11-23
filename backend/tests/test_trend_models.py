@@ -407,8 +407,9 @@ def test_registry_exposes_new_proposed_models_without_managed_execution(monkeypa
         "builtin.momentum",
         "builtin.relative_strength",
         "builtin.rsi_state",
+        "builtin.risk_profile",
     ]
-    assert [model["availability"] for model in catalog] == ["released"] + ["proposed"] * 4
+    assert [model["availability"] for model in catalog] == ["released"] + ["proposed"] * 5
     token = "trend-model-contract-test-token-32bytes"
     monkeypatch.setenv("FININTEL_PROCESS_TOKEN", token)
     with TestClient(app, headers={"x-finintel-process-token": token}) as client:
