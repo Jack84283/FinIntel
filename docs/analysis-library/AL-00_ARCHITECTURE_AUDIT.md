@@ -71,7 +71,7 @@ Keep generic primitives and source adapters in `market_data/analytics*.py`. Keep
 | AL-04 · Regime | AL-02 and AL-03 | Approve the trend neutrality band, volatility window and trailing past-only calibration sample/percentiles and threshold equality. The ±2%, 63-return, 756-return and 25th/75th-percentile values are design candidates. Prove prefix invariance with independent trend/volatility unknown states and reason codes. |
 | AL-05 · Managed analysis jobs | AL-02–04 | Integrate only approved models. Verify authenticated IPC, selected-row pinning, independent quality checks, result integrity, compatibility, worker limits and lifecycle. |
 | AL-06 · Analysis desktop | AL-05 | Verify Index Intelligence model/date/parameter controls, Trend/Risk/Regime results, data evidence, job history and bilingual accessibility. |
-| AL-07 · Durable backtest | AL-05 and #70 | Keep the pure engine and verify versioned override-policy eligibility, selected-row pinning, independent quality checks, train/test separation, persisted hashes, retry and restart through authenticated fixed APIs and native commands. |
+| [AL-07 · Durable backtest](AL-07_DURABLE_BACKTEST.md) | AL-05 and #70 | Versioned eligibility, pinned inputs, durable results and authenticated native transport. |
 | AL-08 · Backtest desktop | AL-07 | Launch from eligible completed results, inspect persisted scenario/equity/drawdown/performance/trades, and export locally with a privacy warning. |
 | AL-09 · Integration and acceptance | AL-00–08 | Record synthetic regression and native CI separately from owner sign-off for private-data, installed-desktop, backup/restore, offline and scale checks. |
 

@@ -94,10 +94,8 @@ def evaluate_analysis_job(request: AnalysisRequest, *, db: Path | None = None) -
 
 
 @contextmanager
-def guard_analysis_source_for_commit(
-    request: AnalysisRequest, result: AnalysisResult
-) -> Iterator[None]:
-    """Exclude SQLite source writers until the job ledger commits validated evidence."""
+def reserve_source_for_commit() -> Iterator[sqlite3.Connection]:
+    """Exclude market SQLite writers until the job ledger commits evidence."""
     conn = None
     try:
         # mode=rw permits a reserved writer slot without creating a database. Take
@@ -114,6 +112,17 @@ def guard_analysis_source_for_commit(
         except (OSError, sqlite3.Error) as exc:
             raise StorageError("Local source lock unavailable for analysis commit") from exc
 
+        yield conn
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@contextmanager
+def guard_analysis_source_for_commit(
+    request: AnalysisRequest, result: AnalysisResult
+) -> Iterator[None]:
+    with reserve_source_for_commit() as conn:
         current = read_pinned_inputs_on_connection(
             request, conn, _observation_limit(request), family="Managed analysis"
         )
@@ -122,8 +131,3 @@ def guard_analysis_source_for_commit(
         ):
             raise AnalyticsError("Local source quality changed during managed analysis")
         yield
-    finally:
-        if conn is not None:
-            # Closing rolls back the reserved transaction. No market row or schema
-            # changes are made, and the job ledger owns its own success transaction.
-            conn.close()

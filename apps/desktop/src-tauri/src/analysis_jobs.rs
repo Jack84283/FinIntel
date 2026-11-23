@@ -15,8 +15,8 @@ const PATH: &str = "/api/v1/models/analysis/jobs";
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024 + 8192;
 const MALFORMED: &str = "invalid_response";
 const INVALID: &str = "invalid_input";
-const STATES: [&str; 5] = ["queued", "running", "completed", "failed", "cancelled"];
-const WORKER_ERRORS: [&str; 7] = [
+pub(super) const STATES: [&str; 5] = ["queued", "running", "completed", "failed", "cancelled"];
+pub(super) const WORKER_ERRORS: [&str; 7] = [
     "interrupted",
     "invalid_input",
     "quality_blocked",
@@ -26,7 +26,7 @@ const WORKER_ERRORS: [&str; 7] = [
     "worker_failure",
 ];
 
-type Checked<T> = Result<T, &'static str>;
+pub(super) type Checked<T> = Result<T, &'static str>;
 
 #[derive(Deserialize)]
 struct ModelContract {
@@ -70,7 +70,7 @@ fn models() -> &'static BTreeMap<String, ModelContract> {
     })
 }
 
-fn exact<'a>(value: &'a Value, keys: &[&str]) -> Checked<&'a Map<String, Value>> {
+pub(super) fn exact<'a>(value: &'a Value, keys: &[&str]) -> Checked<&'a Map<String, Value>> {
     let object = value.as_object().ok_or(MALFORMED)?;
     if object.len() != keys.len() || keys.iter().any(|key| !object.contains_key(*key)) {
         return Err(MALFORMED);
@@ -78,15 +78,15 @@ fn exact<'a>(value: &'a Value, keys: &[&str]) -> Checked<&'a Map<String, Value>>
     Ok(object)
 }
 
-fn string(value: &Value) -> Checked<&str> {
+pub(super) fn string(value: &Value) -> Checked<&str> {
     value.as_str().ok_or(MALFORMED)
 }
 
-fn integer(value: &Value, min: u64, max: u64) -> bool {
+pub(super) fn integer(value: &Value, min: u64, max: u64) -> bool {
     value.as_u64().is_some_and(|n| (min..=max).contains(&n))
 }
 
-fn timestamp(value: &Value) -> bool {
+pub(super) fn timestamp(value: &Value) -> bool {
     value.as_str().is_some_and(|text| {
         text.len() <= 40
             && OffsetDateTime::parse(text, &Rfc3339).is_ok_and(|date| date.offset().is_utc())
@@ -110,18 +110,18 @@ fn date(value: &Value) -> Checked<Date> {
     .map_err(|_| MALFORMED)
 }
 
-fn hash(value: &Value) -> bool {
+pub(super) fn hash(value: &Value) -> bool {
     value.as_str().is_some_and(valid_model_job_hash)
 }
 
-fn canonical_hash(value: &Value) -> String {
+pub(super) fn canonical_hash(value: &Value) -> String {
     // Validation admits only ASCII strings and safe integers in hashed fields.
     let mut sorted = value.clone();
     sorted.sort_all_objects();
     format!("{:x}", Sha256::digest(sorted.to_string().as_bytes()))
 }
 
-fn decimal(text: &str, positive: bool) -> bool {
+pub(super) fn decimal(text: &str, positive: bool) -> bool {
     let magnitude = text.strip_prefix('-').unwrap_or(text);
     let (whole, fraction) = magnitude.split_once('.').unwrap_or((magnitude, ""));
     !whole.is_empty()
@@ -259,7 +259,7 @@ fn request(value: &Value, revision: &Value) -> Checked<Value> {
     Ok(normalized)
 }
 
-const SUMMARY_KEYS: &[&str] = &[
+pub(super) const SUMMARY_KEYS: &[&str] = &[
     "id",
     "state",
     "status",
@@ -577,11 +577,11 @@ fn validate_result(result: &Value, job: &Value) -> Checked<()> {
     Ok(())
 }
 
-fn valid_status(status: &str) -> bool {
+pub(super) fn valid_status(status: &str) -> bool {
     status == "cancel_requested" || STATES.contains(&status)
 }
 
-enum Operation {
+pub(super) enum Operation {
     Create(Value),
     List {
         limit: u8,
@@ -632,13 +632,14 @@ impl Operation {
         }
     }
 
-    fn http_request(
+    pub(super) fn http_request(
         &self,
         client: &reqwest::Client,
         base: &str,
         token: &str,
+        path: &str,
     ) -> reqwest::RequestBuilder {
-        let url = format!("{base}{PATH}");
+        let url = format!("{base}{path}");
         let request = match self {
             Self::Create(payload) => client.post(url).json(payload),
             Self::List {
@@ -735,11 +736,23 @@ fn safe_error(status: u16, payload: &Value) -> &'static str {
 }
 
 async fn execute(operation: Operation) -> Result<Value, String> {
+    if super::backend_token().is_empty() {
+        return Err("managed_required".into());
+    }
+    let original = operation.validate()?;
+    let payload = managed_job_response(&operation, PATH).await?;
+    operation.response(&payload, original)?;
+    Ok(payload)
+}
+
+pub(super) async fn managed_job_response(
+    operation: &Operation,
+    path: &str,
+) -> Result<Value, String> {
     let token = super::backend_token();
     if token.is_empty() {
         return Err("managed_required".into());
     }
-    let original = operation.validate()?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(35))
         .no_proxy()
@@ -747,7 +760,7 @@ async fn execute(operation: Operation) -> Result<Value, String> {
         .build()
         .map_err(|_| "backend_unavailable")?;
     let mut response = operation
-        .http_request(&client, &super::backend_base(), token)
+        .http_request(&client, &super::backend_base(), token, path)
         .send()
         .await
         .map_err(|_| "backend_unavailable")?;
@@ -768,7 +781,6 @@ async fn execute(operation: Operation) -> Result<Value, String> {
     if status != success {
         return Err(safe_error(status, &payload).into());
     }
-    operation.response(&payload, original)?;
     Ok(payload)
 }
 
@@ -867,7 +879,7 @@ mod tests {
         for (operation, method, url) in operations {
             assert!(operation.validate().is_ok());
             let request = operation
-                .http_request(&client, base, "test-process-token")
+                .http_request(&client, base, "test-process-token", PATH)
                 .build()
                 .unwrap();
             assert_eq!(request.method().as_str(), method);

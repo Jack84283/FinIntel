@@ -1,4 +1,5 @@
 mod analysis_jobs;
+mod backtest_jobs;
 mod model_jobs;
 
 use std::sync::{atomic::{AtomicBool, AtomicU16, Ordering}, Mutex, OnceLock};
@@ -1547,6 +1548,11 @@ fn main() {
             analysis_jobs::analysis_jobs_get,
             analysis_jobs::analysis_jobs_cancel,
             analysis_jobs::analysis_jobs_retry,
+            backtest_jobs::backtest_jobs_create,
+            backtest_jobs::backtest_jobs_list,
+            backtest_jobs::backtest_jobs_get,
+            backtest_jobs::backtest_jobs_cancel,
+            backtest_jobs::backtest_jobs_retry,
             index_history_acquire,
             daily_acquisition_status,
             daily_acquisition_settings,

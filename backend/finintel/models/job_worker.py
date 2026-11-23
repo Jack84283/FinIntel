@@ -18,7 +18,10 @@ from pathlib import Path
 
 from finintel.market_data.analytics import AnalyticsError
 from finintel.market_data.analytics_store import run_analytics
+from finintel.models.backtest import BacktestContractError
+from finintel.models.backtest_worker import execute_backtest
 from finintel.models.contracts import AnalysisRequest
+from finintel.models.durable_backtest import DurableBacktestRequest
 from finintel.models.engine import evaluate_builtin_indicator
 from finintel.models.job_store import ModelJobLedger, ModelJobStoreError
 from finintel.models.managed_analysis import (
@@ -246,7 +249,7 @@ def source_snapshot_for_job(
 def _safe_error_code(exc: Exception) -> str:
     if isinstance(exc, StorageError):
         return "storage_unavailable"
-    if isinstance(exc, AnalyticsError):
+    if isinstance(exc, (AnalyticsError, BacktestContractError)):
         message = str(exc).lower()
         if "snapshot changed" in message or "source revision" in message:
             return "source_changed"
@@ -279,6 +282,10 @@ def run_child(job_id: str, attempt: int) -> int:
         request = ledger.read_claim(job_id, attempt)
         if request is None:
             return 0  # Cancelled/stale; no result is allowed.
+        if isinstance(request, DurableBacktestRequest):
+            if not execute_backtest(ledger, job_id, attempt, request):
+                ledger.finish_cancelled(job_id, attempt)
+            return 0
         if isinstance(request, AnalysisRequest):
             analysis_result = evaluate_analysis_job(request)
             with guard_analysis_source_for_commit(request, analysis_result):

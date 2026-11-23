@@ -21,6 +21,8 @@ from finintel.market_data.validation_api import router as validation_router
 from finintel.models.analysis_job_api import ANALYSIS_JOBS_PATH
 from finintel.models.analysis_job_api import router as analysis_jobs_router
 from finintel.models.api import router as models_router
+from finintel.models.backtest_job_api import BACKTEST_JOBS_PATH
+from finintel.models.backtest_job_api import router as backtest_jobs_router
 from finintel.models.job_api import router as model_jobs_router
 from finintel.models.job_worker import start_model_jobs, stop_model_jobs
 from finintel.settings.api import router as settings_router
@@ -51,7 +53,7 @@ app = FastAPI(
 @app.exception_handler(RequestValidationError)
 async def redact_model_job_validation(request: Request, exc: RequestValidationError):
     """Do not echo rejected model inputs, private paths, or exception contexts."""
-    if request.url.path.startswith(ANALYSIS_JOBS_PATH):
+    if request.url.path.startswith((ANALYSIS_JOBS_PATH, BACKTEST_JOBS_PATH)):
         return JSONResponse(status_code=422, content={"detail": "invalid_input"})
     if request.url.path.startswith("/api/v1/models/jobs"):
         return JSONResponse(status_code=422, content={"detail": "Invalid local model-job request"})
@@ -76,6 +78,7 @@ app.include_router(analytics_router)
 app.include_router(models_router)
 app.include_router(model_jobs_router)
 app.include_router(analysis_jobs_router)
+app.include_router(backtest_jobs_router)
 app.include_router(validation_router)
 app.include_router(quality_router)
 app.include_router(membership_router)
@@ -93,7 +96,7 @@ async def require_desktop_process_token(request: Request, call_next):
     ):
         detail = (
             "managed_required"
-            if request.url.path.startswith(ANALYSIS_JOBS_PATH)
+            if request.url.path.startswith((ANALYSIS_JOBS_PATH, BACKTEST_JOBS_PATH))
             else "Desktop process authorization required"
         )
         return JSONResponse(status_code=403, content={"detail": detail})

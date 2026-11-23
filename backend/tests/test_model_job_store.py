@@ -790,3 +790,47 @@ def test_analysis_read_rejects_a_valid_timestamp_only_mutation(tmp_path, analysi
         conn.execute("UPDATE model_jobs SET result_json=? WHERE id=?", (changed, identifier))
     with pytest.raises(ModelJobStoreError, match="Stored model-job result failed integrity checks"):
         ledger.get(identifier, include_result=True)
+
+
+def test_v2_upgrade_preserves_analysis_results_and_rolls_back_on_interruption(
+    tmp_path, analysis_fixture, monkeypatch
+):
+    market, spec = analysis_fixture
+    path = tmp_path / "jobs.sqlite3"
+    ledger = ModelJobLedger(path)
+    legacy = ledger.enqueue(request())
+    analysis = _insert_analysis_attempt(ledger, spec)
+    report = evaluate_risk_model(spec, db=market)
+    assert ledger.complete_analysis(analysis, 1, report)
+    with closing(sqlite3.connect(path)) as conn, conn:
+        # Recreate the previous on-disk constraints and retain every column.
+        columns = job_store._V2_COLUMNS
+        ddl = job_store._TABLE_DDL.replace(", 'backtest-job-request-v1'", "")
+        conn.execute(ddl.format(table="previous_model_jobs"))
+        conn.execute(
+            f"INSERT INTO previous_model_jobs ({columns}) SELECT {columns} FROM model_jobs"
+        )
+        conn.execute("DROP TABLE model_jobs")
+        conn.execute("ALTER TABLE previous_model_jobs RENAME TO model_jobs")
+        for statement in job_store._JOB_INDEX_DDL:
+            conn.execute(statement)
+        conn.execute("PRAGMA user_version=2")
+    before = _schema_state(path)
+    assert ledger.get(analysis, include_result=True)["result"] == report.model_dump(mode="json")
+    assert ledger.list(backtest_only=True) == {"total": 0, "items": []}
+
+    migrate = ModelJobLedger._migrate_table
+
+    def interrupted(conn, columns):
+        migrate(conn, columns)
+        raise sqlite3.OperationalError("synthetic migration interruption")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ModelJobLedger, "_migrate_table", staticmethod(interrupted))
+        with pytest.raises(ModelJobStoreError, match="storage is unavailable"):
+            ledger.reconcile_interrupted()
+    assert _schema_state(path) == before
+    assert ModelJobLedger(path).reconcile_interrupted() == 0
+    assert _schema_state(path) == (JOB_SCHEMA_VERSION, before[1], before[2])
+    assert ledger.get(legacy["id"], legacy_only=True) == legacy
+    assert ledger.get(analysis, include_result=True)["result"] == report.model_dump(mode="json")
