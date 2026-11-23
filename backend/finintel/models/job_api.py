@@ -74,7 +74,7 @@ def list_model_jobs(
 ) -> dict:
     _require_managed(request)
     try:
-        return ModelJobLedger().list(limit=limit, offset=offset, status=status)
+        return ModelJobLedger().list(limit=limit, offset=offset, status=status, legacy_only=True)
     except ModelJobStoreError as exc:
         raise _storage_failure(exc) from exc
 
@@ -84,7 +84,7 @@ def get_model_job(job_id: str, request: Request, include_result: bool = False) -
     _require_managed(request)
     _valid_job_id(job_id)
     try:
-        item = ModelJobLedger().get(job_id, include_result=include_result)
+        item = ModelJobLedger().get(job_id, include_result=include_result, legacy_only=True)
     except ModelJobStoreError as exc:
         raise _storage_failure(exc) from exc
     if item is None:
@@ -97,7 +97,7 @@ def cancel_model_job(job_id: str, request: Request) -> dict:
     _require_managed(request)
     _valid_job_id(job_id)
     try:
-        state = ModelJobLedger().cancel(job_id)
+        state = ModelJobLedger().cancel(job_id, legacy_only=True)
     except ModelJobStoreError as exc:
         raise _storage_failure(exc) from exc
     if state is None:
@@ -111,14 +111,14 @@ def retry_model_job(job_id: str, request: Request) -> dict:
     _valid_job_id(job_id)
     ledger = ModelJobLedger()
     try:
-        existing = ledger.get(job_id)
+        existing = ledger.get(job_id, legacy_only=True)
         if existing is None:
             raise HTTPException(status_code=404, detail="Model job not found")
         if not ledger.retry(job_id):
             raise HTTPException(
                 status_code=409, detail="Model job cannot be retried in its current state"
             )
-        item = ledger.get(job_id)
+        item = ledger.get(job_id, legacy_only=True)
         assert item is not None
         return item
     except ModelJobStoreError as exc:
