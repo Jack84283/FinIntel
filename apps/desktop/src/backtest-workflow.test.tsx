@@ -350,7 +350,7 @@ describe("mounted backtest lifecycle", () => {
     await click("View result");
     expect(host.textContent).toContain("Verified backtest result");
     expect(host.textContent).toContain(archive.report.input_sha256);
-    expect(host.textContent).toContain(archive.report.metrics.cumulative_return);
+    expect(host.querySelector(`[title="${archive.report.metrics.cumulative_return}"]`)).toBeTruthy();
     const previous = ipc.getMockImplementation()!;
     const corrupted = structuredClone(archived);
     corrupted.result.report.rows[0].equity_after_cost = "1";

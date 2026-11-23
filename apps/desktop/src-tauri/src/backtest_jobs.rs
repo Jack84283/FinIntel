@@ -324,7 +324,7 @@ fn report(value: &Value, job: &Value) -> Checked<()> {
     Ok(())
 }
 
-fn summary(value: &Value, expected_id: Option<&str>, include: bool) -> Checked<()> {
+pub(super) fn summary(value: &Value, expected_id: Option<&str>, include: bool) -> Checked<()> {
     let mut keys: Vec<_> = SUMMARY_KEYS
         .iter()
         .copied()

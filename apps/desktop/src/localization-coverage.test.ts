@@ -9,7 +9,7 @@ const screens = [
   "TechnicalIndicatorsCard.tsx", "IndexHistoryCard.tsx",
   "DataValidationPage.tsx", "DataQualityPage.tsx", "IndexMembershipPage.tsx", "IndexIntelligencePage.tsx", "ModelJobsPage.tsx", "IndexIntelligenceChart.tsx", "IndexBasketPanel.tsx", "ConstituentOverlapPanel.tsx", "ConstituentTrendPanel.tsx", "ModelResearchPanel.tsx", "MarketExplorer.tsx",
   "PreferencesPage.tsx", "ProviderCredentialsCard.tsx", "SymbolSelector.tsx",
-  "components/MarketDatePicker.tsx", "ModelJobsWorkspace.tsx", "BacktestWorkspace.tsx", "BacktestForm.tsx", "BacktestJobDetail.tsx",
+  "components/MarketDatePicker.tsx", "ModelJobsWorkspace.tsx", "BacktestWorkspace.tsx", "BacktestForm.tsx", "BacktestJobDetail.tsx", "BacktestResultView.tsx", "BacktestExport.tsx",
 ];
 
 describe("localization catalog coverage", () => {

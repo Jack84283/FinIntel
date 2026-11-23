@@ -1,5 +1,6 @@
 mod analysis_jobs;
 mod backtest_jobs;
+mod backtest_export;
 mod model_jobs;
 
 use std::sync::{atomic::{AtomicBool, AtomicU16, Ordering}, Mutex, OnceLock};
@@ -1399,6 +1400,7 @@ async fn daily_acquisition_history(
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Native development can keep using the standard developer backend.
             // Production bundles launch an app-owned backend with a private port.
@@ -1553,6 +1555,7 @@ fn main() {
             backtest_jobs::backtest_jobs_get,
             backtest_jobs::backtest_jobs_cancel,
             backtest_jobs::backtest_jobs_retry,
+            backtest_export::backtest_export,
             index_history_acquire,
             daily_acquisition_status,
             daily_acquisition_settings,

@@ -6,15 +6,20 @@ import {
 } from "./backtest-jobs-api";
 import { backtestDisclosure, backtestError, backtestFields, fixedAssumptionLabels } from "./backtest-workflow";
 import { AnalysisJobError } from "./analysis-jobs-api";
+import { BacktestExport } from "./BacktestExport";
+import { BacktestResultView } from "./BacktestResultView";
 import { useLocale } from "./localization";
 
 function BacktestEvidence({ job, result }: { job: BacktestJobSummary; result: BacktestJobResult }) {
-  const { t, language } = useLocale();
+  const { t } = useLocale();
   const { request } = job;
   const { report } = result;
   const entries = [
     ["Backtest job ID", job.id], ["Source job ID", request.source_job_id],
-    ["Model", `${t("SMA crossover")} · ${request.simulation.model_version}`],
+    ["Model", `${request.simulation.model_id} · ${request.simulation.model_version}`],
+    ["Source index", request.simulation.index_code + " · FRED"],
+    ["Training end", request.simulation.training_end],
+    ["Test period", request.simulation.test_start + " – " + request.simulation.test_end],
     ["Source implementation revision", request.source_implementation_revision],
     ["Engine revision", request.engine_revision],
     ["Original quality policy", t("require_complete")],
@@ -29,15 +34,10 @@ function BacktestEvidence({ job, result }: { job: BacktestJobSummary; result: Ba
     ["Backtest input SHA-256", report.input_sha256],
     ["Backtest report output SHA-256", report.output_sha256],
   ];
-  return <section aria-label={t("Verified backtest result")} className="space-y-3 border-t pt-3">
-    <h3 className="font-semibold">{t("Verified backtest result")}</h3>
-    <p className="font-medium">{t(backtestDisclosure)}</p>
+  return <details className="space-y-3 rounded-md border p-3">
+    <summary className="cursor-pointer font-semibold">{t("Backtest evidence")}</summary>
     <p className="text-muted-foreground">{t("Archived backtests retain their original evidence after local source data changes. New backtests must pass current source checks.")}</p>
     <dl className="grid gap-2 sm:grid-cols-2">
-      <div><dt className="text-muted-foreground">{t("Test sessions")}</dt><dd>{report.test_sessions.toLocaleString(language)}</dd></div>
-      <div><dt className="text-muted-foreground">{t("Hypothetical transactions")}</dt><dd>{report.metrics.transactions.toLocaleString(language)}</dd></div>
-      <div><dt className="text-muted-foreground">{t("Cumulative strategy return (fraction)")}</dt><dd className="break-all tabular-nums">{report.metrics.cumulative_return}</dd></div>
-      <div><dt className="text-muted-foreground">{t("Cumulative benchmark return (fraction)")}</dt><dd className="break-all tabular-nums">{report.metrics.frictionless_benchmark_cumulative_return}</dd></div>
       {entries.map(([key, value]) => <div key={key}><dt className="text-muted-foreground">{t(key)}</dt><dd className="break-words">{value}</dd></div>)}
     </dl>
     <details className="rounded-md border px-3 py-2">
@@ -51,7 +51,7 @@ function BacktestEvidence({ job, result }: { job: BacktestJobSummary; result: Ba
       <summary className="cursor-pointer font-medium">{t("Evidence hashes")}</summary>
       {hashes.map(([key, value]) => <EvidenceHash key={key} label={t(key)} value={value} />)}
     </details>
-  </section>;
+  </details>;
 }
 
 export function BacktestJobDetail({ initial, selectionGeneration, workspaceGeneration, onChanged, onClose }: {
@@ -191,6 +191,11 @@ export function BacktestJobDetail({ initial, selectionGeneration, workspaceGener
         <Button type="button" size="sm" disabled={busy} onClick={() => void run("result")}>{t("View result")}</Button>}
     </div>
     {error && <p role="alert" className="text-destructive">{t(error)}</p>}
-    {job.state === "completed" && result && <BacktestEvidence key={result.report.output_sha256} job={job} result={result} />}
+    {job.state === "completed" && result && <div key={result.report.output_sha256} className="min-w-0 space-y-4">
+      <p className="font-semibold">{t(backtestDisclosure)}</p>
+      <BacktestResultView job={job} result={result} />
+      <BacktestEvidence job={job} result={result} />
+      <BacktestExport job={job} result={result} />
+    </div>}
   </section>;
 }

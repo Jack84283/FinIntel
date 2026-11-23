@@ -105,6 +105,7 @@ jobs:
           cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel model_jobs::tests
           cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel analysis_jobs::tests
           cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel backtest_jobs::tests
+          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel backtest_export::tests
       - name: Package macOS app bundle
         if: runner.os == 'macOS'
         run: npm run tauri:build --workspace @finintel/desktop -- --bundles app
