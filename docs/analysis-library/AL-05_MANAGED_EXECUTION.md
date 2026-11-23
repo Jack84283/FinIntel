@@ -1,6 +1,6 @@
 # AL-05 · Managed analysis execution
 
-AL-05A introduced the v2 ledger and preserved v1 SMA records. AL-05B connects that ledger to the existing isolated model worker. AL-05C will expose the analysis queue through authenticated HTTP and fixed Tauri commands, with typed clients for AL-06.
+AL-05A introduced the v2 ledger and preserved v1 SMA records. AL-05B connects that ledger to the existing isolated model worker. AL-05C exposes the analysis queue through authenticated HTTP, fixed Tauri commands and a typed client for AL-06. See [Managed Analysis Library transport](AL-05C_MANAGED_ANALYSIS_TRANSPORT.md).
 
 ## Approval and source pins
 
@@ -24,4 +24,4 @@ The existing ownership lock allows one supervisor and one child. Limits remain 3
 
 A synthetic macOS smoke run at the 2,000-observation cap measured four-source Relative Strength at 0.49 seconds and 81 MiB peak RSS, and two-source Risk Profile with 999-return windows at 3.56 seconds and 88 MiB. A single-source Market Regime run with a 1,000-observation calibration window measured 0.74 seconds and 75 MiB. All three included isolated child startup, validation and SQLite persistence. Results were below 1.8 MB each. These are development measurements on disposable data.
 
-The current managed HTTP/Tauri commands and TypeScript client retain the SMA-only contract. AL-05C should use the internal enqueue entry point from an authenticated fixed route, expose the typed request/result distinction and safe errors, and keep existing SMA history compatible. AL-06 will consume that transport. Installed-desktop, private-data, and real-device acceptance remain owner validation gates.
+The SMA HTTP, IPC and TypeScript contracts remain available. The Analysis Library transport uses separate authenticated routes and fixed IPC commands backed by the same ledger and worker. AL-06 will consume that transport for the Analysis Library UI. Installed-desktop, private-data and real-device acceptance remain owner validation gates.

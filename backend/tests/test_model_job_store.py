@@ -464,6 +464,8 @@ def test_v1_upgrade_preserves_every_legacy_column_and_existing_lifecycle(tmp_pat
     assert version == 1
     assert ledger.list()["total"] == 5
     assert ledger.get(ids["completed"], include_result=True)["result"] == result()
+    assert ledger.list(analysis_only=True) == {"total": 0, "items": []}
+    assert ledger.get(ids["completed"], include_result=True, analysis_only=True) is None
     assert _schema_state(path) == (version, indexes, old_rows)
 
     assert ledger.cancel("no-such-job") is None  # First write migrates without editing a job.
