@@ -1,9 +1,4 @@
-"""Issue #32: opt-in, local-only durable research-job ledger.
-
-Phase 2A stores *metadata and results* but intentionally does not execute jobs,
-expose HTTP routes or start a worker. Execution must live in an isolated follow-up
-worker. The market-data database and its schema are never modified here.
-"""
+"""Local-only durable research-job ledger, separate from market data."""
 
 from __future__ import annotations
 
@@ -20,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from finintel.market_data.analytics import CALCULATION_VERSION
 from finintel.models.api import ModelResearchResult
+from finintel.models.contracts import AnalysisRequest, AnalysisResult
 from finintel.models.registry import (
     IMPLEMENTATION_REVISION,
     MAX_MODEL_OBSERVATIONS,
@@ -27,10 +23,24 @@ from finintel.models.registry import (
     MODEL_ID,
     MODEL_VERSION,
     ModelParameters,
+    get_model_definition,
 )
 from finintel.storage.db import database_path
 
-JOB_SCHEMA_VERSION = 1
+JOB_SCHEMA_VERSION = 2
+LEGACY_JOB_SCHEMA_VERSION = 1
+LEGACY_REQUEST_CONTRACT = "model-job-sma-v1"
+ANALYSIS_REQUEST_CONTRACT = "analysis-model-request-v1"
+PERSISTED_ANALYSIS_MODELS = frozenset(
+    {
+        ("builtin.ema_trend", "1.0.0"),
+        ("builtin.momentum", "1.0.0"),
+        ("builtin.relative_strength", "1.0.0"),
+        ("builtin.rsi_state", "1.0.0"),
+        ("builtin.risk_profile", "1.0.0"),
+        ("builtin.market_regime", "1.0.0"),
+    }
+)
 MAX_ACTIVE_JOBS = 32
 MAX_ATTEMPTS = 3
 MAX_LIST_LIMIT = 100
@@ -93,29 +103,75 @@ def jobs_database_path() -> Path:
     )
 
 
-DDL = """
-CREATE TABLE model_jobs (
+# Only checked-in model identities are interpolated into DDL.
+_ANALYSIS_IDENTITIES_SQL = " OR ".join(
+    f"(model_id = '{identifier}' AND model_version = '{version}')"
+    for identifier, version in sorted(PERSISTED_ANALYSIS_MODELS)
+)
+_TABLE_DDL = f"""
+CREATE TABLE {{table}} (
     id TEXT PRIMARY KEY NOT NULL,
     state TEXT NOT NULL CHECK(state IN ('queued','running','completed','failed','cancelled')),
-    model_id TEXT NOT NULL CHECK(model_id = 'builtin.sma_crossover'),
-    model_version TEXT NOT NULL CHECK(model_version = '1.0.0'),
+    model_id TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    request_contract TEXT NOT NULL DEFAULT '{LEGACY_REQUEST_CONTRACT}',
     request_json TEXT NOT NULL,
     request_sha256 TEXT NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 3),
     progress INTEGER NOT NULL DEFAULT 0 CHECK(progress BETWEEN 0 AND 100),
     cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK(cancel_requested IN (0,1)),
     result_json TEXT,
+    result_envelope_sha256 TEXT,
     output_sha256 TEXT,
     source_snapshot_sha256 TEXT,
     error_code TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     started_at TEXT,
-    finished_at TEXT
-);
-CREATE INDEX model_jobs_recent ON model_jobs(created_at DESC, id DESC);
-CREATE INDEX model_jobs_pending ON model_jobs(state, created_at, id);
+    finished_at TEXT,
+    CHECK (
+        (request_contract = '{LEGACY_REQUEST_CONTRACT}'
+            AND model_id = '{MODEL_ID}' AND model_version = '{MODEL_VERSION}')
+        OR
+        (request_contract = '{ANALYSIS_REQUEST_CONTRACT}'
+            AND ({_ANALYSIS_IDENTITIES_SQL}))
+    ),
+    CHECK (
+        CASE WHEN request_contract = '{ANALYSIS_REQUEST_CONTRACT}' AND state = 'completed'
+             THEN result_envelope_sha256 IS NOT NULL
+                  AND length(result_envelope_sha256) = 64
+                  AND result_envelope_sha256 NOT GLOB '*[^0-9a-f]*'
+             ELSE result_envelope_sha256 IS NULL
+        END
+    )
+)
 """
+_JOB_INDEX_DDL = (
+    "CREATE INDEX model_jobs_recent ON model_jobs(created_at DESC, id DESC)",
+    "CREATE INDEX model_jobs_pending ON model_jobs(state, created_at, id)",
+)
+_LEGACY_COLUMNS = (
+    "id,state,model_id,model_version,request_json,request_sha256,attempts,progress,"
+    "cancel_requested,result_json,output_sha256,source_snapshot_sha256,error_code,"
+    "created_at,updated_at,started_at,finished_at"
+)
+
+
+def analysis_job_request_payload(request: AnalysisRequest) -> tuple[str, str]:
+    """Return checked canonical request JSON and its hash for future enqueue."""
+    if not isinstance(request, AnalysisRequest):
+        raise ModelJobStoreError("Invalid analysis model-job request")
+    try:
+        request = AnalysisRequest.model_validate_json(request.model_dump_json())
+        if (request.model_id, request.model_version) not in PERSISTED_ANALYSIS_MODELS:
+            raise ValueError("Unsupported persistent analysis model")
+        parameters = get_model_definition(request).validate_request(request)
+        payload = request.model_dump(mode="json")
+        payload["parameters"] = parameters.model_dump(mode="json")
+        canonical = _canonical(payload)
+    except (ValueError, TypeError) as exc:
+        raise ModelJobStoreError("Invalid analysis model-job request") from exc
+    return canonical, hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class ModelJobLedger:
@@ -157,7 +213,10 @@ class ModelJobLedger:
                 self._initialize(conn)
             else:
                 conn.execute("PRAGMA query_only = ON")
-                if conn.execute("PRAGMA user_version").fetchone()[0] != JOB_SCHEMA_VERSION:
+                if conn.execute("PRAGMA user_version").fetchone()[0] not in {
+                    LEGACY_JOB_SCHEMA_VERSION,
+                    JOB_SCHEMA_VERSION,
+                }:
                     raise ModelJobStoreError("Model-job storage needs initialization or upgrade")
             return conn
         except (sqlite3.Error, ModelJobStoreError) as exc:
@@ -170,15 +229,60 @@ class ModelJobLedger:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         if version == JOB_SCHEMA_VERSION:
             return
+        # Recheck under the reservation in case another process migrated first.
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if version == JOB_SCHEMA_VERSION:
+                return
+            if version == LEGACY_JOB_SCHEMA_VERSION:
+                ModelJobLedger._migrate_legacy(conn)
+            elif (
+                version == 0
+                and not conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                ).fetchone()
+            ):
+                conn.execute(_TABLE_DDL.format(table="model_jobs"))
+            else:
+                raise ModelJobStoreError("Unsupported model-job storage version")
+            for statement in _JOB_INDEX_DDL:
+                conn.execute(statement)
+            conn.execute(f"PRAGMA user_version = {JOB_SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_legacy(conn: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(model_jobs)")}
+        if columns != set(_LEGACY_COLUMNS.split(",")):
+            raise ModelJobStoreError("Unexpected model-job storage columns")
+        conn.execute(_TABLE_DDL.format(table="model_jobs_v2"))
+        conn.execute(
+            f"INSERT INTO model_jobs_v2 ({_LEGACY_COLUMNS}) "
+            f"SELECT {_LEGACY_COLUMNS} FROM model_jobs"
+        )
         if (
-            version != 0
-            or conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-            ).fetchone()
+            conn.execute("SELECT count(*) FROM model_jobs").fetchone()[0]
+            != conn.execute("SELECT count(*) FROM model_jobs_v2").fetchone()[0]
         ):
-            raise ModelJobStoreError("Unsupported model-job storage version")
-        # executescript commits implicitly; creation happens only for a new empty database.
-        conn.executescript("BEGIN IMMEDIATE;\n" + DDL + "\nPRAGMA user_version = 1;\nCOMMIT;")
+            raise ModelJobStoreError("Model-job migration did not preserve existing rows")
+        # Join on the primary key and compare NULLs explicitly. This avoids
+        # materializing a sorted copy of every retained result for verification.
+        differences = " OR ".join(
+            f"old.{column} IS NOT new.{column}"
+            for column in _LEGACY_COLUMNS.split(",")
+            if column != "id"
+        )
+        if (
+            conn.execute(
+                "SELECT 1 FROM model_jobs AS old "
+                "LEFT JOIN model_jobs_v2 AS new ON old.id = new.id "
+                f"WHERE new.id IS NULL OR {differences} LIMIT 1"
+            ).fetchone()
+            is not None
+        ):
+            raise ModelJobStoreError("Model-job migration did not preserve existing rows")
+        conn.execute("DROP TABLE model_jobs")
+        conn.execute("ALTER TABLE model_jobs_v2 RENAME TO model_jobs")
 
     @staticmethod
     def _summary(row: sqlite3.Row) -> dict:
@@ -242,6 +346,46 @@ class ModelJobLedger:
             conn.close()
 
     @staticmethod
+    def _verified_analysis_request(row: sqlite3.Row) -> AnalysisRequest:
+        request = AnalysisRequest.model_validate_json(row["request_json"])
+        canonical, digest = analysis_job_request_payload(request)
+        if (
+            canonical != row["request_json"]
+            or digest != row["request_sha256"]
+            or request.model_id != row["model_id"]
+            or request.model_version != row["model_version"]
+        ):
+            raise ModelJobStoreError("Stored analysis model-job request failed integrity checks")
+        return request
+
+    @staticmethod
+    def _checked_analysis_result(row: sqlite3.Row, raw: str) -> tuple[AnalysisResult, str | None]:
+        request = ModelJobLedger._verified_analysis_request(row)
+        definition = get_model_definition(request)
+        maximum = min(MAX_RESULT_BYTES, definition.metadata.execution.max_result_bytes)
+        if len(raw.encode("utf-8")) > maximum:
+            raise ModelJobStoreError("Model-job result exceeds retention quota")
+        result = AnalysisResult.model_validate_json(raw)
+        definition.validate_result(request, result)
+        sources = result.evidence.sources
+        snapshot = sources[0].snapshot_sha256 if len(sources) == 1 else None
+        return result, snapshot
+
+    @staticmethod
+    def _verified_analysis_result(row: sqlite3.Row, raw: str) -> dict:
+        if hashlib.sha256(raw.encode("utf-8")).hexdigest() != row["result_envelope_sha256"]:
+            raise ModelJobStoreError("Stored model-job result failed integrity checks")
+        result, snapshot = ModelJobLedger._checked_analysis_result(row, raw)
+        payload = result.model_dump(mode="json")
+        if (
+            _canonical(payload) != raw
+            or result.output_sha256 != row["output_sha256"]
+            or snapshot != row["source_snapshot_sha256"]
+        ):
+            raise ModelJobStoreError("Stored model-job result failed integrity checks")
+        return payload
+
+    @staticmethod
     def _verified_stored_result(row: sqlite3.Row) -> dict | None:
         """Fail closed on stored-result corruption, without modifying any observation."""
         raw = row["result_json"]
@@ -252,6 +396,12 @@ class ModelJobLedger:
         if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_RESULT_BYTES:
             raise ModelJobStoreError("Stored model-job result failed integrity checks")
         try:
+            # sqlite3.Row membership searches values rather than column names.
+            if "request_contract" in row.keys():  # noqa: SIM118
+                if row["request_contract"] == ANALYSIS_REQUEST_CONTRACT:
+                    return ModelJobLedger._verified_analysis_result(row, raw)
+                if row["request_contract"] != LEGACY_REQUEST_CONTRACT:
+                    raise ModelJobStoreError("Invalid stored model-job request contract")
             result = ModelResearchResult.model_validate_json(raw)
             original = ModelJobRequest.model_validate_json(row["request_json"]).model_dump(
                 mode="json"
@@ -318,13 +468,15 @@ class ModelJobLedger:
         except (ValidationError, ValueError, TypeError, KeyError, IndexError) as exc:
             raise ModelJobStoreError("Stored model-job result failed integrity checks") from exc
 
-    def get(self, identifier: str, *, include_result: bool = False) -> dict | None:
+    def get(
+        self, identifier: str, *, include_result: bool = False, legacy_only: bool = False
+    ) -> dict | None:
         conn = self._open(writable=False)
         if conn is None:
             return None
         try:
             row = conn.execute("SELECT * FROM model_jobs WHERE id=?", (identifier,)).fetchone()
-            if row is None:
+            if row is None or (legacy_only and row["model_id"] != MODEL_ID):
                 return None
             result = self._summary(row)
             if include_result:
@@ -333,7 +485,14 @@ class ModelJobLedger:
         finally:
             conn.close()
 
-    def list(self, *, limit: int = 20, offset: int = 0, status: str | None = None) -> dict:
+    def list(
+        self,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        status: str | None = None,
+        legacy_only: bool = False,
+    ) -> dict:
         if not 1 <= limit <= MAX_LIST_LIMIT or not 0 <= offset <= 10_000:
             raise ModelJobStoreError("Invalid model-job pagination")
         if status not in {
@@ -346,16 +505,21 @@ class ModelJobLedger:
             "cancelled",
         }:
             raise ModelJobStoreError("Invalid model-job status filter")
+        conditions = []
+        params = []
+        if legacy_only:
+            conditions.append("model_id=?")
+            params.append(MODEL_ID)
         # Filter before applying LIMIT so pagination and total reflect *all*
         # matching jobs, not merely the currently visible ten rows.
         if status == "cancel_requested":
-            where, params = " WHERE state='running' AND cancel_requested=1", ()
+            conditions.append("state='running' AND cancel_requested=1")
         elif status == "running":
-            where, params = " WHERE state='running' AND cancel_requested=0", ()
+            conditions.append("state='running' AND cancel_requested=0")
         elif status is not None:
-            where, params = " WHERE state=?", (status,)
-        else:
-            where, params = "", ()
+            conditions.append("state=?")
+            params.append(status)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
         conn = self._open(writable=False)
         if conn is None:
             return {"total": 0, "items": []}
@@ -385,7 +549,8 @@ class ModelJobLedger:
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
                     "SELECT id,request_json,attempts FROM model_jobs "
-                    "WHERE state='queued' ORDER BY created_at,id LIMIT 1"
+                    "WHERE state='queued' AND request_contract=? ORDER BY created_at,id LIMIT 1",
+                    (LEGACY_REQUEST_CONTRACT,),
                 ).fetchone()
                 if row is None:
                     return None
@@ -410,8 +575,9 @@ class ModelJobLedger:
         try:
             row = conn.execute(
                 "SELECT request_json,request_sha256 FROM model_jobs "
-                "WHERE id=? AND attempts=? AND state='running' AND cancel_requested=0",
-                (identifier, attempt),
+                "WHERE id=? AND attempts=? AND state='running' AND cancel_requested=0 "
+                "AND model_id=? AND model_version=?",
+                (identifier, attempt, MODEL_ID, MODEL_VERSION),
             ).fetchone()
             if row is None:
                 return None
@@ -445,7 +611,7 @@ class ModelJobLedger:
         finally:
             conn.close()
 
-    def cancel(self, identifier: str) -> str | None:
+    def cancel(self, identifier: str, *, legacy_only: bool = False) -> str | None:
         """Queued cancellation is final; running cancellation is cooperative."""
         conn = self._open(writable=True)
         assert conn is not None
@@ -453,9 +619,9 @@ class ModelJobLedger:
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
-                    "SELECT state FROM model_jobs WHERE id=?", (identifier,)
+                    "SELECT state,model_id FROM model_jobs WHERE id=?", (identifier,)
                 ).fetchone()
-                if row is None:
+                if row is None or (legacy_only and row["model_id"] != MODEL_ID):
                     return None
                 if row["state"] == "queued":
                     at = _now()
@@ -590,8 +756,8 @@ class ModelJobLedger:
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
                     "SELECT request_json,state,cancel_requested,attempts "
-                    "FROM model_jobs WHERE id=?",
-                    (identifier,),
+                    "FROM model_jobs WHERE id=? AND request_contract=?",
+                    (identifier, LEGACY_REQUEST_CONTRACT),
                 ).fetchone()
                 if (
                     row is None
@@ -620,14 +786,65 @@ class ModelJobLedger:
                     or source != original["expected_snapshot_sha256"]
                 ):
                     raise ModelJobStoreError("Model-job result does not match queued request")
-                at = _now()
-                cursor = conn.execute(
-                    "UPDATE model_jobs SET state='completed',progress=100,result_json=?,"
-                    "output_sha256=?,source_snapshot_sha256=?,updated_at=?,finished_at=? "
-                    "WHERE id=? AND attempts=? AND state='running' AND cancel_requested=0",
-                    (canonical, output, source, at, at, identifier, attempt),
+                return self._persist_result(conn, identifier, attempt, canonical, output, source)
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _persist_result(
+        conn: sqlite3.Connection,
+        identifier: str,
+        attempt: int,
+        canonical: str,
+        output: str,
+        source: str | None,
+        *,
+        envelope_digest: str | None = None,
+    ) -> bool:
+        at = _now()
+        cursor = conn.execute(
+            "UPDATE model_jobs SET state='completed',progress=100,result_json=?,"
+            "output_sha256=?,source_snapshot_sha256=?,result_envelope_sha256=?,"
+            "updated_at=?,finished_at=? "
+            "WHERE id=? AND attempts=? AND state='running' AND cancel_requested=0",
+            (canonical, output, source, envelope_digest, at, at, identifier, attempt),
+        )
+        return cursor.rowcount == 1
+
+    def complete_analysis(self, identifier: str, attempt: int, result: AnalysisResult) -> bool:
+        """Store the checked result for a matching internal analysis attempt."""
+        self._validate_attempt(attempt)
+        if not isinstance(result, AnalysisResult):
+            raise ModelJobStoreError("Invalid analysis model-job output schema")
+        conn = self._open(writable=True)
+        assert conn is not None
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT model_id,model_version,request_json,request_sha256 "
+                    "FROM model_jobs WHERE id=? AND request_contract=? "
+                    "AND state='running' AND cancel_requested=0 AND attempts=?",
+                    (identifier, ANALYSIS_REQUEST_CONTRACT, attempt),
+                ).fetchone()
+                if row is None:
+                    return False
+                try:
+                    canonical = _canonical(result.model_dump(mode="json"))
+                    validated, source = self._checked_analysis_result(row, canonical)
+                except (ValueError, TypeError) as exc:
+                    raise ModelJobStoreError(
+                        "Invalid analysis model-job result or request"
+                    ) from exc
+                return self._persist_result(
+                    conn,
+                    identifier,
+                    attempt,
+                    canonical,
+                    validated.output_sha256,
+                    source,
+                    envelope_digest=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
                 )
-                return cursor.rowcount == 1
         finally:
             conn.close()
 
@@ -657,7 +874,8 @@ class ModelJobLedger:
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
                 target = conn.execute(
-                    "SELECT state,attempts FROM model_jobs WHERE id=?", (identifier,)
+                    "SELECT state,attempts FROM model_jobs WHERE id=? AND request_contract=?",
+                    (identifier, LEGACY_REQUEST_CONTRACT),
                 ).fetchone()
                 if target is None or target["state"] not in {"failed", "cancelled"}:
                     return False
