@@ -286,6 +286,8 @@ export function AnalysisResultVisualization({ result }: { result: AnalysisResult
       </div>
       <strong className="rounded-md border bg-muted px-2 py-1 text-xs">{t("Research only")}</strong>
     </header>
+    {result.evidence.quality_policy === "allow_unverified" &&
+      <p role="status" className="rounded-md border bg-muted p-2">{t("Unverified evidence is allowed for this historical research.")}</p>}
     {result.evidence.sources.some(source => source.quality.status !== "verified") &&
       <p role="status" className="rounded-md border bg-muted p-2">{t("Result uses unverified source evidence.")}</p>}
     {content}

@@ -28,13 +28,24 @@ function Hash({ label, value }: { label: string; value: string }) {
   </div>;
 }
 
+function qualityWarningLabel(code: string): string {
+  switch (code) {
+    case "quality_scan_not_run": return "A data quality scan has not been run.";
+    case "quality_scan_partial": return "The data quality scan is incomplete.";
+    case "quality_scan_stale": return "The data quality scan is out of date.";
+    case "unresolved_quality_findings": return "The source has unresolved data quality findings.";
+    default: return "The saved result includes an additional data quality warning.";
+  }
+}
+
 function Evidence({ result }: { result: AnalysisResult }) {
   const { t, language } = useLocale();
   const { evidence } = result;
   return <section aria-label={t("Verified research result")} className="space-y-3 border-t pt-3">
     <h3 className="font-semibold">{t("Verified research result")}</h3>
     <p className="text-muted-foreground">{t("Research only. Archived results retain their original evidence even if local data has changed.")}</p>
-    {evidence.warnings.map(warning => <p key={warning} className="text-muted-foreground">{t(warning)}</p>)}
+    {evidence.warnings.filter(warning => warning !== "quality_override").map(warning =>
+      <p key={warning} className="text-muted-foreground">{t(qualityWarningLabel(warning))}</p>)}
     <dl className="grid gap-2 sm:grid-cols-2">
       <div><dt className="text-muted-foreground">{t("Model")}</dt><dd>{evidence.model.model_id} · {evidence.model.model_version}</dd></div>
       <div><dt className="text-muted-foreground">{t("Implementation revision")}</dt><dd className="break-words">{evidence.model.implementation_revision}</dd></div>
@@ -49,7 +60,7 @@ function Evidence({ result }: { result: AnalysisResult }) {
       {evidence.sources.map(source => <li key={source.identity.code}>
         {t(SOURCE_NAMES[source.identity.code])} · {source.identity.code} · FRED · {source.observed.start} – {source.observed.end} · {t(source.quality.status)}
         <div className="text-muted-foreground">{t("Observations")} {source.observed.count.toLocaleString(language)} · {t("Aligned observations")} {source.aligned_count.toLocaleString(language)} · {t("Excluded observations")} {source.excluded_count.toLocaleString(language)}
-          {source.quality.warnings.map(warning => <span key={warning}> · {t(warning)}</span>)}</div>
+          {source.quality.warnings.map(warning => <span key={warning}> · {t(qualityWarningLabel(warning))}</span>)}</div>
       </li>)}
     </ol>
     <details className="rounded-md border px-3 py-2">

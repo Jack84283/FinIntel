@@ -21,7 +21,7 @@ const close = (index: number) => ({ session_date: date(index), close: String(100
 const evaluated_at_utc = "2025-01-01T00:00:00.000000+00:00";
 
 async function verified<M extends AnalysisModelId>(modelId: M, points: readonly AnalysisPoint<M>[], {
-  parameters = {}, codes = ["SP500"] as AnalysisSourceCode[], unverified = false,
+  parameters = {}, codes = ["SP500"] as AnalysisSourceCode[], unverified = false, allowUnverified = false,
 } = {}) {
   const model = contracts[modelId];
   const observed_sessions = points.map(point => point.session_date);
@@ -34,7 +34,7 @@ async function verified<M extends AnalysisModelId>(modelId: M, points: readonly 
   const resolved = { ...Object.fromEntries(Object.entries(model.parameters).map(([key, rule]) => [key, rule.default])), ...parameters };
   const request = {
     contract_version: "analysis-model-request-v1", model_id: modelId, model_version: model.version,
-    window: requested, sources, quality_policy: unverified ? "allow_unverified" : "require_complete", parameters: resolved,
+    window: requested, sources, quality_policy: (allowUnverified || unverified) ? "allow_unverified" : "require_complete", parameters: resolved,
   };
   const evidence = {
     contract_version: "analysis-model-evidence-v1", model: identity, calculation_version: model.calculation,
@@ -44,7 +44,7 @@ async function verified<M extends AnalysisModelId>(modelId: M, points: readonly 
       quality: unverified ? { status: "not_run", warnings: ["quality_scan_not_run"] } : { status: "verified", warnings: [] },
     })),
     requested, observed_sessions, parameters: resolved, output_fields: model.output_fields,
-    quality_policy: request.quality_policy, warnings: unverified ? ["quality_override"] : [], research_only: true,
+    quality_policy: request.quality_policy, warnings: (allowUnverified || unverified) ? ["quality_override"] : [], research_only: true,
   };
   const output_sha256 = await canonicalModelSha256(points);
   const result = {
@@ -251,6 +251,20 @@ describe("mounted verified result visualization", () => {
     });
     await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "Go")!.click());
     expect(tableValue("momentum", 1999)).toBe("1.25%");
+  });
+
+  it.each([
+    ["en", "Unverified evidence is allowed for this historical research.", "Result uses unverified source evidence."],
+    ["zh-CN", "本次历史研究允许使用未经核验的证据。", "此结果使用了未经核验的数据来源证据。"],
+  ] as const)("explains the selected override with verified sources in %s", async (language, policyMessage, sourceAlert) => {
+    saveWorkspacePreferences({ language, theme: "dark", reduceMotion: false });
+    const points: AnalysisPoint<"builtin.rsi_state">[] = [{
+      ...close(0), rsi: null, rsi_state: null, lower_threshold: 30, upper_threshold: 70, warmup_complete: false,
+    }];
+    await render(verified("builtin.rsi_state", points, { allowUnverified: true }));
+    expect(host.textContent).toContain(policyMessage);
+    expect(host.textContent).not.toContain(sourceAlert);
+    expect(host.textContent).not.toContain("quality_override");
   });
 
   it("renders a localized read-only chart with focusable native controls and no animation in either theme", async () => {

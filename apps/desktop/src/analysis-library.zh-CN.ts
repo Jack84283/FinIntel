@@ -274,7 +274,11 @@ export const analysisLibraryChinese: Readonly<Record<string, string>> = {
   "Trend distances": "趋势偏离幅度",
   "Historical results": "历史结果",
   "Aligned observations": "已对齐的观测记录",
-  "quality_override": "已选择允许未经核验的数据证据",
+  "A data quality scan has not been run.": "尚未运行数据质量扫描。",
+  "The data quality scan is incomplete.": "数据质量扫描尚未完成。",
+  "The data quality scan is out of date.": "数据质量扫描结果已过期。",
+  "The source has unresolved data quality findings.": "该来源存在尚未解决的数据质量问题。",
+  "The saved result includes an additional data quality warning.": "此已保存的结果包含一项额外的数据质量警告。",
   "Session date": "交易日",
   "session_date": "交易日",
 };
