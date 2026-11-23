@@ -101,7 +101,9 @@ jobs:
       - name: Run native overlap Unicode unit tests
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel overlap_search_tests
       - name: Run native model-job contract tests
-        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel model_jobs::tests
+        run: |
+          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel model_jobs::tests
+          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel analysis_jobs::tests
       - name: Package macOS app bundle
         if: runner.os == 'macOS'
         run: npm run tauri:build --workspace @finintel/desktop -- --bundles app

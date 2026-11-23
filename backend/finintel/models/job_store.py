@@ -156,6 +156,28 @@ _LEGACY_COLUMNS = (
     "cancel_requested,result_json,output_sha256,source_snapshot_sha256,error_code,"
     "created_at,updated_at,started_at,finished_at"
 )
+_SUMMARY_COLUMNS = (
+    "id",
+    "state",
+    "model_id",
+    "model_version",
+    "request_sha256",
+    "attempts",
+    "progress",
+    "cancel_requested",
+    "output_sha256",
+    "source_snapshot_sha256",
+    "error_code",
+    "created_at",
+    "updated_at",
+    "started_at",
+    "finished_at",
+)
+_ANALYSIS_SUMMARY_SELECT = (
+    "SELECT "
+    + ",".join((*_SUMMARY_COLUMNS, "request_json", "request_contract"))
+    + " FROM model_jobs"
+)
 
 
 def analysis_job_request_payload(request: AnalysisRequest) -> tuple[str, str]:
@@ -287,26 +309,7 @@ class ModelJobLedger:
 
     @staticmethod
     def _summary(row: sqlite3.Row) -> dict:
-        summary = {
-            key: row[key]
-            for key in (
-                "id",
-                "state",
-                "model_id",
-                "model_version",
-                "request_sha256",
-                "attempts",
-                "progress",
-                "cancel_requested",
-                "output_sha256",
-                "source_snapshot_sha256",
-                "error_code",
-                "created_at",
-                "updated_at",
-                "started_at",
-                "finished_at",
-            )
-        }
+        summary = {key: row[key] for key in _SUMMARY_COLUMNS}
         # Public presentation status is additive; durable SQLite state stays
         # unchanged for atomic transitions and backward compatibility.
         summary["status"] = (
@@ -315,6 +318,17 @@ class ModelJobLedger:
             else row["state"]
         )
         return summary
+
+    @staticmethod
+    def _analysis_summary(row: sqlite3.Row) -> dict:
+        request = ModelJobLedger._verified_analysis_request(row)
+        return {
+            **ModelJobLedger._summary(row),
+            "implementation_revision": MANAGED_ANALYSIS_REVISIONS[
+                (request.model_id, request.model_version)
+            ],
+            "request": request.model_dump(mode="json"),
+        }
 
     def enqueue(self, request: ModelJobRequest) -> dict:
         if not isinstance(request, ModelJobRequest):
@@ -364,6 +378,8 @@ class ModelJobLedger:
                     (identifier, contract, model_id, version, canonical, digest, at, at),
                 )
                 row = conn.execute("SELECT * FROM model_jobs WHERE id=?", (identifier,)).fetchone()
+            if contract == ANALYSIS_REQUEST_CONTRACT:
+                return self._analysis_summary(row)
             return self._summary(row)
         finally:
             conn.close()
@@ -492,21 +508,38 @@ class ModelJobLedger:
             raise ModelJobStoreError("Stored model-job result failed integrity checks") from exc
 
     def get(
-        self, identifier: str, *, include_result: bool = False, legacy_only: bool = False
+        self,
+        identifier: str,
+        *,
+        include_result: bool = False,
+        legacy_only: bool = False,
+        analysis_only: bool = False,
     ) -> dict | None:
         conn = self._open(writable=False)
         if conn is None:
             return None
         try:
-            row = conn.execute("SELECT * FROM model_jobs WHERE id=?", (identifier,)).fetchone()
-            if row is None or (legacy_only and row["model_id"] != MODEL_ID):
+            if analysis_only and (
+                conn.execute("PRAGMA user_version").fetchone()[0] == LEGACY_JOB_SCHEMA_VERSION
+            ):
                 return None
-            result = self._summary(row)
-            if include_result:
-                result["result"] = self._verified_stored_result(row)
-            return result
+            query = "SELECT * FROM model_jobs"
+            if analysis_only and not include_result:
+                query = _ANALYSIS_SUMMARY_SELECT
+            where = " WHERE id=?"
+            params = (identifier,)
+            if analysis_only:
+                where += " AND request_contract=?"
+                params += (ANALYSIS_REQUEST_CONTRACT,)
+            row = conn.execute(query + where, params).fetchone()
         finally:
             conn.close()
+        if row is None or (legacy_only and row["model_id"] != MODEL_ID):
+            return None
+        result = self._analysis_summary(row) if analysis_only else self._summary(row)
+        if include_result:
+            result["result"] = self._verified_stored_result(row)
+        return result
 
     def list(
         self,
@@ -515,6 +548,7 @@ class ModelJobLedger:
         offset: int = 0,
         status: str | None = None,
         legacy_only: bool = False,
+        analysis_only: bool = False,
     ) -> dict:
         if not 1 <= limit <= MAX_LIST_LIMIT or not 0 <= offset <= 10_000:
             raise ModelJobStoreError("Invalid model-job pagination")
@@ -533,6 +567,9 @@ class ModelJobLedger:
         if legacy_only:
             conditions.append("model_id=?")
             params.append(MODEL_ID)
+        if analysis_only:
+            conditions.append("request_contract=?")
+            params.append(ANALYSIS_REQUEST_CONTRACT)
         # Filter before applying LIMIT so pagination and total reflect *all*
         # matching jobs, not merely the currently visible ten rows.
         if status == "cancel_requested":
@@ -547,16 +584,21 @@ class ModelJobLedger:
         if conn is None:
             return {"total": 0, "items": []}
         try:
+            if analysis_only:
+                # Count and filter against one snapshot even while the worker updates jobs.
+                conn.execute("BEGIN")
+                if conn.execute("PRAGMA user_version").fetchone()[0] == LEGACY_JOB_SCHEMA_VERSION:
+                    return {"total": 0, "items": []}
             total = conn.execute("SELECT COUNT(*) FROM model_jobs" + where, params).fetchone()[0]
+            query = _ANALYSIS_SUMMARY_SELECT if analysis_only else "SELECT * FROM model_jobs"
             items = conn.execute(
-                "SELECT * FROM model_jobs"
-                + where
-                + " ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",
+                query + where + " ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",
                 (*params, limit, offset),
             ).fetchall()
-            return {"total": total, "items": [self._summary(row) for row in items]}
         finally:
             conn.close()
+        summarize = self._analysis_summary if analysis_only else self._summary
+        return {"total": total, "items": [summarize(row) for row in items]}
 
     @staticmethod
     def _validate_attempt(attempt: int) -> None:
@@ -654,7 +696,9 @@ class ModelJobLedger:
         finally:
             conn.close()
 
-    def cancel(self, identifier: str, *, legacy_only: bool = False) -> str | None:
+    def cancel(
+        self, identifier: str, *, legacy_only: bool = False, analysis_only: bool = False
+    ) -> str | None:
         """Queued cancellation is final; running cancellation is cooperative."""
         conn = self._open(writable=True)
         assert conn is not None
@@ -662,9 +706,12 @@ class ModelJobLedger:
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
-                    "SELECT state,model_id FROM model_jobs WHERE id=?", (identifier,)
+                    "SELECT state,model_id,request_contract FROM model_jobs WHERE id=?",
+                    (identifier,),
                 ).fetchone()
                 if row is None or (legacy_only and row["model_id"] != MODEL_ID):
+                    return None
+                if analysis_only and row["request_contract"] != ANALYSIS_REQUEST_CONTRACT:
                     return None
                 if row["state"] == "queued":
                     at = _now()
@@ -909,22 +956,38 @@ class ModelJobLedger:
         finally:
             conn.close()
 
-    def retry(self, identifier: str, *, legacy_only: bool = True) -> bool:
+    def retry(
+        self,
+        identifier: str,
+        *,
+        legacy_only: bool = True,
+        analysis_only: bool = False,
+        expected_attempt: int | None = None,
+    ) -> bool:
         """Retries retain the *identical* request and its expected source pin."""
         conn = self._open(writable=True)
         assert conn is not None
         try:
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
+                contract = (
+                    ANALYSIS_REQUEST_CONTRACT
+                    if analysis_only
+                    else LEGACY_REQUEST_CONTRACT
+                    if legacy_only
+                    else None
+                )
                 target = conn.execute(
                     "SELECT state,attempts,request_json,request_sha256,request_contract,"
                     "model_id,model_version FROM model_jobs WHERE id=?"
-                    + (" AND request_contract=?" if legacy_only else ""),
-                    (identifier, LEGACY_REQUEST_CONTRACT) if legacy_only else (identifier,),
+                    + (" AND request_contract=?" if contract else ""),
+                    (identifier, contract) if contract else (identifier,),
                 ).fetchone()
                 if target is None or target["state"] not in {"failed", "cancelled"}:
                     return False
-                if target["attempts"] >= MAX_ATTEMPTS:
+                if target["attempts"] >= MAX_ATTEMPTS or (
+                    expected_attempt is not None and target["attempts"] != expected_attempt
+                ):
                     return False
                 if target["request_contract"] == ANALYSIS_REQUEST_CONTRACT:
                     try:

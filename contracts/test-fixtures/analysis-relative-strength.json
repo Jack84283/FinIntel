@@ -1,0 +1,290 @@
+{
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "state": "completed",
+  "model_id": "builtin.relative_strength",
+  "model_version": "1.0.0",
+  "request_sha256": "17b0279fc95d528fcd6b5aa6f129125c5ef85bbdb691e0b1de0cc7ca20ecf298",
+  "attempts": 1,
+  "progress": 100,
+  "cancel_requested": 0,
+  "output_sha256": "eb21c03d1ec7d2e48858f5968ae9d3928b546f5463b6f99b4e9ecdd57fc2bbd8",
+  "source_snapshot_sha256": null,
+  "error_code": null,
+  "created_at": "2024-01-04T00:00:00.000000+00:00",
+  "updated_at": "2024-01-04T00:00:00.000000+00:00",
+  "started_at": "2024-01-04T00:00:00.000000+00:00",
+  "finished_at": "2024-01-04T00:00:00.000000+00:00",
+  "status": "completed",
+  "implementation_revision": "relative-strength-common-baseline-v1",
+  "request": {
+    "model_id": "builtin.relative_strength",
+    "model_version": "1.0.0",
+    "contract_version": "analysis-model-request-v1",
+    "sources": [
+      {
+        "identity": {
+          "instrument_kind": "index",
+          "code": "NDX",
+          "provider": "fred",
+          "adjustment": "price_index",
+          "return_semantics": "price_index",
+          "frequency": "daily",
+          "units": "index_points"
+        },
+        "snapshot_sha256": "360b06b0c74d1e9a058233a932eff012c30efb0367c1164cbcf8c59af42b4bf9"
+      },
+      {
+        "identity": {
+          "instrument_kind": "index",
+          "code": "SP500",
+          "provider": "fred",
+          "adjustment": "price_index",
+          "return_semantics": "price_index",
+          "frequency": "daily",
+          "units": "index_points"
+        },
+        "snapshot_sha256": "320e0ccaa61058dad0651d76ad8d67f9ac9f3c7949c1eb1c5d2f6bfefa8b8577"
+      }
+    ],
+    "window": {
+      "start": "2024-01-02",
+      "end": "2024-01-03"
+    },
+    "parameters": {},
+    "quality_policy": "allow_unverified"
+  },
+  "result": {
+    "contract_version": "analysis-model-result-v1",
+    "evidence": {
+      "contract_version": "analysis-model-evidence-v1",
+      "model": {
+        "model_id": "builtin.relative_strength",
+        "model_version": "1.0.0",
+        "implementation_revision": "relative-strength-common-baseline-v1"
+      },
+      "calculation_version": "index-analytics-v2",
+      "sources": [
+        {
+          "identity": {
+            "instrument_kind": "index",
+            "code": "NDX",
+            "provider": "fred",
+            "adjustment": "price_index",
+            "return_semantics": "price_index",
+            "frequency": "daily",
+            "units": "index_points"
+          },
+          "snapshot_sha256": "360b06b0c74d1e9a058233a932eff012c30efb0367c1164cbcf8c59af42b4bf9",
+          "observed": {
+            "start": "2024-01-02",
+            "end": "2024-01-03",
+            "count": 2
+          },
+          "aligned_count": 2,
+          "excluded_count": 0,
+          "quality": {
+            "status": "not_run",
+            "warnings": [
+              "quality_scan_not_run"
+            ]
+          }
+        },
+        {
+          "identity": {
+            "instrument_kind": "index",
+            "code": "SP500",
+            "provider": "fred",
+            "adjustment": "price_index",
+            "return_semantics": "price_index",
+            "frequency": "daily",
+            "units": "index_points"
+          },
+          "snapshot_sha256": "320e0ccaa61058dad0651d76ad8d67f9ac9f3c7949c1eb1c5d2f6bfefa8b8577",
+          "observed": {
+            "start": "2024-01-02",
+            "end": "2024-01-03",
+            "count": 2
+          },
+          "aligned_count": 2,
+          "excluded_count": 0,
+          "quality": {
+            "status": "not_run",
+            "warnings": [
+              "quality_scan_not_run"
+            ]
+          }
+        }
+      ],
+      "requested": {
+        "start": "2024-01-02",
+        "end": "2024-01-03"
+      },
+      "observed_sessions": [
+        "2024-01-02",
+        "2024-01-03"
+      ],
+      "parameters": {},
+      "output_fields": [
+        {
+          "name": "session_date",
+          "kind": "date",
+          "units": "iso_date",
+          "nullable": false,
+          "strictly_positive": false,
+          "allowed_values": []
+        },
+        {
+          "name": "benchmark",
+          "kind": "enum",
+          "units": "index_code",
+          "nullable": false,
+          "strictly_positive": false,
+          "allowed_values": [
+            "sp500",
+            "djia",
+            "nasdaqcom",
+            "ndx"
+          ]
+        },
+        {
+          "name": "sp500_normalized_100",
+          "kind": "decimal",
+          "units": "index_base_100",
+          "nullable": true,
+          "strictly_positive": true,
+          "allowed_values": []
+        },
+        {
+          "name": "sp500_relative_strength",
+          "kind": "decimal",
+          "units": "ratio",
+          "nullable": true,
+          "strictly_positive": true,
+          "allowed_values": []
+        },
+        {
+          "name": "sp500_return_difference",
+          "kind": "decimal",
+          "units": "decimal_return_difference",
+          "nullable": true,
+          "strictly_positive": false,
+          "allowed_values": []
+        },
+        {
+          "name": "djia_normalized_100",
+          "kind": "decimal",
+          "units": "index_base_100",
+          "nullable": true,
+          "strictly_positive": true,
+          "allowed_values": []
+        },
+        {
+          "name": "djia_relative_strength",
+          "kind": "decimal",
+          "units": "ratio",
+          "nullable": true,
+          "strictly_positive": true,
+          "allowed_values": []
+        },
+        {
+          "name": "djia_return_difference",
+          "kind": "decimal",
+          "units": "decimal_return_difference",
+          "nullable": true,
+          "strictly_positive": false,
+          "allowed_values": []
+        },
+        {
+          "name": "nasdaqcom_normalized_100",
+          "kind": "decimal",
+          "units": "index_base_100",
+          "nullable": true,
+          "strictly_positive": true,
+          "allowed_values": []
+        },
+        {
+          "name": "nasdaqcom_relative_strength",
+          "kind": "decimal",
+          "units": "ratio",
+          "nullable": true,
+          "strictly_positive": true,
+          "allowed_values": []
+        },
+        {
+          "name": "nasdaqcom_return_difference",
+          "kind": "decimal",
+          "units": "decimal_return_difference",
+          "nullable": true,
+          "strictly_positive": false,
+          "allowed_values": []
+        },
+        {
+          "name": "ndx_normalized_100",
+          "kind": "decimal",
+          "units": "index_base_100",
+          "nullable": true,
+          "strictly_positive": true,
+          "allowed_values": []
+        },
+        {
+          "name": "ndx_relative_strength",
+          "kind": "decimal",
+          "units": "ratio",
+          "nullable": true,
+          "strictly_positive": true,
+          "allowed_values": []
+        },
+        {
+          "name": "ndx_return_difference",
+          "kind": "decimal",
+          "units": "decimal_return_difference",
+          "nullable": true,
+          "strictly_positive": false,
+          "allowed_values": []
+        }
+      ],
+      "quality_policy": "allow_unverified",
+      "warnings": [
+        "quality_override"
+      ],
+      "research_only": true
+    },
+    "points": [
+      {
+        "benchmark": "ndx",
+        "djia_normalized_100": null,
+        "djia_relative_strength": null,
+        "djia_return_difference": null,
+        "nasdaqcom_normalized_100": null,
+        "nasdaqcom_relative_strength": null,
+        "nasdaqcom_return_difference": null,
+        "ndx_normalized_100": "100",
+        "ndx_relative_strength": "1",
+        "ndx_return_difference": "0",
+        "session_date": "2024-01-02",
+        "sp500_normalized_100": "100",
+        "sp500_relative_strength": "1",
+        "sp500_return_difference": "0"
+      },
+      {
+        "benchmark": "ndx",
+        "djia_normalized_100": null,
+        "djia_relative_strength": null,
+        "djia_return_difference": null,
+        "nasdaqcom_normalized_100": null,
+        "nasdaqcom_relative_strength": null,
+        "nasdaqcom_return_difference": null,
+        "ndx_normalized_100": "105.00",
+        "ndx_relative_strength": "1",
+        "ndx_return_difference": "0.00",
+        "session_date": "2024-01-03",
+        "sp500_normalized_100": "103.00",
+        "sp500_relative_strength": "0.9809523809523809523809523810",
+        "sp500_return_difference": "-0.02"
+      }
+    ],
+    "reproducibility_sha256": "ff8877dc483a9430f73b45c795f2e4232da017f2c8b8978eb9ac60488edd57dd",
+    "output_sha256": "eb21c03d1ec7d2e48858f5968ae9d3928b546f5463b6f99b4e9ecdd57fc2bbd8",
+    "evaluated_at_utc": "2024-01-04T00:00:00Z"
+  }
+}

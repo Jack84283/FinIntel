@@ -1,0 +1,227 @@
+{
+  "builtin.ema_trend": {
+    "version": "1.0.0",
+    "revision": "ema-sma-seed-decimal-v1",
+    "calculation": "index-analytics-v2",
+    "min_sources": 1,
+    "max_sources": 1,
+    "allows_unverified": true,
+    "parameters": {
+      "fast_window": {
+        "default": 12,
+        "maximum": 1999,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "slow_window": {
+        "default": 26,
+        "maximum": 2000,
+        "minimum": 2,
+        "type": "integer"
+      }
+    },
+    "output_fields": [
+      {"name": "session_date", "kind": "date", "units": "iso_date", "nullable": false, "strictly_positive": false, "allowed_values": []},
+      {"name": "close", "kind": "decimal", "units": "index_points", "nullable": false, "strictly_positive": true, "allowed_values": []},
+      {"name": "fast_ema", "kind": "decimal", "units": "index_points", "nullable": true, "strictly_positive": true, "allowed_values": []},
+      {"name": "slow_ema", "kind": "decimal", "units": "index_points", "nullable": true, "strictly_positive": true, "allowed_values": []},
+      {"name": "ema_difference", "kind": "decimal", "units": "index_points", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "trend_after_close", "kind": "enum", "units": "state", "nullable": true, "strictly_positive": false, "allowed_values": ["above", "flat", "below"]},
+      {"name": "crossover_after_close", "kind": "enum", "units": "event", "nullable": true, "strictly_positive": false, "allowed_values": ["above", "none", "below"]},
+      {"name": "warmup_complete", "kind": "boolean", "units": "flag", "nullable": false, "strictly_positive": false, "allowed_values": []}
+    ]
+  },
+  "builtin.market_regime": {
+    "version": "1.0.0",
+    "revision": "market-regime-two-axis-v1",
+    "calculation": "market-regime-v1",
+    "min_sources": 1,
+    "max_sources": 1,
+    "allows_unverified": true,
+    "parameters": {
+      "short_window": {
+        "default": 50,
+        "exclusiveMaximum": 2000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "long_window": {
+        "default": 200,
+        "maximum": 2000,
+        "minimum": 2,
+        "type": "integer"
+      },
+      "neutrality_band": {
+        "default": "0.02",
+        "pattern": "^(?:0(?:\\.[0-9]{1,6})?|1(?:\\.0{1,6})?)$",
+        "type": "string"
+      },
+      "volatility_window": {
+        "default": 63,
+        "maximum": 1998,
+        "minimum": 2,
+        "type": "integer"
+      },
+      "calibration_window": {
+        "default": 756,
+        "maximum": 1997,
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "output_fields": [
+      {"name": "session_date", "kind": "date", "units": "iso_date", "nullable": false, "strictly_positive": false, "allowed_values": []},
+      {"name": "close", "kind": "decimal", "units": "index_points", "nullable": false, "strictly_positive": true, "allowed_values": []},
+      {"name": "sma50", "kind": "decimal", "units": "index_points", "nullable": true, "strictly_positive": true, "allowed_values": []},
+      {"name": "sma200", "kind": "decimal", "units": "index_points", "nullable": true, "strictly_positive": true, "allowed_values": []},
+      {"name": "close_distance", "kind": "decimal", "units": "decimal_return", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "sma_distance", "kind": "decimal", "units": "decimal_return", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "trend_state", "kind": "enum", "units": "trend_state", "nullable": false, "strictly_positive": false, "allowed_values": ["uptrend", "downtrend", "sideways", "unknown"]},
+      {"name": "realized_volatility", "kind": "decimal", "units": "decimal_return", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "volatility_p25", "kind": "decimal", "units": "decimal_return", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "volatility_p75", "kind": "decimal", "units": "decimal_return", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "volatility_calibration_count", "kind": "integer", "units": "observations", "nullable": false, "strictly_positive": false, "allowed_values": []},
+      {"name": "volatility_state", "kind": "enum", "units": "volatility_state", "nullable": false, "strictly_positive": false, "allowed_values": ["low", "normal", "high", "unknown"]},
+      {"name": "reason_codes", "kind": "reason_codes", "units": "classification_reasons", "nullable": false, "strictly_positive": false, "allowed_values": ["trend_above_band", "trend_below_band", "trend_mixed", "trend_insufficient_history", "vol_below_p25", "vol_above_p75", "vol_normal_range", "vol_calibration_insufficient", "quality_unverified"]}
+    ]
+  },
+  "builtin.momentum": {
+    "version": "1.0.0",
+    "revision": "momentum-trailing-observed-v1",
+    "calculation": "index-analytics-v2",
+    "min_sources": 1,
+    "max_sources": 1,
+    "allows_unverified": true,
+    "parameters": {
+      "lookback_sessions": {
+        "default": 63,
+        "enum": [
+          21,
+          63,
+          126,
+          252
+        ],
+        "type": "integer"
+      }
+    },
+    "output_fields": [
+      {"name": "session_date", "kind": "date", "units": "iso_date", "nullable": false, "strictly_positive": false, "allowed_values": []},
+      {"name": "close", "kind": "decimal", "units": "index_points", "nullable": false, "strictly_positive": true, "allowed_values": []},
+      {"name": "comparison_session_date", "kind": "date", "units": "iso_date", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "comparison_close", "kind": "decimal", "units": "index_points", "nullable": true, "strictly_positive": true, "allowed_values": []},
+      {"name": "momentum", "kind": "decimal", "units": "decimal_return", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "lookback_sessions", "kind": "integer", "units": "sessions", "nullable": false, "strictly_positive": false, "allowed_values": []},
+      {"name": "warmup_complete", "kind": "boolean", "units": "flag", "nullable": false, "strictly_positive": false, "allowed_values": []}
+    ]
+  },
+  "builtin.relative_strength": {
+    "version": "1.0.0",
+    "revision": "relative-strength-common-baseline-v1",
+    "calculation": "index-analytics-v2",
+    "min_sources": 2,
+    "max_sources": 4,
+    "allows_unverified": true,
+    "parameters": {},
+    "output_fields": [
+      {"name": "session_date", "kind": "date", "units": "iso_date", "nullable": false, "strictly_positive": false, "allowed_values": []},
+      {"name": "benchmark", "kind": "enum", "units": "index_code", "nullable": false, "strictly_positive": false, "allowed_values": ["sp500", "djia", "nasdaqcom", "ndx"]},
+      {"name": "sp500_normalized_100", "kind": "decimal", "units": "index_base_100", "nullable": true, "strictly_positive": true, "allowed_values": []},
+      {"name": "sp500_relative_strength", "kind": "decimal", "units": "ratio", "nullable": true, "strictly_positive": true, "allowed_values": []},
+      {"name": "sp500_return_difference", "kind": "decimal", "units": "decimal_return_difference", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "djia_normalized_100", "kind": "decimal", "units": "index_base_100", "nullable": true, "strictly_positive": true, "allowed_values": []},
+      {"name": "djia_relative_strength", "kind": "decimal", "units": "ratio", "nullable": true, "strictly_positive": true, "allowed_values": []},
+      {"name": "djia_return_difference", "kind": "decimal", "units": "decimal_return_difference", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "nasdaqcom_normalized_100", "kind": "decimal", "units": "index_base_100", "nullable": true, "strictly_positive": true, "allowed_values": []},
+      {"name": "nasdaqcom_relative_strength", "kind": "decimal", "units": "ratio", "nullable": true, "strictly_positive": true, "allowed_values": []},
+      {"name": "nasdaqcom_return_difference", "kind": "decimal", "units": "decimal_return_difference", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "ndx_normalized_100", "kind": "decimal", "units": "index_base_100", "nullable": true, "strictly_positive": true, "allowed_values": []},
+      {"name": "ndx_relative_strength", "kind": "decimal", "units": "ratio", "nullable": true, "strictly_positive": true, "allowed_values": []},
+      {"name": "ndx_return_difference", "kind": "decimal", "units": "decimal_return_difference", "nullable": true, "strictly_positive": false, "allowed_values": []}
+    ]
+  },
+  "builtin.risk_profile": {
+    "version": "1.0.0",
+    "revision": "historical-risk-linear95-decimal-v1",
+    "calculation": "historical-risk-v1",
+    "min_sources": 1,
+    "max_sources": 2,
+    "allows_unverified": true,
+    "parameters": {
+      "risk_window": {
+        "default": 63,
+        "exclusiveMaximum": 2000,
+        "minimum": 2,
+        "type": "integer"
+      },
+      "tail_window": {
+        "default": 252,
+        "exclusiveMaximum": 2000,
+        "minimum": 60,
+        "type": "integer"
+      }
+    },
+    "output_fields": [
+      {"name": "session_date", "kind": "date", "units": "iso_date", "nullable": false, "strictly_positive": false, "allowed_values": []},
+      {"name": "close", "kind": "decimal", "units": "index_points", "nullable": false, "strictly_positive": true, "allowed_values": []},
+      {"name": "simple_return", "kind": "decimal", "units": "decimal_return", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "comparison_return", "kind": "decimal", "units": "decimal_return", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "annualized_volatility", "kind": "decimal", "units": "decimal_return", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "downside_deviation", "kind": "decimal", "units": "decimal_return", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "var_95", "kind": "decimal", "units": "decimal_return", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "expected_shortfall_95", "kind": "decimal", "units": "decimal_return", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "correlation", "kind": "decimal", "units": "ratio", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "current_drawdown", "kind": "decimal", "units": "decimal_return", "nullable": false, "strictly_positive": false, "allowed_values": []},
+      {"name": "maximum_drawdown", "kind": "decimal", "units": "decimal_return", "nullable": false, "strictly_positive": false, "allowed_values": []},
+      {"name": "open_peak_date", "kind": "date", "units": "iso_date", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "open_trough_date", "kind": "date", "units": "iso_date", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "maximum_peak_date", "kind": "date", "units": "iso_date", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "maximum_trough_date", "kind": "date", "units": "iso_date", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "last_recovered_peak_date", "kind": "date", "units": "iso_date", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "last_recovered_trough_date", "kind": "date", "units": "iso_date", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "last_recovery_date", "kind": "date", "units": "iso_date", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "open_elapsed_intervals", "kind": "integer", "units": "observed_intervals", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "last_peak_to_recovery_intervals", "kind": "integer", "units": "observed_intervals", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "last_trough_to_recovery_intervals", "kind": "integer", "units": "observed_intervals", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "historical_sample_count", "kind": "integer", "units": "observed_intervals", "nullable": false, "strictly_positive": false, "allowed_values": []},
+      {"name": "historical_tail_count", "kind": "integer", "units": "observed_intervals", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "historical_tail_status", "kind": "enum", "units": "risk_status", "nullable": false, "strictly_positive": false, "allowed_values": ["insufficient_history", "empty_tail", "available"]}
+    ]
+  },
+  "builtin.rsi_state": {
+    "version": "1.0.0",
+    "revision": "rsi-simple-rolling-states-v1",
+    "calculation": "index-analytics-v2",
+    "min_sources": 1,
+    "max_sources": 1,
+    "allows_unverified": true,
+    "parameters": {
+      "window": {
+        "default": 14,
+        "maximum": 1999,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "lower_threshold": {
+        "default": 30,
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "upper_threshold": {
+        "default": 70,
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "output_fields": [
+      {"name": "session_date", "kind": "date", "units": "iso_date", "nullable": false, "strictly_positive": false, "allowed_values": []},
+      {"name": "close", "kind": "decimal", "units": "index_points", "nullable": false, "strictly_positive": true, "allowed_values": []},
+      {"name": "rsi", "kind": "decimal", "units": "oscillator_0_100", "nullable": true, "strictly_positive": false, "allowed_values": []},
+      {"name": "rsi_state", "kind": "enum", "units": "state", "nullable": true, "strictly_positive": false, "allowed_values": ["low", "neutral", "high"]},
+      {"name": "lower_threshold", "kind": "integer", "units": "oscillator_0_100", "nullable": false, "strictly_positive": false, "allowed_values": []},
+      {"name": "upper_threshold", "kind": "integer", "units": "oscillator_0_100", "nullable": false, "strictly_positive": false, "allowed_values": []},
+      {"name": "warmup_complete", "kind": "boolean", "units": "flag", "nullable": false, "strictly_positive": false, "allowed_values": []}
+    ]
+  }
+}

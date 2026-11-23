@@ -9,17 +9,20 @@ import subprocess
 import sys
 import time
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from finintel import main as backend_main
 from finintel.market_data.analytics import AnalyticsError
-from finintel.models import job_api, job_worker, managed_analysis
+from finintel.models import analysis_job_api, job_api, job_worker, managed_analysis
+from finintel.models.analysis_job_api import ANALYSIS_JOBS_PATH
 from finintel.models.contracts import AnalysisRequest, DateRange, SourcePin
 from finintel.models.engine import evaluate_builtin_indicator
 from finintel.models.job_store import ModelJobLedger, ModelJobRequest, ModelJobStoreError
-from finintel.models.registry import PRICE_INDEX_SOURCES
+from finintel.models.managed_approvals import MANAGED_ANALYSIS_REVISIONS
+from finintel.models.registry import PRICE_INDEX_SOURCES, get_model_definition
 from finintel.storage.db import _write_connection
 
 REAL_WINDOWS_JOB_LIMIT = job_worker._limit_windows_worker
@@ -28,6 +31,7 @@ REAL_MACOS_RSS = job_worker._macos_rss_bytes
 START = date(2026, 9, 1)
 END = date(2026, 10, 5)
 TOKEN = "local-managed-test-process-token-issue-58"
+MANAGED_HEADERS = {"x-finintel-process-token": TOKEN}
 
 
 @pytest.fixture(autouse=True)
@@ -653,6 +657,14 @@ def analysis_request(*, model_id="builtin.risk_profile", codes=("SP500",), param
     )
 
 
+def analysis_api_body(spec: AnalysisRequest, **updates) -> dict:
+    return {
+        **spec.model_dump(mode="json"),
+        "implementation_revision": MANAGED_ANALYSIS_REVISIONS[(spec.model_id, spec.model_version)],
+        **updates,
+    }
+
+
 @pytest.mark.parametrize(
     ("model_id", "parameters", "codes"),
     [
@@ -679,7 +691,10 @@ def test_real_child_executes_each_approved_analysis_model(
             )
     spec = analysis_request(model_id=model_id, codes=codes, parameters=parameters)
     ledger = ModelJobLedger(jobs)
-    identifier = job_worker.enqueue_analysis_job(spec)["id"]
+    client = TestClient(backend_main.app, headers=MANAGED_HEADERS)
+    created = client.post(ANALYSIS_JOBS_PATH, json=analysis_api_body(spec))
+    assert created.status_code == 202
+    identifier = created.json()["id"]
     claimed = ledger.claim_next()
     assert claimed is not None and claimed[0] == identifier and claimed[2] == 1
     assert list(claimed[1].sources) == list(spec.sources)
@@ -693,13 +708,22 @@ def test_real_child_executes_each_approved_analysis_model(
         check=False,
     )
     assert completed.returncode == 0, "Isolated analysis worker failed"
-    finished = ledger.get(identifier, include_result=True)
+    detail = client.get(f"{ANALYSIS_JOBS_PATH}/{identifier}?include_result=true")
+    assert detail.status_code == 200
+    finished = detail.json()
     assert finished["state"] == "completed"
     assert finished["result"]["evidence"]["model"]["model_id"] == model_id
     assert [
         source["identity"]["code"] for source in finished["result"]["evidence"]["sources"]
     ] == list(codes)
     assert finished["result"]["output_sha256"] == finished["output_sha256"]
+    assert finished["source_snapshot_sha256"] == (
+        spec.sources[0].snapshot_sha256 if len(codes) == 1 else None
+    )
+    assert [source["snapshot_sha256"] for source in finished["result"]["evidence"]["sources"]] == [
+        source.snapshot_sha256 for source in spec.sources
+    ]
+    assert client.get(f"/api/v1/models/jobs/{identifier}").status_code == 404
     assert ledger.get(identifier, legacy_only=True) is None
     assert not ledger.retry(identifier, legacy_only=False)
 
@@ -905,3 +929,204 @@ def test_source_commit_lock_contention_fails_closed_and_retry_releases_lock(loca
     assert retry == attempt + 1
     assert job_worker.run_child(identifier, retry) == 0
     assert ledger.get(identifier, include_result=True)["state"] == "completed"
+
+
+def test_analysis_api_authenticates_every_route_before_validation(local_storage):
+    client = TestClient(backend_main.app)
+    identifier = "123e4567-e89b-12d3-a456-426614174000"
+    for headers in ({}, {"x-finintel-process-token": "wrong"}):
+        for method, path in (
+            ("POST", ""),
+            ("GET", "?limit=-5"),
+            ("GET", f"/{identifier}"),
+            ("POST", f"/{identifier}/cancel"),
+            ("POST", f"/{identifier}/retry"),
+        ):
+            reply = client.request(
+                method, ANALYSIS_JOBS_PATH + path, content=b"{broken", headers=headers
+            )
+            assert reply.status_code == 403
+            assert reply.json() == {"detail": "managed_required"}
+
+
+def test_analysis_api_rejects_model_and_source_contract_changes(local_storage):
+    market, _ = local_storage
+    seed_market(market)
+    spec = analysis_request()
+    client = TestClient(backend_main.app, headers=MANAGED_HEADERS)
+    source = spec.sources[0].model_dump(mode="json")
+    malformed = [
+        {"model_id": "builtin.sma_crossover"},
+        {"model_version": "2.0.0"},
+        {"implementation_revision": "unapproved"},
+        {"parameters": {"risk_window": 1}},
+        {"parameters": {"tail_window": "60"}},
+        {"parameters": {"private_path": "/tmp/private-file"}},
+        {"sources": []},
+        {"sources": [source, source]},
+        {"sources": [{"identity": source["identity"]}]},
+        {"sources": [{**source, "snapshot_sha256": "F" * 64}]},
+        {"window": {"start": "2026-09-31", "end": END.isoformat()}},
+    ]
+    for updates in malformed:
+        response = client.post(ANALYSIS_JOBS_PATH, json=analysis_api_body(spec, **updates))
+        assert response.status_code == 422
+        assert response.json() == {"detail": "invalid_input"}
+    response = client.post(
+        ANALYSIS_JOBS_PATH, json=analysis_api_body(spec, quality_policy="require_complete")
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "quality_blocked"}
+    forged_pin = {**source, "snapshot_sha256": "0" * 64}
+    response = client.post(ANALYSIS_JOBS_PATH, json=analysis_api_body(spec, sources=[forged_pin]))
+    assert response.status_code == 409
+    assert response.json() == {"detail": "source_changed"}
+    with sqlite3.connect(market) as conn:
+        conn.execute(
+            "UPDATE index_daily_closes SET close='1234' WHERE session_date=?",
+            (START.isoformat(),),
+        )
+    response = client.post(ANALYSIS_JOBS_PATH, json=analysis_api_body(spec))
+    assert response.status_code == 409
+    assert response.json() == {"detail": "source_changed"}
+    assert client.get(ANALYSIS_JOBS_PATH).json() == {"total": 0, "items": []}
+
+
+def test_analysis_history_paginates_filtered_jobs_and_shares_queue_quota(local_storage):
+    market, _ = local_storage
+    seed_market(market)
+    spec = analysis_request()
+    client = TestClient(backend_main.app, headers=MANAGED_HEADERS)
+    legacy = client.post("/api/v1/models/jobs", json=job_api_body())
+    assert legacy.status_code == 202
+    legacy_id = legacy.json()["id"]
+    for suffix in ("", "/cancel", "/retry"):
+        reply = client.request(
+            "POST" if suffix else "GET", f"{ANALYSIS_JOBS_PATH}/{legacy_id}{suffix}"
+        )
+        assert reply.status_code == 404
+        assert reply.json() == {"detail": "job_not_found"}
+    assert client.get(f"/api/v1/models/jobs/{legacy_id}").json()["state"] == "queued"
+
+    identifiers = []
+    for _ in range(31):
+        response = client.post(ANALYSIS_JOBS_PATH, json=analysis_api_body(spec))
+        assert response.status_code == 202
+        identifiers.append(response.json()["id"])
+    full = client.post(ANALYSIS_JOBS_PATH, json=analysis_api_body(spec))
+    assert full.status_code == 409
+    assert full.json() == {"detail": "queue_full"}
+    for identifier in identifiers[:12]:
+        assert client.post(f"{ANALYSIS_JOBS_PATH}/{identifier}/cancel").json() == {
+            "state": "cancelled"
+        }
+    cancelled = client.get(ANALYSIS_JOBS_PATH, params={"status": "cancelled"}).json()
+    assert cancelled["total"] == 12
+    assert len(cancelled["items"]) == 10
+    next_page = client.get(ANALYSIS_JOBS_PATH, params={"status": "cancelled", "offset": 10}).json()
+    assert next_page["total"] == 12
+    assert {item["id"] for item in cancelled["items"] + next_page["items"]} == set(identifiers[:12])
+    assert client.get(ANALYSIS_JOBS_PATH).json()["total"] == 31
+    assert client.get("/api/v1/models/jobs").json()["total"] == 1
+    for suffix in ("?limit=101", "?offset=10001", "?status=private", "/not-a-job"):
+        invalid = client.get(ANALYSIS_JOBS_PATH + suffix)
+        assert invalid.status_code == 422
+        assert invalid.json() == {"detail": "invalid_input"}
+
+
+def test_analysis_retry_fences_attempts_and_historical_detail_checks_integrity(local_storage):
+    market, jobs = local_storage
+    seed_market(market)
+    spec = analysis_request()
+    ledger = ModelJobLedger(jobs)
+    client = TestClient(backend_main.app, headers=MANAGED_HEADERS)
+    queued = client.post(ANALYSIS_JOBS_PATH, json=analysis_api_body(spec)).json()
+    identifier = queued["id"]
+    detail = f"{ANALYSIS_JOBS_PATH}/{identifier}"
+    assert client.post(detail + "/retry").json() == {"detail": "job_conflict"}
+    assert client.get(detail, params={"include_result": True}).json()["result"] is None
+    _, original, first = ledger.claim_next()
+    assert ledger.reconcile_interrupted() == 1
+    assert client.get(detail).json()["error_code"] == "interrupted"
+    retry = client.post(detail + "/retry")
+    assert retry.status_code == 200
+    assert retry.json()["request_sha256"] == queued["request_sha256"]
+    _, current, second = ledger.claim_next()
+    assert current == original
+    assert second == first + 1
+    assert not ledger.complete_analysis(
+        identifier, first, managed_analysis.evaluate_analysis_job(original)
+    )
+    assert client.get(detail).json()["state"] == "running"
+    assert job_worker.run_child(identifier, second) == 0
+    original_detail = client.get(detail, params={"include_result": True}).json()
+    with sqlite3.connect(market) as conn:
+        conn.execute(
+            "UPDATE index_daily_closes SET close='1234' WHERE session_date=?",
+            (START.isoformat(),),
+        )
+    assert client.get(detail, params={"include_result": True}).json() == original_detail
+    with sqlite3.connect(jobs) as conn:
+        conn.execute("UPDATE model_jobs SET result_json='{}' WHERE id=?", (identifier,))
+    response = client.get(detail, params={"include_result": True})
+    assert response.status_code == 503
+    assert response.json() == {"detail": "storage_unavailable"}
+
+
+def test_analysis_transport_schema_tracks_worker_approvals():
+    path = Path(__file__).resolve().parents[2] / "contracts/analysis-jobs.json"
+    contracts = json.loads(path.read_text(encoding="utf-8"))
+    assert set(contracts) == {model_id for model_id, _ in MANAGED_ANALYSIS_REVISIONS}
+    for (model_id, version), revision in MANAGED_ANALYSIS_REVISIONS.items():
+        request = AnalysisRequest(
+            model_id=model_id,
+            model_version=version,
+            sources=(SourcePin(identity=PRICE_INDEX_SOURCES[0], snapshot_sha256="a" * 64),),
+            window=DateRange(start=date(2020, 1, 1), end=date(2020, 2, 1)),
+        )
+        definition = get_model_definition(request)
+        metadata = definition.metadata
+        assert contracts[model_id] == {
+            "version": version,
+            "revision": revision,
+            "calculation": metadata.calculation_version,
+            "min_sources": metadata.min_sources,
+            "max_sources": metadata.max_sources,
+            "allows_unverified": metadata.allows_unverified,
+            "parameters": {
+                name: {
+                    key: value for key, value in rule.items() if key not in {"title", "description"}
+                }
+                for name, rule in definition.parameter_type.model_json_schema()[
+                    "properties"
+                ].items()
+            },
+            "output_fields": [field.model_dump(mode="json") for field in metadata.output_fields],
+        }
+
+
+def test_slow_analysis_retry_cannot_requeue_a_newer_failed_attempt(local_storage, monkeypatch):
+    market, jobs = local_storage
+    seed_market(market)
+    spec = analysis_request()
+    ledger = ModelJobLedger(jobs)
+    client = TestClient(backend_main.app, headers=MANAGED_HEADERS)
+    identifier = client.post(ANALYSIS_JOBS_PATH, json=analysis_api_body(spec)).json()["id"]
+    detail = f"{ANALYSIS_JOBS_PATH}/{identifier}"
+    _, _, first = ledger.claim_next()
+    assert ledger.fail(identifier, first, "worker_failure")
+    preflight = analysis_job_api.preflight_analysis_job
+
+    def interleaved_preflight(request):
+        preflight(request)
+        assert ledger.retry(identifier, analysis_only=True, expected_attempt=first)
+        claimed_id, _, second = ledger.claim_next()
+        assert claimed_id == identifier and second == first + 1
+        assert ledger.fail(identifier, second, "worker_failure")
+
+    monkeypatch.setattr(analysis_job_api, "preflight_analysis_job", interleaved_preflight)
+    reply = client.post(detail + "/retry")
+    assert reply.status_code == 409
+    assert reply.json() == {"detail": "job_conflict"}
+    job = client.get(detail).json()
+    assert job["state"] == "failed" and job["attempts"] == first + 1
