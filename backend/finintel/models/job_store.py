@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from finintel.market_data.analytics import CALCULATION_VERSION
 from finintel.models.api import ModelResearchResult
 from finintel.models.contracts import AnalysisRequest, AnalysisResult
+from finintel.models.managed_approvals import MANAGED_ANALYSIS_REVISIONS
 from finintel.models.registry import (
     IMPLEMENTATION_REVISION,
     MAX_MODEL_OBSERVATIONS,
@@ -158,7 +159,7 @@ _LEGACY_COLUMNS = (
 
 
 def analysis_job_request_payload(request: AnalysisRequest) -> tuple[str, str]:
-    """Return checked canonical request JSON and its hash for future enqueue."""
+    """Return checked canonical request JSON and its hash."""
     if not isinstance(request, AnalysisRequest):
         raise ModelJobStoreError("Invalid analysis model-job request")
     try:
@@ -321,6 +322,28 @@ class ModelJobLedger:
         spec = request.model_dump(mode="json")
         canonical = _canonical(spec)
         digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return self._enqueue(LEGACY_REQUEST_CONTRACT, MODEL_ID, MODEL_VERSION, canonical, digest)
+
+    def enqueue_analysis(self, request: AnalysisRequest) -> dict:
+        """Persist an internal analysis request after worker preflight."""
+        canonical, digest = analysis_job_request_payload(request)
+        self._verify_analysis_approval(request)
+        return self._enqueue(
+            ANALYSIS_REQUEST_CONTRACT, request.model_id, request.model_version, canonical, digest
+        )
+
+    @staticmethod
+    def _verify_analysis_approval(request: AnalysisRequest) -> None:
+        revision = MANAGED_ANALYSIS_REVISIONS.get((request.model_id, request.model_version))
+        if (
+            revision is None
+            or get_model_definition(request).metadata.implementation_revision != revision
+        ):
+            raise ModelJobStoreError("Unsupported managed analysis implementation")
+
+    def _enqueue(
+        self, contract: str, model_id: str, version: str, canonical: str, digest: str
+    ) -> dict:
         identifier = str(uuid.uuid4())
         at = _now()
         conn = self._open(writable=True)
@@ -335,10 +358,10 @@ class ModelJobLedger:
                     raise ModelJobStoreError("Model-job queue is full")
                 conn.execute(
                     "INSERT INTO model_jobs "
-                    "(id,state,model_id,model_version,request_json,request_sha256,"
-                    "created_at,updated_at) "
-                    "VALUES (?,'queued',?,?,?,?,?,?)",
-                    (identifier, MODEL_ID, MODEL_VERSION, canonical, digest, at, at),
+                    "(id,state,request_contract,model_id,model_version,request_json,"
+                    "request_sha256,created_at,updated_at) "
+                    "VALUES (?,'queued',?,?,?,?,?,?,?)",
+                    (identifier, contract, model_id, version, canonical, digest, at, at),
                 )
                 row = conn.execute("SELECT * FROM model_jobs WHERE id=?", (identifier,)).fetchone()
             return self._summary(row)
@@ -540,7 +563,28 @@ class ModelJobLedger:
         if type(attempt) is not int or not 1 <= attempt <= MAX_ATTEMPTS:
             raise ModelJobStoreError("Invalid model-job attempt")
 
-    def claim_next(self) -> tuple[str, ModelJobRequest, int] | None:
+    @staticmethod
+    def _verified_claim_request(row: sqlite3.Row) -> ModelJobRequest | AnalysisRequest:
+        try:
+            if row["request_contract"] == ANALYSIS_REQUEST_CONTRACT:
+                request = ModelJobLedger._verified_analysis_request(row)
+                ModelJobLedger._verify_analysis_approval(request)
+                return request
+            if row["request_contract"] != LEGACY_REQUEST_CONTRACT or (
+                row["model_id"],
+                row["model_version"],
+            ) != (MODEL_ID, MODEL_VERSION):
+                raise ValueError("Unsupported stored model-job contract")
+            if (
+                hashlib.sha256(row["request_json"].encode("utf-8")).hexdigest()
+                != row["request_sha256"]
+            ):
+                raise ValueError("Stored model-job request hash mismatch")
+            return ModelJobRequest.model_validate_json(row["request_json"])
+        except (ValueError, TypeError) as exc:
+            raise ModelJobStoreError("Stored model-job request is invalid") from exc
+
+    def claim_next(self) -> tuple[str, ModelJobRequest | AnalysisRequest, int] | None:
         """Reserve one queued job atomically; return a monotonic attempt generation."""
         conn = self._open(writable=True)
         assert conn is not None
@@ -548,25 +592,35 @@ class ModelJobLedger:
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
-                    "SELECT id,request_json,attempts FROM model_jobs "
-                    "WHERE state='queued' AND request_contract=? ORDER BY created_at,id LIMIT 1",
-                    (LEGACY_REQUEST_CONTRACT,),
+                    "SELECT id,request_json,request_sha256,request_contract,model_id,"
+                    "model_version,attempts FROM model_jobs "
+                    "WHERE state='queued' ORDER BY created_at,id LIMIT 1"
                 ).fetchone()
                 if row is None:
                     return None
-                if row["attempts"] >= MAX_ATTEMPTS:
-                    raise ModelJobStoreError("Model-job attempt quota exhausted")
+                try:
+                    if row["attempts"] >= MAX_ATTEMPTS:
+                        raise ModelJobStoreError("Model-job attempt quota exhausted")
+                    request = self._verified_claim_request(row)
+                except ModelJobStoreError:
+                    # A malformed entry must fail closed without blocking the queue.
+                    at = _now()
+                    conn.execute(
+                        "UPDATE model_jobs SET state='failed',error_code='invalid_input',"
+                        "updated_at=?,finished_at=? WHERE id=?",
+                        (at, at, row["id"]),
+                    )
+                    return None
                 conn.execute(
                     "UPDATE model_jobs SET state='running',attempts=attempts+1,"
                     "started_at=?,updated_at=?,progress=0 WHERE id=? AND state='queued'",
                     (_now(), _now(), row["id"]),
                 )
-                request = ModelJobRequest.model_validate_json(row["request_json"])
                 return row["id"], request, row["attempts"] + 1
         finally:
             conn.close()
 
-    def read_claim(self, identifier: str, attempt: int) -> ModelJobRequest | None:
+    def read_claim(self, identifier: str, attempt: int) -> ModelJobRequest | AnalysisRequest | None:
         """Read the exact running attempt for the isolated process, never a stale retry."""
         self._validate_attempt(attempt)
         conn = self._open(writable=False)
@@ -574,22 +628,11 @@ class ModelJobLedger:
             return None
         try:
             row = conn.execute(
-                "SELECT request_json,request_sha256 FROM model_jobs "
-                "WHERE id=? AND attempts=? AND state='running' AND cancel_requested=0 "
-                "AND model_id=? AND model_version=?",
-                (identifier, attempt, MODEL_ID, MODEL_VERSION),
+                "SELECT request_json,request_sha256,request_contract,model_id,model_version "
+                "FROM model_jobs WHERE id=? AND attempts=? AND state='running' AND cancel_requested=0",
+                (identifier, attempt),
             ).fetchone()
-            if row is None:
-                return None
-            if (
-                hashlib.sha256(row["request_json"].encode("utf-8")).hexdigest()
-                != (row["request_sha256"])
-            ):
-                raise ModelJobStoreError("Model-job request identity is invalid")
-            try:
-                return ModelJobRequest.model_validate_json(row["request_json"])
-            except ValidationError as exc:
-                raise ModelJobStoreError("Stored model-job request is invalid") from exc
+            return self._verified_claim_request(row) if row is not None else None
         finally:
             conn.close()
 
@@ -866,7 +909,7 @@ class ModelJobLedger:
         finally:
             conn.close()
 
-    def retry(self, identifier: str) -> bool:
+    def retry(self, identifier: str, *, legacy_only: bool = True) -> bool:
         """Retries retain the *identical* request and its expected source pin."""
         conn = self._open(writable=True)
         assert conn is not None
@@ -874,13 +917,20 @@ class ModelJobLedger:
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
                 target = conn.execute(
-                    "SELECT state,attempts FROM model_jobs WHERE id=? AND request_contract=?",
-                    (identifier, LEGACY_REQUEST_CONTRACT),
+                    "SELECT state,attempts,request_json,request_sha256,request_contract,"
+                    "model_id,model_version FROM model_jobs WHERE id=?"
+                    + (" AND request_contract=?" if legacy_only else ""),
+                    (identifier, LEGACY_REQUEST_CONTRACT) if legacy_only else (identifier,),
                 ).fetchone()
                 if target is None or target["state"] not in {"failed", "cancelled"}:
                     return False
                 if target["attempts"] >= MAX_ATTEMPTS:
                     return False
+                if target["request_contract"] == ANALYSIS_REQUEST_CONTRACT:
+                    try:
+                        self._verified_claim_request(target)
+                    except ModelJobStoreError:
+                        return False
                 active = conn.execute(
                     "SELECT COUNT(*) FROM model_jobs WHERE state IN ('queued','running')"
                 ).fetchone()[0]

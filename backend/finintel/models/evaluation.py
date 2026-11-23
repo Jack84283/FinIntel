@@ -57,6 +57,16 @@ def read_pinned_inputs(
     if conn is None:
         raise AnalyticsError("No local stored observations are available")
     try:
+        return read_pinned_inputs_on_connection(request, conn, maximum, family=family)
+    finally:
+        conn.close()
+
+
+def read_pinned_inputs_on_connection(
+    request: AnalysisRequest, conn: sqlite3.Connection, maximum: int, *, family: str
+) -> list[PinnedInput]:
+    """Read from the caller's established SQLite snapshot."""
+    try:
         inputs = []
         for pin in request.sources:
             source = pin.identity
@@ -100,8 +110,6 @@ def read_pinned_inputs(
         return inputs
     except sqlite3.Error as exc:
         raise StorageError(f"Local {family.lower()} model query failed") from exc
-    finally:
-        conn.close()
 
 
 def build_result(

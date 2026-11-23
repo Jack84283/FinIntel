@@ -18,8 +18,14 @@ from pathlib import Path
 
 from finintel.market_data.analytics import AnalyticsError
 from finintel.market_data.analytics_store import run_analytics
+from finintel.models.contracts import AnalysisRequest
 from finintel.models.engine import evaluate_builtin_indicator
 from finintel.models.job_store import ModelJobLedger, ModelJobStoreError
+from finintel.models.managed_analysis import (
+    evaluate_analysis_job,
+    guard_analysis_source_for_commit,
+    preflight_analysis_job,
+)
 from finintel.models.registry import MAX_MODEL_OBSERVATIONS, MAX_RUNTIME_SECONDS
 from finintel.storage.db import StorageError
 
@@ -252,6 +258,12 @@ def _safe_error_code(exc: Exception) -> str:
     return "worker_failure"
 
 
+def enqueue_analysis_job(request: AnalysisRequest) -> dict:
+    """Internal queue entry point for a pinned analysis request."""
+    preflight_analysis_job(request)
+    return ModelJobLedger().enqueue_analysis(request)
+
+
 def run_child(job_id: str, attempt: int) -> int:
     """Executed only in a spawned worker process, never in the API process."""
     try:
@@ -267,6 +279,13 @@ def run_child(job_id: str, attempt: int) -> int:
         request = ledger.read_claim(job_id, attempt)
         if request is None:
             return 0  # Cancelled/stale; no result is allowed.
+        if isinstance(request, AnalysisRequest):
+            analysis_result = evaluate_analysis_job(request)
+            with guard_analysis_source_for_commit(request, analysis_result):
+                completed = ledger.complete_analysis(job_id, attempt, analysis_result)
+            if not completed:
+                ledger.finish_cancelled(job_id, attempt)
+            return 0
         actual_before = source_snapshot_for_job(
             code=request.code,
             start=request.start,
