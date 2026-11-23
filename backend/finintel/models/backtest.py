@@ -258,17 +258,7 @@ def _validated_points(
     return points, dates, levels
 
 
-def run_sma_backtest(*, research: dict, request: BacktestRequest) -> dict:
-    """Simulate *hypothetical* index exposure, with no same-close signal fills.
-
-    Post-close signal at t can only be executed at the *next observed close*,
-    and participates in price movement strictly AFTER that close. The index
-    itself is not directly tradable; the benchmark ignores transaction costs.
-    This pure function does not authorize live trading or production acceptance.
-    """
-    if not isinstance(request, BacktestRequest):
-        _fail("Typed, validated backtest request required")
-    points, dates, levels = _validated_points(research, request)
+def _test_indices(points: list[dict], dates: list[date], request: BacktestRequest) -> list[int]:
     if request.training_end not in dates:
         _fail("Training endpoint is not a pinned observed session")
     test_indices = [
@@ -285,6 +275,21 @@ def run_sma_backtest(*, research: dict, request: BacktestRequest) -> dict:
         or points[test_indices[0] - 1]["signal_after_close"] is None
     ):
         _fail("Test requires adjacent observed training warm-up and two test sessions")
+    return test_indices
+
+
+def run_sma_backtest(*, research: dict, request: BacktestRequest) -> dict:
+    """Simulate *hypothetical* index exposure, with no same-close signal fills.
+
+    Post-close signal at t can only be executed at the *next observed close*,
+    and participates in price movement strictly AFTER that close. The index
+    itself is not directly tradable; the benchmark ignores transaction costs.
+    This pure function does not authorize live trading or production acceptance.
+    """
+    if not isinstance(request, BacktestRequest):
+        _fail("Typed, validated backtest request required")
+    points, dates, levels = _validated_points(research, request)
+    test_indices = _test_indices(points, dates, request)
 
     with localcontext() as ctx:
         ctx.prec = 28

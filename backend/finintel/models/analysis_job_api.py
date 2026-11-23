@@ -81,13 +81,17 @@ def _request_errors() -> Iterator[None]:
 
 @router.post("", status_code=202)
 async def create_analysis_job(request: Request) -> dict:
-    # Authenticate before reading the body, then keep SQLite work off the event loop.
+    return await run_in_threadpool(_queue, await _read_job_body(request))
+
+
+async def _read_job_body(request: Request) -> bytearray:
+    # Route dependencies authenticate before the bounded body is read.
     payload = bytearray()
     async for chunk in request.stream():
         if len(payload) + len(chunk) > 8192:
             raise HTTPException(status_code=422, detail="invalid_input")
         payload.extend(chunk)
-    return await run_in_threadpool(_queue, payload)
+    return payload
 
 
 def _queue(payload: bytearray) -> dict:

@@ -145,13 +145,13 @@ export type AnalysisResult<M extends AnalysisModelId = AnalysisModelId> = {
   };
 }[M];
 
-const states = ["queued", "running", "completed", "failed", "cancelled"] as const;
-const statuses = [...states, "cancel_requested"] as const;
-const workerCodes = [
+export const states = ["queued", "running", "completed", "failed", "cancelled"] as const;
+export const statuses = [...states, "cancel_requested"] as const;
+export const workerCodes = [
   "interrupted", "invalid_input", "quality_blocked", "source_changed",
   "storage_unavailable", "resource_limit", "worker_failure",
 ] as const;
-const transportCodes = [
+export const transportCodes = [
   "managed_required", "invalid_input", "queue_full", "job_conflict", "source_changed",
   "job_not_found", "quality_blocked", "resource_limit", "storage_unavailable",
   "invalid_response", "backend_unavailable",
@@ -223,34 +223,34 @@ const summaryKeys = [
   "error_code", "created_at", "updated_at", "started_at", "finished_at",
 ];
 
-function requireValid(value: unknown, code: AnalysisJobErrorCode = "invalid_response"): asserts value {
+export function requireValid(value: unknown, code: AnalysisJobErrorCode = "invalid_response"): asserts value {
   if (!value) throw new AnalysisJobError(code);
 }
-function object(value: unknown, keys?: readonly string[]): JsonObject {
+export function object(value: unknown, keys?: readonly string[]): JsonObject {
   requireValid(value !== null && typeof value === "object" && !Array.isArray(value));
   const record = value as JsonObject;
   requireValid(!keys || (Object.keys(record).length === keys.length &&
     keys.every(key => Object.hasOwn(record, key))));
   return record;
 }
-function contains<const T>(choices: readonly T[], value: unknown): value is T {
+export function contains<const T>(choices: readonly T[], value: unknown): value is T {
   return choices.some(choice => choice === value);
 }
-function integer(value: unknown, min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER): value is number {
+export function integer(value: unknown, min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
 }
-function hash(value: unknown): value is string {
+export function hash(value: unknown): value is string {
   return typeof value === "string" && value.length === 64 && /^[0-9a-f]{64}$/.test(value);
 }
-function identifier(value: unknown): value is string {
+export function identifier(value: unknown): value is string {
   return typeof value === "string" && value.length === 36 && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
 }
-function day(value: unknown): value is string {
+export function day(value: unknown): value is string {
   if (typeof value !== "string" || !/^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value)) return false;
   const parsed = new Date(value + "T00:00:00Z");
   return Number.isFinite(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
 }
-function timestamp(value: unknown): boolean {
+export function timestamp(value: unknown): boolean {
   if (typeof value !== "string") return false;
   const match = /^(.{10})T((?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9])(?:\.[0-9]{1,9})?(?:Z|\+00:00)$/.exec(value);
   return Boolean(match && match[0] === value && day(match[1]));

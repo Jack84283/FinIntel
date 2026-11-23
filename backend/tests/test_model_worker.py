@@ -1130,3 +1130,263 @@ def test_slow_analysis_retry_cannot_requeue_a_newer_failed_attempt(local_storage
     assert reply.json() == {"detail": "job_conflict"}
     job = client.get(detail).json()
     assert job["state"] == "failed" and job["attempts"] == first + 1
+
+
+def _verified_market_quality(market):
+    now = datetime.now(UTC)
+    with sqlite3.connect(market) as conn:
+        conn.execute(
+            "INSERT INTO data_quality_scan_progress "
+            "(scan_key,source_identity,source_data_version_start,source_data_version_end,"
+            "cursor_start,cursor_next,max_findings,findings_examined,findings_stored,"
+            "total_known_findings,persisted_findings_total,status,stale,updated_at,"
+            "validation_reference_date) "
+            "SELECT 'all','fixture',source_version,source_version,0,0,1,0,0,0,0,"
+            "'completed',0,?,? FROM data_quality_source_state WHERE id=1",
+            (now.isoformat(), now.date().isoformat()),
+        )
+
+
+def _backtest_body(client, *, policy="require_complete"):
+    from finintel.models.backtest import BACKTEST_REVISION, BacktestRequest
+
+    queued = client.post("/api/v1/models/jobs", json=job_api_body(quality_policy=policy))
+    assert queued.status_code == 202, queued.json()
+    source_id = queued.json()["id"]
+    assert ModelJobLedger().claim_next()[0] == source_id
+    assert job_worker.run_child(source_id, 1) == 0
+    source = ModelJobLedger().get(source_id, include_result=True, legacy_only=True)
+    research = source["result"]
+    simulation = BacktestRequest(
+        index_code="SP500",
+        expected_snapshot_sha256=source["source_snapshot_sha256"],
+        training_end=START + timedelta(days=30),
+        test_start=START + timedelta(days=31),
+        test_end=START + timedelta(days=33),
+    )
+    return source, {
+        "contract_version": "backtest-job-request-v1",
+        "source_job_id": source_id,
+        "source_request_sha256": source["request_sha256"],
+        "source_output_sha256": source["output_sha256"],
+        "source_lineage_sha256": research["reproducibility_sha256"],
+        "source_implementation_revision": research["lineage"]["implementation_revision"],
+        "engine_revision": BACKTEST_REVISION,
+        "simulation": simulation.model_dump(mode="json"),
+    }
+
+
+def test_durable_backtest_uses_frozen_source_and_persists_exact_engine_report(local_storage):
+    from finintel.models.backtest import BacktestRequest, run_sma_backtest
+    from finintel.models.backtest_job_api import BACKTEST_JOBS_PATH
+
+    market, _ = local_storage
+    seed_market(market)
+    _verified_market_quality(market)
+    client = TestClient(backend_main.app, headers=MANAGED_HEADERS)
+    source, body = _backtest_body(client)
+    assert TestClient(backend_main.app).post(BACKTEST_JOBS_PATH, json=body).status_code == 403
+    assert client.post(BACKTEST_JOBS_PATH, json={**body, "module": "/private/file"}).json() == {
+        "detail": "invalid_input"
+    }
+    assert client.post(
+        BACKTEST_JOBS_PATH, json={**body, "source_output_sha256": "a" * 64}
+    ).json() == {"detail": "source_changed"}
+    created = client.post(BACKTEST_JOBS_PATH, json=body)
+    assert created.status_code == 202, created.json()
+    identifier = created.json()["id"]
+    route = f"{BACKTEST_JOBS_PATH}/{identifier}"
+    assert client.get(f"/api/v1/models/jobs/{identifier}").status_code == 404
+    assert client.post(f"/api/v1/models/jobs/{identifier}/cancel").status_code == 404
+    assert client.get(f"{ANALYSIS_JOBS_PATH}/{identifier}").status_code == 404
+    assert client.get("/api/v1/models/jobs").json()["total"] == 1
+    assert client.get(BACKTEST_JOBS_PATH, params={"status": "queued"}).json()["total"] == 1
+    ledger = ModelJobLedger()
+    _, _, attempt = ledger.claim_next()
+    assert ledger.claim_next() is None
+    worker = subprocess.run(
+        [sys.executable, "-m", "finintel.models.job_worker", "--child", identifier, str(attempt)],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=40,
+        check=False,
+    )
+    assert worker.returncode == 0
+    detail = client.get(route, params={"include_result": "true"}).json()
+    assert detail["state"] == "completed"
+    result = detail["result"]
+    expected = run_sma_backtest(
+        research=source["result"],
+        request=BacktestRequest.model_validate_json(json.dumps(body["simulation"])),
+    )
+    assert result["report"] == expected
+    assert result["request_sha256"] == detail["request_sha256"]
+    assert expected["transactions"][0]["signal_as_of_session"] == body["simulation"]["training_end"]
+
+    with sqlite3.connect(market) as conn:
+        conn.execute(
+            "UPDATE index_daily_closes SET close=1234 WHERE session_date=?", (START.isoformat(),)
+        )
+    assert client.post(BACKTEST_JOBS_PATH, json=body).json() == {"detail": "source_changed"}
+    assert (
+        ModelJobLedger().get(identifier, include_result=True, backtest_only=True)["result"]
+        == result
+    )
+    with sqlite3.connect(ledger.path) as conn:
+        conn.execute(
+            "UPDATE model_jobs SET result_json=replace(result_json,'equity_after_cost','tampered') WHERE id=?",
+            (identifier,),
+        )
+    assert client.get(route, params={"include_result": "true"}).json() == {
+        "detail": "storage_unavailable"
+    }
+
+
+@pytest.mark.parametrize("source_verified", [True, False])
+def test_backtest_rejects_original_override_even_if_source_is_verified(
+    local_storage, source_verified
+):
+    from finintel.models.backtest_job_api import BACKTEST_JOBS_PATH
+
+    market, _ = local_storage
+    seed_market(market)
+    if source_verified:
+        _verified_market_quality(market)
+    client = TestClient(backend_main.app, headers=MANAGED_HEADERS)
+    source, body = _backtest_body(client, policy="allow_unverified")
+    assert source["result"]["lineage"]["quality_verified"] is source_verified
+    if not source_verified:
+        _verified_market_quality(market)
+    assert client.post(BACKTEST_JOBS_PATH, json=body).json() == {"detail": "quality_blocked"}
+
+
+def test_backtest_rechecks_sources_and_fences_cancelled_and_interrupted_attempts(
+    local_storage, monkeypatch
+):
+    from finintel.models import backtest_worker
+    from finintel.models.backtest_job_api import BACKTEST_JOBS_PATH
+
+    market, _ = local_storage
+    seed_market(market)
+    _verified_market_quality(market)
+    client = TestClient(backend_main.app, headers=MANAGED_HEADERS)
+    _, body = _backtest_body(client)
+    identifier = client.post(BACKTEST_JOBS_PATH, json=body).json()["id"]
+    route = f"{BACKTEST_JOBS_PATH}/{identifier}"
+    ledger = ModelJobLedger()
+    _, _, first = ledger.claim_next()
+    assert client.post(route + "/cancel").json() == {"state": "cancel_requested"}
+    assert ledger.reconcile_interrupted() == 1
+    assert ledger.get(identifier)["state"] == "cancelled"
+    assert client.post(route + "/retry").json()["request"] == body
+    _, _, second = ledger.claim_next()
+    assert second == 2
+    assert job_worker.run_child(identifier, first) == 0
+    assert ledger.get(identifier)["state"] == "running"
+    simulate = backtest_worker.run_sma_backtest
+
+    def change_after_simulation(**kwargs):
+        result = simulate(**kwargs)
+        with sqlite3.connect(market) as conn:
+            conn.execute(
+                "UPDATE index_daily_closes SET close=1234 WHERE session_date=?",
+                (START.isoformat(),),
+            )
+        return result
+
+    monkeypatch.setattr(backtest_worker, "run_sma_backtest", change_after_simulation)
+    assert job_worker.run_child(identifier, second) == 2
+    assert ledger.get(identifier)["error_code"] == "source_changed"
+    assert client.post(route + "/retry").json() == {"detail": "source_changed"}
+
+
+def test_backtest_final_verification_keeps_source_writer_reserved(local_storage, monkeypatch):
+    from finintel.models.backtest_job_api import BACKTEST_JOBS_PATH
+
+    market, _ = local_storage
+    seed_market(market)
+    _verified_market_quality(market)
+    client = TestClient(backend_main.app, headers=MANAGED_HEADERS)
+    _, body = _backtest_body(client)
+    identifier = client.post(BACKTEST_JOBS_PATH, json=body).json()["id"]
+    ledger = ModelJobLedger()
+    _, _, attempt = ledger.claim_next()
+    persist = ModelJobLedger._persist_result
+    verified = []
+
+    def try_concurrent_write(*args, **kwargs):
+        with (
+            sqlite3.connect(market, timeout=0) as writer,
+            pytest.raises(sqlite3.OperationalError, match="locked"),
+        ):
+            writer.execute("BEGIN IMMEDIATE")
+        verified.append(True)
+        return persist(*args, **kwargs)
+
+    monkeypatch.setattr(ModelJobLedger, "_persist_result", staticmethod(try_concurrent_write))
+    assert job_worker.run_child(identifier, attempt) == 0
+    assert verified == [True]
+    assert ledger.get(identifier)["state"] == "completed"
+
+
+def test_backtest_rejects_stale_quality_bad_windows_and_incompatible_semantics(local_storage):
+    from finintel.models.backtest_job_api import BACKTEST_JOBS_PATH
+
+    market, _ = local_storage
+    seed_market(market)
+    _verified_market_quality(market)
+    client = TestClient(backend_main.app, headers=MANAGED_HEADERS)
+    _, body = _backtest_body(client)
+    for change in (
+        {"training_end": (START + timedelta(days=19)).isoformat()},
+        {"index_code": "VIX"},
+        {"source_semantics": "adjusted_price"},
+    ):
+        bad = {**body, "simulation": {**body["simulation"], **change}}
+        response = client.post(BACKTEST_JOBS_PATH, json=bad)
+        assert response.status_code == 422
+        assert response.json() == {"detail": "invalid_input"}
+
+    with sqlite3.connect(market) as conn:
+        conn.execute("UPDATE data_quality_scan_progress SET stale=1 WHERE scan_key='all'")
+    assert client.post(BACKTEST_JOBS_PATH, json=body).json() == {"detail": "quality_blocked"}
+
+
+def test_backtest_authenticates_each_operation_before_processing(local_storage):
+    from finintel.models.backtest_job_api import BACKTEST_JOBS_PATH
+
+    identifier = "123e4567-e89b-12d3-a456-426614174000"
+    client = TestClient(backend_main.app)
+    for headers in ({}, {"x-finintel-process-token": "wrong"}):
+        for method, path in (
+            ("POST", ""),
+            ("GET", ""),
+            ("GET", f"/{identifier}"),
+            ("POST", f"/{identifier}/retry"),
+            ("POST", f"/{identifier}/cancel"),
+        ):
+            response = client.request(method, BACKTEST_JOBS_PATH + path, headers=headers)
+            assert response.status_code == 403
+            assert response.json() == {"detail": "managed_required"}
+
+
+def test_backtest_fails_closed_on_source_writer_lock_contention(local_storage):
+    from contextlib import closing
+
+    from finintel.models.backtest_job_api import BACKTEST_JOBS_PATH
+
+    market, _ = local_storage
+    seed_market(market)
+    _verified_market_quality(market)
+    client = TestClient(backend_main.app, headers=MANAGED_HEADERS)
+    _, body = _backtest_body(client)
+    identifier = client.post(BACKTEST_JOBS_PATH, json=body).json()["id"]
+    ledger = ModelJobLedger()
+    _, _, attempt = ledger.claim_next()
+    with closing(sqlite3.connect(market)) as writer, writer:
+        writer.execute("BEGIN IMMEDIATE")
+        assert job_worker.run_child(identifier, attempt) == 2
+    job = ledger.get(identifier, include_result=True)
+    assert job["error_code"] == "storage_unavailable"
+    assert job["result"] is None
+    assert client.post(f"{BACKTEST_JOBS_PATH}/{identifier}/retry").json()["request"] == body

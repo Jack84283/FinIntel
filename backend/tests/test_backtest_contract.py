@@ -273,3 +273,19 @@ def test_contract_forbids_leverage_unsupported_symbols_and_custom_execution():
             test_start=START + timedelta(days=30),
             test_end=START + timedelta(days=35),
         )
+
+
+def test_cross_language_durable_fixture_preserves_golden_report():
+    import json
+    from pathlib import Path
+
+    from finintel.models.durable_backtest import DurableBacktestRequest, checked_result, digest
+
+    fixture = Path(__file__).resolve().parents[2] / "contracts/test-fixtures/durable-backtest.json"
+    archived = json.loads(fixture.read_text(encoding="utf-8"))
+    request = DurableBacktestRequest.model_validate_json(json.dumps(archived["request"]))
+    assert digest(archived["request"]) == archived["request_sha256"]
+    envelope = checked_result(json.dumps(archived["result"]), request, archived["request_sha256"])
+    assert envelope.report.model_dump(mode="json") == run_sma_backtest(
+        research=_research(), request=request.simulation
+    )
