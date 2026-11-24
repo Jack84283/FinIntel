@@ -180,6 +180,49 @@ fn is_local_windows_drive(path: &Path) -> bool {
     matches!(unsafe { GetDriveTypeW(root.as_ptr()) }, 2 | 3 | 6)
 }
 
+#[cfg(target_os = "macos")]
+fn local_mount_flags(flags: u32) -> bool {
+    flags & libc::MNT_LOCAL as u32 != 0
+}
+
+#[cfg(target_os = "linux")]
+fn local_filesystem_type(kind: u32) -> bool {
+    // Linux has no general local-mount flag. Accept known local filesystem
+    // types and fail closed for ambiguous types such as FUSE.
+    const LOCAL: &[u32] = &[
+        libc::EXT4_SUPER_MAGIC as u32, // ext2/3/4 share a magic value.
+        libc::BTRFS_SUPER_MAGIC as u32,
+        libc::XFS_SUPER_MAGIC as u32,
+        libc::F2FS_SUPER_MAGIC as u32,
+        libc::MSDOS_SUPER_MAGIC as u32,
+        libc::TMPFS_MAGIC as u32,
+        libc::OVERLAYFS_SUPER_MAGIC as u32,
+    ];
+    LOCAL.contains(&kind)
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn is_local_unix_filesystem(path: &Path) -> bool {
+    use std::{ffi::CString, mem::MaybeUninit, os::unix::ffi::OsStrExt};
+
+    let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut info = MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY: the pathname is NUL-terminated and statfs initializes the
+    // output struct on success. Keep both allocations alive through the call.
+    let info = unsafe {
+        if libc::statfs(path.as_ptr(), info.as_mut_ptr()) != 0 {
+            return false;
+        }
+        info.assume_init()
+    };
+    #[cfg(target_os = "macos")]
+    return local_mount_flags(info.f_flags);
+    #[cfg(target_os = "linux")]
+    return local_filesystem_type(info.f_type as u32);
+}
+
 fn write_export_with(
     path: &Path,
     extension: &str,
@@ -199,16 +242,20 @@ fn write_export_with(
     }
     let parent = path
         .parent()
+        .and_then(|dir| dir.canonicalize().ok())
         .filter(|dir| dir.is_dir())
         .ok_or("invalid_destination")?;
     #[cfg(windows)]
-    if !parent
-        .canonicalize()
-        .is_ok_and(|resolved| is_local_windows_drive(&resolved))
-    {
+    if !is_local_windows_drive(&parent) {
         return Err("invalid_destination");
     }
-    match fs::symlink_metadata(path) {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    if !is_local_unix_filesystem(&parent) {
+        return Err("invalid_destination");
+    }
+    // Use the resolved parent for both staging and persistence.
+    let destination = parent.join(path.file_name().ok_or("invalid_destination")?);
+    match fs::symlink_metadata(&destination) {
         Ok(metadata) if !metadata.is_file() => return Err("invalid_destination"),
         Ok(_) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -216,12 +263,13 @@ fn write_export_with(
     }
     // Stage next to the target, so persistence is a same-filesystem atomic replacement.
     // NamedTempFile owns cleanup on failure and creates private files on Unix.
-    let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|_| "export_write_failed")?;
+    let mut temp = tempfile::NamedTempFile::new_in(&parent).map_err(|_| "export_write_failed")?;
     write(temp.as_file_mut()).map_err(|_| "export_write_failed")?;
     temp.as_file()
         .sync_all()
         .map_err(|_| "export_write_failed")?;
-    temp.persist(path).map_err(|_| "export_write_failed")?;
+    temp.persist(destination)
+        .map_err(|_| "export_write_failed")?;
     Ok(())
 }
 
@@ -324,6 +372,31 @@ mod tests {
             windows_drive_root(Path::new(r"\\?\C:\report.json")),
             Some([67, 58, 92, 0])
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_requires_the_local_mount_flag() {
+        assert!(local_mount_flags(libc::MNT_LOCAL as u32));
+        assert!(!local_mount_flags(0));
+        assert!(!local_mount_flags(libc::MNT_RDONLY as u32));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_accepts_known_local_filesystems_and_rejects_network_or_unknown_types() {
+        assert!(local_filesystem_type(libc::EXT4_SUPER_MAGIC as u32));
+        assert!(local_filesystem_type(libc::TMPFS_MAGIC as u32));
+        for kind in [
+            libc::NFS_SUPER_MAGIC as u32,
+            libc::SMB_SUPER_MAGIC as u32,
+            0xff53_4d42, // CIFS
+            0xfe53_4d42, // SMB2
+            libc::FUSE_SUPER_MAGIC as u32,
+            0,
+        ] {
+            assert!(!local_filesystem_type(kind));
+        }
     }
 
     #[test]
