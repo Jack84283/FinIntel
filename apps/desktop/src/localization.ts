@@ -113,6 +113,8 @@ const translations = {
 const additionalChinese: Readonly<Record<string, string>> = {
   "Comparison": "对比",
   "Compare local instruments": "对比本地品种",
+  "Select comparison instruments": "选择对比品种",
+  "Apply selection": "应用选择",
   "Compare price levels from local historical observations.": "使用本地历史记录对比价格水平。",
   "Clear comparison": "清空对比",
   "Search local instruments": "搜索本地品种",
