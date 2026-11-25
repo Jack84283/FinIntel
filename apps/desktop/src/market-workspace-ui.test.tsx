@@ -235,7 +235,8 @@ describe("Market instrument workspace", () => {
     await click(button("Data Acquisition", host.querySelector("header") ?? host));
     await click(button("Simulate completed import"));
     await click(button("View in Markets"));
-    expect(fetchMarketComparison).toHaveBeenLastCalledWith([{ kind: "equity", code: "AAPL", provider: "tiingo" }], expect.any(String), expect.any(String), expect.any(AbortSignal));
+    expect(fetchMarketComparison).toHaveBeenLastCalledWith([{ kind: "index", code: "SP500", provider: "fred" }, { kind: "equity", code: "AAPL", provider: "tiingo" }], expect.any(String), expect.any(String), expect.any(AbortSignal));
+    await change(host.querySelector<HTMLSelectElement>('select[aria-label="Historical detail instrument"]')!, "tiingo:AAPL");
     await click(button("Historical price details"));
     expect(active()).toBe("tiingo:AAPL");
     expect(host.querySelectorAll('[role="tab"]:not([data-market-tab="comparison"])')).toHaveLength(8);
@@ -366,10 +367,72 @@ describe("Chart-first Market workspace", () => {
     expect(host.textContent).toContain("Select one or more local instruments.");
   });
 
+  it("adds a requested acquisition instrument without discarding other sources or changing historical tabs", async () => {
+    const sources = [{ kind: "equity", code: "NVDA", provider: "tiingo" }, { kind: "equity", code: "MSFT", provider: "tiingo" }];
+    localStorage.setItem(COMPARISON_KEY, JSON.stringify({ sources, hidden: ["tiingo:NVDA"], period: "5y" }));
+    await mountMarket();
+    const tabs = JSON.parse(localStorage.getItem(MARKET_WORKSPACE_KEY)!).tabs;
+    await click(button("Data Acquisition", host.querySelector("header") ?? host));
+    await click(button("Simulate completed import"));
+    await click(button("View in Markets"));
+    const expected = [...sources, { kind: "equity", code: "AAPL", provider: "tiingo" }];
+    expect(fetchMarketComparison).toHaveBeenLastCalledWith(expected, expect.any(String), expect.any(String), expect.any(AbortSignal));
+    expect(JSON.parse(localStorage.getItem(COMPARISON_KEY)!)).toMatchObject({ sources: expected, hidden: ["tiingo:NVDA"], period: "5y" });
+    expect(JSON.parse(localStorage.getItem(MARKET_WORKSPACE_KEY)!).tabs).toEqual(tabs);
+  });
+
+  it("requires an explicit replacement when acquisition opens a fifth instrument", async () => {
+    const sources = ["NVDA", "MSFT", "QQQ", "SPY"].map(code => ({ kind: "equity", code, provider: "tiingo" }));
+    localStorage.setItem(COMPARISON_KEY, JSON.stringify({ sources, hidden: ["tiingo:NVDA", "tiingo:MSFT"] }));
+    await mountMarket();
+    async function requestFifth() {
+      await click(button("Data Acquisition", host.querySelector("header") ?? host));
+      await click(button("Simulate completed import"));
+      await click(button("View in Markets"));
+      return host.querySelector<HTMLDialogElement>('dialog[aria-label="Replace comparison instrument"]')!;
+    }
+    let dialog = await requestFifth();
+    expect(dialog.textContent).toContain("AAPL");
+    expect(button("Replace instrument", dialog).disabled).toBe(true);
+    expect(JSON.parse(localStorage.getItem(COMPARISON_KEY)!).sources).toEqual(sources);
+    await click(button("Cancel", dialog));
+    expect(host.querySelector('dialog[aria-label="Replace comparison instrument"]')).toBeNull();
+    expect(JSON.parse(localStorage.getItem(COMPARISON_KEY)!).sources).toEqual(sources);
+    dialog = await requestFifth();
+    await change(dialog.querySelector("select")!, "tiingo:NVDA");
+    await click(button("Replace instrument", dialog));
+    const expected = [{ kind: "equity", code: "AAPL", provider: "tiingo" }, ...sources.slice(1)];
+    expect(fetchMarketComparison).toHaveBeenLastCalledWith(expected, expect.any(String), expect.any(String), expect.any(AbortSignal));
+    expect(JSON.parse(localStorage.getItem(COMPARISON_KEY)!)).toMatchObject({ sources: expected, hidden: ["tiingo:MSFT"] });
+    expect(host.querySelector('dialog[aria-label="Replace comparison instrument"]')).toBeNull();
+  });
+
+  it("does not display unrelated historical details when all eight historical tabs are occupied", async () => {
+    const sources = [{ kind: "equity", code: "AMZN", provider: "tiingo" }];
+    const tabs = [{ selection: { kind: "index", code: "SP500" } },
+      ...["AAPL", "NVDA", "QQQ", "MSFT", "SPY", "TSLA", "GOOG"].map(symbol => ({ selection: { kind: "equity", symbol, provider: "tiingo" } }))];
+    localStorage.setItem(COMPARISON_KEY, JSON.stringify({ sources }));
+    localStorage.setItem(MARKET_WORKSPACE_KEY, JSON.stringify({ tabs, active: "fred:SP500", comparing: true }));
+    await mountMarket();
+    await click(button("Historical price details"));
+    expect(host.querySelector("[data-market-tab]")).toBeNull();
+    expect(host.querySelector("[data-comparison-chart]")).toBeTruthy();
+    expect(host.textContent).toContain("Close a historical tab before opening another instrument.");
+    expect(readIndexHistory).not.toHaveBeenCalled();
+    expect(fetchMarketDaily).not.toHaveBeenCalled();
+    await click(button("Manage historical tabs"));
+    await click(button("Close tab · QQQ · Tiingo"));
+    await click(button("Price comparison"));
+    await click(button("Historical price details"));
+    expect(active()).toBe("tiingo:AMZN");
+  });
+
   it("moves the crosshair and shows exact observed values and gaps", async () => {
     localStorage.setItem(COMPARISON_KEY, JSON.stringify({ sources: (comparisonFixture as ComparisonResult).request.sources }));
     await mountMarket();
     const svg = host.querySelector<SVGSVGElement>("svg[data-comparison-chart]")!;
+    const output = host.querySelector("output")!;
+    expect(output.className).toBe("sr-only");
     Object.defineProperty(svg, "getScreenCTM", { value: () => ({ inverse: () => ({}) }) });
     Object.defineProperty(svg, "createSVGPoint", { value: () => ({ x: 0, y: 0, matrixTransform() { return { x: this.x, y: this.y }; } }) });
     await act(async () => svg.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 88, clientY: 100 })));
@@ -377,6 +440,14 @@ describe("Chart-first Market workspace", () => {
     await act(async () => svg.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 819, clientY: 100 })));
     expect(host.querySelector("[data-comparison-tooltip]")?.textContent).toContain("Unavailable");
     expect(host.querySelector("[data-comparison-tooltip]")?.textContent).toContain("5,250");
+    expect(output.className).toBe("sr-only");
+    await act(async () => svg.dispatchEvent(new MouseEvent("pointerout", { bubbles: true, relatedTarget: document.body })));
+    expect(host.querySelector("[data-comparison-tooltip]")).toBeNull();
+    expect(output.className).toBe("sr-only");
+    const slider = host.querySelector<HTMLInputElement>('input[type="range"]')!;
+    await act(async () => slider.focus());
+    expect(host.querySelector("[data-comparison-tooltip]")).toBeTruthy();
+    expect(output.className).toBe("sr-only");
   });
   it("restores a comparison, rejects late results and retries a safe error", async () => {
     const comparison = comparisonFixture as ComparisonResult;
