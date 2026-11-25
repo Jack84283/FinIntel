@@ -67,12 +67,12 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
   const [historicalDetails, setHistoricalDetails] = useState(() => !workspace.comparing && !comparisonSourceFromSelection(workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!.selection));
   const comparing = !historicalDetails;
   const [comparison, setComparison] = useState(() => {
-    const saved = readComparisonPreferences();
     const source = comparisonSourceFromSelection(workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!.selection);
-    return !workspace.comparing && source ? { ...saved, sources: [source], hidden: [] } : saved;
+    return readComparisonPreferences(workspace.comparing ? undefined : source);
   });
   const [comparisonPickerOpen, setComparisonPickerOpen] = useState(false);
   const [comparisonNotice, setComparisonNotice] = useState("");
+  const [detailKey, setDetailKey] = useState("");
   useEffect(() => { saveComparisonPreferences(comparison); }, [comparison]);
   useEffect(() => { if (comparing && !workspace.comparing) onShowComparison(); }, [comparing, workspace.comparing, onShowComparison]);
   const { selection, view } = workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!;
@@ -270,6 +270,22 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
     if (addComparison(source)) { setHistoricalDetails(false); onShowComparison(); }
   }
 
+  function showHistoricalDetails() {
+    if (!comparing) { setHistoricalDetails(false); return; }
+    const source = comparison.sources.find(item => sourceKey(item) === detailKey) ?? comparison.sources[0];
+    if (source) {
+      const target: MarketSelection = source.kind === "index"
+        ? { kind: "index", code: source.code }
+        : { kind: "equity", symbol: source.code, provider: source.provider };
+      const key = marketTabKey(target);
+      if (workspace.tabs.some(tab => marketTabKey(tab.selection) === key)) onActivateTab(key);
+      else if (workspace.tabs.length < MARKET_TAB_LIMIT) onChooseInstrument(target, "new");
+      else { setComparisonNotice("Close a historical tab before opening another instrument."); setHistoricalDetails(true); return; }
+    }
+    setComparisonNotice("");
+    setHistoricalDetails(true);
+  }
+
   function addInstrument() {
     if (comparing) { setComparisonPickerOpen(true); return; }
     if (workspace.tabs.length >= MARKET_TAB_LIMIT) {
@@ -368,7 +384,11 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
           <Badge variant="outline">{t("Local SQLite")}</Badge>
           <Button type="button" variant="secondary" size="sm" onClick={() => setReload((value) => value + 1)}><RefreshCw aria-hidden="true" /> {t("Reload local data")}</Button>
           <Button type="button" size="sm" onClick={onOpenAcquisition}><Database aria-hidden="true" /> {t("Data Acquisition")}</Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => setHistoricalDetails(value => !value)}>{t(comparing ? "Historical price details" : "Price comparison")}</Button>
+          {comparing && comparison.sources.length > 1 && <select aria-label={t("Historical detail instrument")} value={comparison.sources.some(item => sourceKey(item) === detailKey) ? detailKey : sourceKey(comparison.sources[0])}
+            onChange={event => setDetailKey(event.target.value)} className="h-8 rounded-md border border-input bg-background px-2 text-xs">
+            {comparison.sources.map(source => <option key={sourceKey(source)} value={sourceKey(source)}>{source.code} · {source.provider}</option>)}
+          </select>}
+          <Button type="button" variant="outline" size="sm" onClick={showHistoricalDetails}>{t(comparing ? "Historical price details" : "Price comparison")}</Button>
           {!comparing && <><Button type="button" variant="outline" size="sm" onClick={compareCurrent}>{t("Add to comparison")}</Button>
           <Button type="button" variant={pickerVisible ? "secondary" : "outline"} size="sm" aria-expanded={pickerVisible} aria-controls="market-search-panel" onClick={() => { setAddMode(false); update({ showSearch: !pickerVisible }); }}><SlidersHorizontal aria-hidden="true" /> {pickerVisible ? t("Hide filters") : t("Show filters")}</Button></>}
         </>}
