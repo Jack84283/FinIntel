@@ -6,7 +6,7 @@ import { LocalDataTable } from "./components/TablePagination";
 import { useLocale } from "./localization";
 import type { ComparisonMode, ComparisonResult, ComparisonSource } from "./market-comparison-api";
 
-const INSPECTION_COLORS = ["text-blue-700 [html:not([data-theme=light])_&]:text-blue-300", "text-amber-700 [html:not([data-theme=light])_&]:text-amber-300", "text-teal-700 [html:not([data-theme=light])_&]:text-teal-300", "text-fuchsia-700 [html:not([data-theme=light])_&]:text-fuchsia-300"];
+export const INSPECTION_COLORS = ["text-blue-700 [html:not([data-theme=light])_&]:text-blue-300", "text-green-700 [html:not([data-theme=light])_&]:text-green-300", "text-amber-700 [html:not([data-theme=light])_&]:text-amber-300", "text-fuchsia-700 [html:not([data-theme=light])_&]:text-fuchsia-300"];
 const providers = { fred: "FRED", tiingo: "Tiingo", alpaca_sip: "Alpaca SIP", alpha_vantage: "Alpha Vantage" };
 export const comparisonLabel = (source: ComparisonSource) => `${source.code} · ${providers[source.provider]}`;
 const units = (mode: ComparisonMode) => mode === "close" ? "price_level" : mode === "normalized_100" ? "index_base_100" : "percent_points";
@@ -14,8 +14,8 @@ const field = (name: string, units: string): AnalysisOutputField => ({
   name, kind: "decimal", units, nullable: true, strictly_positive: false, allowed_values: [],
 });
 
-export function MarketComparisonChart({ result, mode, hidden, onVisibility }: {
-  result: ComparisonResult; mode: ComparisonMode; hidden: readonly string[]; onVisibility: (key: string) => void;
+export function MarketComparisonChart({ result, mode, hidden }: {
+  result: ComparisonResult; mode: ComparisonMode; hidden: readonly string[];
 }) {
   const { t, language } = useLocale();
   const title = t(mode === "close" ? "Actual close" : mode === "normalized_100" ? "Base 100" : "Cumulative price return");
@@ -30,13 +30,6 @@ export function MarketComparisonChart({ result, mode, hidden, onVisibility }: {
   const closeField = field("close", "price_level");
   return <div className="space-y-3">
     {mode === "close" && <p className="text-xs text-muted-foreground">{t("Actual closes use USD per share for stocks and ETFs, and index points for indexes. Use returns for relative comparison.")}</p>}
-    <fieldset className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-      <legend className="sr-only">{t("Visible comparison series")}</legend>
-      {columns.map(column => <label key={column.field.name} className="flex items-center gap-1.5">
-        <input type="checkbox" checked={!hidden.includes(column.field.name)} onChange={() => onVisibility(column.field.name)}
-          className="accent-primary focus-visible:ring-2 focus-visible:ring-ring" /><span className={INSPECTION_COLORS[columns.indexOf(column)]}>{column.label}</span>
-      </label>)}
-    </fieldset>
     {displayed.length > 0
       ? <AnalysisSeriesChart title={title} rows={rows} columns={displayed} styleIndices={displayed.map(column => columns.indexOf(column))} expanded hideLegend
           inspection={index => result.sources.map((source, i) => {
