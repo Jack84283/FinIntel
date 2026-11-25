@@ -15,7 +15,20 @@ Baseline: main at `dfbc4d0` (#86). The history from #73 through #86 covers the a
 | macOS native | PASS | 19 Rust tests with loopback access |
 | macOS packaged sidecar | PASS | Baseline sidecar startup, token rejection, isolated job and shutdown exercised against a disposable database |
 | Initial hosted Windows | FAIL | Backup staging file remained open, blocking the rename. See the compatibility fix below. |
-| Current hosted Ubuntu, macOS and Windows | NOT_RUN | See the latest checks on [PR #87](https://github.com/Jack84283/FinIntel/pull/87/checks) for the updated revision. |
+
+## Final hosted CI evidence
+
+[Bootstrap CI run 45551093483](https://github.com/Jack84283/FinIntel/actions/runs/45551093483) passed all five jobs for implementation commit [`937cd8819d8843c43d14aa737d5af34836cace7f`](https://github.com/Jack84283/FinIntel/commit/937cd8819d8843c43d14aa737d5af34836cace7f).
+
+| Hosted job | Status |
+| --- | --- |
+| Backend / Python (Ubuntu) | PASS |
+| Frontend / React (Ubuntu) | PASS |
+| Native / Ubuntu 24.04, including DEB packaging | PASS |
+| Native / macOS, including app bundle packaging | PASS |
+| Native / Windows, including the backup restore regression and installer packaging | PASS |
+
+The backend job generated and archived the [`finintel-al09-synthetic-acceptance` artifact, ID 14994530166](https://github.com/Jack84283/FinIntel/actions/runs/45551093483/artifacts/14994530166). The JSON records 170 mandatory checks passed with zero failures or skips. The artifact is subject to GitHub Actions retention.
 
 Generate the redacted Python evidence with `python scripts/al09_synthetic_acceptance.py --output artifacts/al09-synthetic-acceptance.json` from a checkout with the backend development dependencies. Any mandatory failure, skip, collection error or missing prerequisite returns nonzero. The JSON includes stable synthetic test IDs, outcomes, commit and environment context, with no database or report content. The hosted frontend and native jobs provide separate evidence for their respective stacks.
 
