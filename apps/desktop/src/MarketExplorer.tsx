@@ -13,6 +13,9 @@ import { searchAcquirableSymbols } from "./symbol-catalog-api";
 import { listIndexHistory, readIndexHistory, type IndexCatalogRecord, type IndexHistory } from "./index-history-api";
 import type { MarketSelection } from "./market-selection";
 import { MarketTabs } from "./MarketTabs";
+import { MarketComparisonPanel } from "./MarketComparisonPanel";
+import { comparisonSource, comparisonSourceFromSelection, sourceKey, type ComparisonSource } from "./market-comparison-api";
+import { COMPARISON_LIMIT, readComparisonPreferences, saveComparisonPreferences } from "./market-comparison-preferences";
 import { MARKET_TAB_LIMIT, marketTabKey, marketTabSymbol, parseMarketSelection, type MarketSort, type MarketView, type MarketWorkspace } from "./market-workspace";
 import { IndexLineChart, MarketCharts } from "./market-chart";
 import { TechnicalIndicatorsCard } from "./TechnicalIndicatorsCard";
@@ -48,10 +51,11 @@ type HistoryResult =
   | { kind: "equity"; data: DailySeries }
   | { kind: "error" };
 
-export function MarketExplorer({ workspace, limitReached, onActivateTab, onCloseTab, onChooseInstrument, onUpdateView, onOpenAcquisition }: {
+export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowComparison, onCloseTab, onChooseInstrument, onUpdateView, onOpenAcquisition }: {
   workspace: MarketWorkspace;
   limitReached: boolean;
   onActivateTab: (key: string) => void;
+  onShowComparison: () => void;
   onCloseTab: (key: string) => void;
   onChooseInstrument: (selection: MarketSelection, mode: "current" | "new") => void;
   onUpdateView: (key: string, patch: Partial<MarketView>) => void;
@@ -59,7 +63,10 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onClose
 }) {
   const { t } = useLocale();
   const notify = useNotify();
-  const { active } = workspace;
+  const { active, comparing } = workspace;
+  const [comparison, setComparison] = useState(readComparisonPreferences);
+  const [comparisonNotice, setComparisonNotice] = useState("");
+  useEffect(() => { saveComparisonPreferences(comparison); }, [comparison]);
   const { selection, view } = workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!;
   const { start, end, period, draftStart, draftEnd, sortColumn, descending, tableFilter, showSearch } = view;
   const update = (patch: Partial<MarketView>) => onUpdateView(active, patch);
@@ -82,7 +89,7 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onClose
   const instrumentInput = useRef<HTMLInputElement>(null);
   const focusPicker = useRef(false);
   const indexState = directory?.revision === reload ? directory.status : "loading";
-  const request = useMemo(() => ({ selection, start, end, period, reload, indexState }), [selection, start, end, period, reload, indexState]);
+  const request = useMemo(() => ({ selection, start, end, period, reload, indexState, comparing }), [selection, start, end, period, reload, indexState, comparing]);
   const [result, setResult] = useState<{ request: typeof request; result: HistoryResult } | null>(null);
   const currentHistory = result?.request === request ? result.result : null;
   const series = currentHistory?.kind === "equity" ? currentHistory.data : null;
@@ -136,7 +143,7 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onClose
   }, [reload]);
 
   useEffect(() => {
-    if (request.indexState !== "ready") return;
+    if (request.indexState !== "ready" || request.comparing) return;
     let ignore = false;
     const { selection, start, end, period } = request;
     const history: Promise<HistoryResult> = selection.kind === "index"
@@ -214,11 +221,51 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onClose
     onChooseInstrument(validated, mode);
   }
 
+  const comparisonChoices = useMemo(() => {
+    const choices = new Map<string, ComparisonSource>();
+    for (const item of indexCatalog) {
+      const source = item.sessions > 0 && comparisonSource({ kind: "index", code: item.code, provider: item.provider });
+      if (source) choices.set(sourceKey(source), source);
+    }
+    for (const item of instruments) {
+      const source = item.adjustment === "raw_unadjusted" && item.frequency === "1d"
+        && comparisonSource({ kind: "equity", code: item.symbol, provider: item.provider });
+      if (source) choices.set(sourceKey(source), source);
+    }
+    return [...choices.values()];
+  }, [indexCatalog, instruments]);
+
+  function addComparison(source: ComparisonSource) {
+    if (comparison.sources.some(item => sourceKey(item) === sourceKey(source))) {
+      setComparisonNotice("");
+      return true;
+    }
+    if (comparison.sources.length >= COMPARISON_LIMIT) {
+      setComparisonNotice("Four comparison sources are selected.");
+      return false;
+    }
+    setComparison(current => ({ ...current, sources: [...current.sources, source] }));
+    setComparisonNotice("");
+    return true;
+  }
+
+  function compareCurrent() {
+    const source = comparisonSourceFromSelection(selection);
+    if (!source || !comparisonChoices.some(item => sourceKey(item) === sourceKey(source))) {
+      setComparisonNotice(selection.kind === "index" && selection.code === "VIX"
+        ? "VIX measures volatility and is available only in individual Market tabs."
+        : "Choose a supported instrument and its exact local provider.");
+      return;
+    }
+    if (addComparison(source)) onShowComparison();
+  }
+
   function addInstrument() {
     if (workspace.tabs.length >= MARKET_TAB_LIMIT) {
       setPickerNotice(true);
       return;
     }
+    if (comparing) onActivateTab(active);
     setInstrumentQuery("");
     setPendingInstrument(null);
     setActiveSuggestion(-1);
@@ -305,16 +352,18 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onClose
         id="markets-title"
         breadcrumb={t("FinIntel / Markets")}
         title={t("Market Data Explorer")}
-        subtitle={`${t("Historical daily prices stored in local SQLite. No live quotes.")} · ${t("Selected instrument")}: ${selectedLabel}`}
+        subtitle={comparing ? t("Compare price levels from local historical observations.") : `${t("Historical daily prices stored in local SQLite. No live quotes.")} · ${t("Selected instrument")}: ${selectedLabel}`}
         actions={<>
-          <Badge variant="secondary" aria-label={t("Selected instrument")}>{selectedLabel}</Badge>
+          {!comparing && <Badge variant="secondary" aria-label={t("Selected instrument")}>{selectedLabel}</Badge>}
           <Badge variant="outline">{t("Local SQLite")}</Badge>
           <Button type="button" variant="secondary" size="sm" onClick={() => setReload((value) => value + 1)}><RefreshCw aria-hidden="true" /> {t("Reload local data")}</Button>
           <Button type="button" size="sm" onClick={onOpenAcquisition}><Database aria-hidden="true" /> {t("Data Acquisition")}</Button>
-          <Button type="button" variant={pickerVisible ? "secondary" : "outline"} size="sm" aria-expanded={pickerVisible} aria-controls="market-search-panel" onClick={() => { setAddMode(false); update({ showSearch: !pickerVisible }); }}><SlidersHorizontal aria-hidden="true" /> {pickerVisible ? t("Hide filters") : t("Show filters")}</Button>
+          {!comparing && <><Button type="button" variant="outline" size="sm" onClick={compareCurrent}>{t("Add to comparison")}</Button>
+          <Button type="button" variant={pickerVisible ? "secondary" : "outline"} size="sm" aria-expanded={pickerVisible} aria-controls="market-search-panel" onClick={() => { setAddMode(false); update({ showSearch: !pickerVisible }); }}><SlidersHorizontal aria-hidden="true" /> {pickerVisible ? t("Hide filters") : t("Show filters")}</Button></>}
         </>}
       />
-      <MarketTabs workspace={workspace} panelId={panelId} onActivate={key => { setPickerNotice(false); onActivateTab(key); }}
+      <MarketTabs workspace={workspace} panelId={panelId} onCompare={() => { setComparisonNotice(""); onShowComparison(); }}
+        onActivate={key => { setPickerNotice(false); setComparisonNotice(""); onActivateTab(key); }}
         onClose={key => { setPickerNotice(false); onCloseTab(key); }} onAdd={addInstrument} describe={tab => {
           const item = tab.selection;
           if (item.kind === "index") {
@@ -325,7 +374,11 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onClose
           return `${name ? `${name} (${item.symbol})` : item.symbol} · ${providerName(item.provider)}`;
         }} />
       {(limitReached || pickerNotice) && <p role="status" className="px-1 text-xs text-muted-foreground">{t("Eight instrument tabs are open. Close one to open another.")}</p>}
-      <div id={panelId} role="tabpanel" aria-labelledby={`${panelId}-${active}`} className="min-w-0 space-y-2">
+      {comparisonNotice && <p role="status" className="px-1 text-xs text-muted-foreground">{t(comparisonNotice)}</p>}
+      {comparing ? <div id={`${panelId}-comparison-panel`} role="tabpanel" aria-labelledby={`${panelId}-comparison`} className="min-w-0">
+        <MarketComparisonPanel settings={comparison} choices={comparisonChoices} directoryLoading={indexState === "loading"}
+          directoryFailed={indexState === "error"} onChange={setComparison} onAdd={addComparison} onOpenAcquisition={onOpenAcquisition} />
+      </div> : <div id={panelId} role="tabpanel" aria-labelledby={`${panelId}-${active}`} className="min-w-0 space-y-2">
       {indexState === "loading" && <Card><CardContent><Skeleton className="h-8 w-64" aria-label={t("Loading local instruments")} /></CardContent></Card>}
       {indexState === "error" && <Card role="alert"><CardHeader><CardTitle>{t("Local database unavailable")}</CardTitle></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground"><p>{indexError || directoryError}</p><p>{t("Start the Python service on 127.0.0.1:8765 and try again.")}</p><Button onClick={() => setReload((value) => value + 1)} variant="secondary">{t("Retry")}</Button></CardContent></Card>}
       {indexState === "ready" && !hasAnyInstrument && <Card><CardHeader><CardTitle>{t("No stored market data yet")}</CardTitle><CardDescription>{t("FinIntel reads your local SQLite database. Open Data Acquisition to fetch and store your first stock or ETF, or use Index History to import an index.")}</CardDescription></CardHeader><CardContent className="space-y-3"><div className="flex items-center gap-2 text-muted-foreground"><Database aria-hidden="true" className="size-5" /><span className="text-sm">{t("No price series have been imported.")}</span></div><Button type="button" onClick={onOpenAcquisition}><Database aria-hidden="true" /> {t("Open Data Acquisition")}</Button></CardContent></Card>}
@@ -393,7 +446,7 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onClose
           {series && <EquityMarketContent bars={bars} series={series} selectedLabel={selectedLabel} period={period} first={first} last={last} closeChange={closeChange} sorted={sorted} visibleRows={visibleRows} page={page} totalRows={filteredRows.length} sortBy={sortBy} sortLabel={sortLabel} setPage={tableControls.onPageChange} tableFilter={tableFilter} setTableFilter={tableControls.onFilterChange} t={t} />}
         </>
       )}
-      </div>
+      </div>}
       <footer className="text-xs text-muted-foreground">{t("Local research workstation · Charts display local SQLite data only · Fetches and action history live in Data Acquisition · Not a live market feed")}</footer>
     </section>
   );

@@ -11,6 +11,8 @@ const marketProps = {
   workspace: parseMarketWorkspace(null),
   limitReached: false,
   onActivateTab: () => undefined,
+  onShowComparison: () => undefined,
+
   onCloseTab: () => undefined,
   onChooseInstrument: () => undefined,
   onUpdateView: () => undefined,
