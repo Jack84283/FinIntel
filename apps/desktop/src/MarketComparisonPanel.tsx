@@ -244,6 +244,8 @@ function ComparisonResultContent({ result, settings, onChange }: {
     "Latest source close", "Observations", "Missing dates", "Nonshared dates", "Price semantics"];
   return <Card className="gap-2 py-3">
     <CardContent className="space-y-3">
+      <p className="text-xs text-muted-foreground">{t(warnings.price_level_only)}</p>
+      {result.warnings.filter(warning => warning !== "price_level_only").map(warning => <p key={warning} className="text-xs text-muted-foreground">{t(warnings[warning])}</p>)}
       <MarketComparisonChart result={result} mode={mode} hidden={hidden} onVisibility={key => onChange({ ...settings,
         hidden: hidden.includes(key) ? hidden.filter(item => item !== key) : [...hidden, key] })} />
       <details className="space-y-2 text-xs text-muted-foreground">
@@ -251,7 +253,6 @@ function ComparisonResultContent({ result, settings, onChange }: {
       <div className="space-y-1 text-xs text-muted-foreground">
         <p>{t("Covered plot window")} · {result.baseline_date} – {result.points.at(-1)?.session_date}</p>
         <p>{t("Shared baseline and endpoint")} · {result.baseline_date} – {result.last_common_date} · {result.shared_sessions} {t("shared sessions")}</p>
-        <ul className="space-y-1">{result.warnings.map(warning => <li key={warning}>{t(warnings[warning])}</li>)}</ul>
       </div>
       <div className="overflow-x-auto rounded-md border">
         <table aria-label={t("Comparison summary")} className="w-full min-w-max text-right text-xs tabular-nums">
