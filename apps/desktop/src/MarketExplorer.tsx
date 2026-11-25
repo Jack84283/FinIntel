@@ -63,11 +63,18 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
 }) {
   const { t } = useLocale();
   const notify = useNotify();
-  const { active, comparing } = workspace;
-  const [comparison, setComparison] = useState(readComparisonPreferences);
+  const { active } = workspace;
+  const [historicalDetails, setHistoricalDetails] = useState(false);
+  const comparing = !historicalDetails;
+  const [comparison, setComparison] = useState(() => {
+    const saved = readComparisonPreferences();
+    const source = comparisonSourceFromSelection(workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!.selection);
+    return !workspace.comparing && source ? { ...saved, sources: [source], hidden: [] } : saved;
+  });
   const [comparisonPickerOpen, setComparisonPickerOpen] = useState(false);
   const [comparisonNotice, setComparisonNotice] = useState("");
   useEffect(() => { saveComparisonPreferences(comparison); }, [comparison]);
+  useEffect(() => { if (comparing) onShowComparison(); }, [comparing]);
   const { selection, view } = workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!;
   const { start, end, period, draftStart, draftEnd, sortColumn, descending, tableFilter, showSearch } = view;
   const update = (patch: Partial<MarketView>) => onUpdateView(active, patch);
@@ -260,7 +267,7 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
         : "Choose a supported instrument and its exact local provider.");
       return;
     }
-    if (addComparison(source)) onShowComparison();
+    if (addComparison(source)) { setHistoricalDetails(false); onShowComparison(); }
   }
 
   function addInstrument() {
@@ -361,11 +368,12 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
           <Badge variant="outline">{t("Local SQLite")}</Badge>
           <Button type="button" variant="secondary" size="sm" onClick={() => setReload((value) => value + 1)}><RefreshCw aria-hidden="true" /> {t("Reload local data")}</Button>
           <Button type="button" size="sm" onClick={onOpenAcquisition}><Database aria-hidden="true" /> {t("Data Acquisition")}</Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => setHistoricalDetails(value => !value)}>{t(comparing ? "Historical price details" : "Price comparison")}</Button>
           {!comparing && <><Button type="button" variant="outline" size="sm" onClick={compareCurrent}>{t("Add to comparison")}</Button>
           <Button type="button" variant={pickerVisible ? "secondary" : "outline"} size="sm" aria-expanded={pickerVisible} aria-controls="market-search-panel" onClick={() => { setAddMode(false); update({ showSearch: !pickerVisible }); }}><SlidersHorizontal aria-hidden="true" /> {pickerVisible ? t("Hide filters") : t("Show filters")}</Button></>}
         </>}
       />
-      <MarketTabs workspace={workspace} panelId={panelId} onCompare={() => { setComparisonNotice(""); onShowComparison(); }}
+      {!comparing && <MarketTabs workspace={workspace} panelId={panelId} onCompare={() => { setComparisonNotice(""); setHistoricalDetails(false); onShowComparison(); }}
         onActivate={key => { setComparisonPickerOpen(false); setPickerNotice(false); setComparisonNotice(""); onActivateTab(key); }}
         onClose={key => { setPickerNotice(false); onCloseTab(key); }} onAdd={addInstrument} describe={tab => {
           const item = tab.selection;
@@ -375,10 +383,10 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
           }
           const name = instrumentNames[item.symbol];
           return `${name ? `${name} (${item.symbol})` : item.symbol} · ${providerName(item.provider)}`;
-        }} />
+        }} />}
       {(limitReached || pickerNotice) && <p role="status" className="px-1 text-xs text-muted-foreground">{t("Eight instrument tabs are open. Close one to open another.")}</p>}
       {comparisonNotice && <p role="status" className="px-1 text-xs text-muted-foreground">{t(comparisonNotice)}</p>}
-      {comparing ? <div id={`${panelId}-comparison-panel`} role="tabpanel" aria-labelledby={`${panelId}-comparison`} className="min-w-0">
+      {comparing ? <div id={`${panelId}-comparison-panel`} role="region" aria-label={t("Compare local instruments")} className="min-w-0">
         <MarketComparisonPanel settings={comparison} choices={comparisonChoices} directoryLoading={indexState === "loading"}
           directoryFailed={indexState === "error"} refreshRevision={reload} onChange={setComparison} pickerOpen={comparisonPickerOpen} onPickerOpen={setComparisonPickerOpen} names={comparisonNames} onOpenAcquisition={onOpenAcquisition} />
       </div> : <div id={panelId} role="tabpanel" aria-labelledby={`${panelId}-${active}`} className="min-w-0 space-y-2">
