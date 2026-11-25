@@ -56,6 +56,7 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
   const descriptionId = useId();
   const [inspected, setInspected] = useState<number>();
   const [hovering, setHovering] = useState(false);
+  const [inspectionFocused, setInspectionFocused] = useState(false);
   const plotRef = useRef<SVGSVGElement>(null);
   const [dimensions, setDimensions] = useState({ width: 840, height: 500 });
   useEffect(() => {
@@ -185,7 +186,7 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
         })}
         <DateLabels rows={rows} right={right} bottom={bottom} />
       </svg>
-      {expanded && inspection && hovering && <div aria-hidden="true" data-comparison-tooltip className="pointer-events-none absolute top-4 grid max-w-[42%] gap-1 rounded-md border bg-background/95 p-2 text-xs tabular-nums shadow-sm" style={x(selection.session_date) < width / 2 ? { left: `calc(${100 * x(selection.session_date) / width}% + 12px)` } : { right: `calc(${100 * (width - x(selection.session_date)) / width}% + 12px)` }}>
+      {expanded && inspection && (hovering || inspectionFocused) && <div aria-hidden="true" data-comparison-tooltip className="pointer-events-none absolute top-4 grid max-w-[42%] gap-1 rounded-md border bg-background/95 p-2 text-xs tabular-nums shadow-sm" style={x(selection.session_date) < width / 2 ? { left: `calc(${100 * x(selection.session_date) / width}% + 12px)` } : { right: `calc(${100 * (width - x(selection.session_date)) / width}% + 12px)` }}>
         <strong>{observedDate(selection.session_date, language)}</strong>
         {inspection(index)}
       </div>}
@@ -196,9 +197,10 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
       <input className="w-full max-w-64 accent-primary focus-visible:ring-2 focus-visible:ring-ring" type="range"
         min={0} max={rows.length - 1} value={index} disabled={rows.length < 2}
         aria-valuetext={observedDate(selection.session_date, language)}
+        onFocus={() => setInspectionFocused(true)} onBlur={() => setInspectionFocused(false)}
         onChange={event => setInspected(Number(event.target.value))} />
     </label>
-    <output className={expanded && hovering ? "sr-only" : "flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums"}>
+    <output className={expanded ? "sr-only" : "flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums"}>
       <strong>{observedDate(selection.session_date, language)}</strong>
       {inspection ? inspection(index) : columns.map(column => <span key={column.field.name}>{column.label} · {formatCell(cell(selection, column.field.name), column.field, language, t)}</span>)}
       {eventField && <span>{fieldLabel(eventField, t)} · {fieldLabel(String(cell(selection, eventField) ?? "Unavailable"), t)}</span>}
