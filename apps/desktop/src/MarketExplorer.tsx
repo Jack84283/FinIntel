@@ -373,7 +373,7 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
           <Button type="button" variant={pickerVisible ? "secondary" : "outline"} size="sm" aria-expanded={pickerVisible} aria-controls="market-search-panel" onClick={() => { setAddMode(false); update({ showSearch: !pickerVisible }); }}><SlidersHorizontal aria-hidden="true" /> {pickerVisible ? t("Hide filters") : t("Show filters")}</Button></>}
         </>}
       />
-      {!comparing && <MarketTabs workspace={workspace} panelId={panelId} onCompare={() => { setComparisonNotice(""); setHistoricalDetails(false); onShowComparison(); }}
+      {!comparing && <MarketTabs workspace={{ ...workspace, comparing: undefined }} panelId={panelId} onCompare={() => { setComparisonNotice(""); setHistoricalDetails(false); onShowComparison(); }}
         onActivate={key => { setComparisonPickerOpen(false); setPickerNotice(false); setComparisonNotice(""); onActivateTab(key); }}
         onClose={key => { setPickerNotice(false); onCloseTab(key); }} onAdd={addInstrument} describe={tab => {
           const item = tab.selection;
