@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { ListFilter } from "lucide-react";
 import { searchAcquirableSymbols } from "./symbol-catalog-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,7 +17,7 @@ const warnings = {
   coverage_gaps: "Coverage differs from the requested bounds or across sources. Missing observations remain gaps.",
 } as const;
 const errors: Record<ComparisonError, string> = {
-  invalid_input: "Choose valid dates and two to four different sources.",
+  invalid_input: "Choose valid dates and one to four different sources.",
   invalid_source: "Choose a supported instrument and its exact local provider.",
   unsupported_vix: "VIX measures volatility and is available only in individual Market tabs.",
   missing_history: "A selected source has no local history in this window. Change the dates or open Data Acquisition.",
@@ -62,7 +62,7 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
   const current = state?.request === request ? state : undefined;
 
   useEffect(() => {
-    if (request.sources.length < 2) return;
+    if (request.sources.length < 1) return;
     const abort = new AbortController();
     void fetchMarketComparison(request.sources, request.start, request.end, abort.signal)
       .then(result => { if (!abort.signal.aborted) setState({ request, result }); })
@@ -142,7 +142,7 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
             {comparisonLabel(source)} <span aria-hidden="true">×</span>
           </Button>)}
           <Button type="button" variant="outline" size="sm" onClick={openPicker}>
-            <Plus aria-hidden="true" /> {t("Add to comparison")}
+            <ListFilter aria-hidden="true" /> {t("Select comparison instruments")}
           </Button>
           {atLimit && <span role="status" className="text-xs text-muted-foreground">{t("Four comparison sources are selected.")}</span>}
         </div>
@@ -210,9 +210,10 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
             </label>
           </div>}
           <label className="grid gap-1 text-xs text-muted-foreground">{t("Comparison display")}
-            <select value={mode} onChange={event => onChange({ ...settings, mode: event.target.value === "cumulative_return_pct"
+            <select value={mode} onChange={event => onChange({ ...settings, mode: event.target.value === "close" ? "close" : event.target.value === "cumulative_return_pct"
               ? "cumulative_return_pct" : "normalized_100" })}
               className="h-8 rounded-md border border-input bg-background px-2 text-foreground">
+              <option value="close">{t("Actual close")}</option>
               <option value="normalized_100">{t("Base 100")}</option>
               <option value="cumulative_return_pct">{t("Cumulative price return")}</option>
             </select>
@@ -220,8 +221,8 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
         </div>
         {dateError && <p role="alert" className="text-xs text-destructive">{t("Choose an ordered date window of up to ten years ending no later than today.")}</p>}
         <p className="text-xs text-muted-foreground">{t("Requested window")} · {start} – {end}</p>
-        {sources.length < 2 && <p role="status" className="text-sm text-muted-foreground">{t("Select at least two local instruments to compare.")}</p>}
-        {sources.length >= 2 && !current && <p role="status" className="text-sm text-muted-foreground">{t("Loading local comparison…")}</p>}
+        {sources.length < 1 && <p role="status" className="text-sm text-muted-foreground">{t("Select one or more local instruments.")}</p>}
+        {sources.length >= 1 && !current && <p role="status" className="text-sm text-muted-foreground">{t("Loading local comparison…")}</p>}
         {current?.error && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-destructive">{t(errors[current.error])}</span>
           <Button type="button" variant="outline" size="sm" onClick={() => setRetry(value => value + 1)}>{t("Retry local query")}</Button>
@@ -243,6 +244,10 @@ function ComparisonResultContent({ result, settings, onChange }: {
     "Latest source close", "Observations", "Missing dates", "Nonshared dates", "Price semantics"];
   return <Card className="gap-2 py-3">
     <CardContent className="space-y-3">
+      <MarketComparisonChart result={result} mode={mode} hidden={hidden} onVisibility={key => onChange({ ...settings,
+        hidden: hidden.includes(key) ? hidden.filter(item => item !== key) : [...hidden, key] })} />
+      <details className="space-y-2 text-xs text-muted-foreground">
+        <summary className="cursor-pointer font-medium">{t("Comparison summary")}</summary>
       <div className="space-y-1 text-xs text-muted-foreground">
         <p>{t("Covered plot window")} · {result.baseline_date} – {result.points.at(-1)?.session_date}</p>
         <p>{t("Shared baseline and endpoint")} · {result.baseline_date} – {result.last_common_date} · {result.shared_sessions} {t("shared sessions")}</p>
@@ -261,8 +266,7 @@ function ComparisonResultContent({ result, settings, onChange }: {
           </tr>)}</tbody>
         </table>
       </div>
-      <MarketComparisonChart result={result} mode={mode} hidden={hidden} onVisibility={key => onChange({ ...settings,
-        hidden: hidden.includes(key) ? hidden.filter(item => item !== key) : [...hidden, key] })} />
+      </details>
       <details className="text-xs text-muted-foreground">
         <summary className="cursor-pointer font-medium focus-visible:ring-2 focus-visible:ring-ring">{t("Comparison source evidence")}</summary>
         <dl className="mt-2 grid gap-1 break-all">
