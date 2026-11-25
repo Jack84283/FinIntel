@@ -117,9 +117,10 @@ async function change(target: HTMLInputElement | HTMLSelectElement, value: strin
 async function press(target: Element, key: string) {
   await act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })); });
 }
-async function mountMarket(label = "Market") {
+async function mountMarket(label = "Market", details = false) {
   await act(async () => root.render(<App />));
   await click(button(label));
+  if (details) await click(button(label === "市场" ? "历史价格详情" : "Historical price details"));
 }
 
 async function choose(symbol: string, mode: "new" | "current" = "new", provider = "Tiingo", keyboard = false) {
@@ -148,7 +149,7 @@ function deferred<T>() {
 
 describe("Market instrument workspace", () => {
   it("opens, deduplicates, disambiguates providers, switches by keyboard and closes tabs", async () => {
-    await mountMarket();
+    await mountMarket("Market", true);
     expect(active()).toBe("fred:SP500");
     expect(host.querySelector('svg[aria-label^="Historical index closing-level line chart"]')).toBeTruthy();
     await choose("AAPL", "new", "Tiingo", true);
@@ -162,9 +163,9 @@ describe("Market instrument workspace", () => {
     expect(tab("tiingo:AAPL").textContent).toContain("Tiingo");
     expect(tab("alpha_vantage:AAPL").textContent).toContain("Alpha Vantage");
     await press(tab("alpha_vantage:AAPL"), "ArrowRight");
-    expect(active()).toBe("comparison");
-    expect(document.activeElement).toBe(tab("comparison"));
-    await press(tab("comparison"), "ArrowRight");
+    expect(host.querySelector("[data-market-tab]")).toBeNull();
+    await click(button("Historical price details"));
+    await click(tab("fred:SP500"));
     expect(active()).toBe("fred:SP500");
     expect(document.activeElement).toBe(tab("fred:SP500"));
     await click(button("Close tab · AAPL · Tiingo"));
@@ -178,7 +179,7 @@ describe("Market instrument workspace", () => {
   });
 
   it("preserves independent dates, sorting, filters and ten-row pages across switches and restart", async () => {
-    await mountMarket();
+    await mountMarket("Market", true);
     await change(host.querySelector<HTMLInputElement>('input[aria-label^="Filter table"]')!, "2024-03");
     await click(button("Next"));
     expect(visibleRows()).toHaveLength(10);
@@ -213,7 +214,7 @@ describe("Market instrument workspace", () => {
     });
     await act(async () => root.unmount());
     root = createRoot(host);
-    await mountMarket();
+    await mountMarket("Market", true);
     expect(active()).toBe("tiingo:AAPL");
     expect(visibleRows()[0].textContent).toBe(equityPage);
   });
@@ -226,13 +227,14 @@ describe("Market instrument workspace", () => {
         ...symbols.map(symbol => ({ selection: { kind: "equity", symbol, provider: "tiingo" } })),
       ],
     }));
-    await mountMarket();
+    await mountMarket("Market", true);
     await click(button("Add instrument tab"));
     expect(host.textContent).toContain("Eight instrument tabs are open.");
     expect(host.querySelectorAll('[role="tab"]:not([data-market-tab="comparison"])')).toHaveLength(8);
     await click(button("Data Acquisition", host.querySelector("header") ?? host));
     await click(button("Simulate completed import"));
     await click(button("View in Markets"));
+    await click(button("Historical price details"));
     expect(active()).toBe("tiingo:AAPL");
     expect(host.querySelectorAll('[role="tab"]:not([data-market-tab="comparison"])')).toHaveLength(8);
     await click(button("Close tab · QQQ · Tiingo"));
@@ -244,7 +246,7 @@ describe("Market instrument workspace", () => {
   });
 
   it("ignores delayed responses from closed tabs and superseded date windows", async () => {
-    await mountMarket();
+    await mountMarket("Market", true);
     const closed = deferred<DailySeries>();
     vi.mocked(fetchMarketDaily).mockReturnValueOnce(closed.promise);
     await choose("AAPL");
@@ -276,7 +278,7 @@ describe("Market instrument workspace", () => {
       active: "alpaca_sip:MISSING",
     }));
     vi.mocked(fetchMarketDaily).mockRejectedValueOnce(new Error("private storage path"));
-    await mountMarket("市场");
+    await mountMarket("市场", true);
     expect(active()).toBe("alpaca_sip:MISSING");
     expect(button("添加品种标签页")).toBeTruthy();
     expect(host.textContent).toContain("请确认本地已保存此品种和数据源的历史记录。");
@@ -287,130 +289,42 @@ describe("Market instrument workspace", () => {
 });
 
 
-describe("Market comparison panel", () => {
-  const comparison = comparisonFixture as ComparisonResult;
-
-  async function addSource(key: string) {
-    await click(button("Select comparison instruments"));
-    const picker = host.querySelector("dialog")!;
-    const check = Array.from(picker.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).find(input => input.value === key)!;
-    await act(async () => check.click());
-    await click(button("Apply selection", picker));
-  }
-
-  function saveSources() {
-    localStorage.setItem(COMPARISON_KEY, JSON.stringify({
-      sources: comparison.request.sources, period: "custom", start: comparison.request.start, end: comparison.request.end,
-    }));
-  }
-
-  it("combines a current instrument with a local source and keeps modes, gaps and tables in sync", async () => {
+describe("Chart-first Market workspace", () => {
+  it("opens a single default source without tabs or a standalone add button", async () => {
     await mountMarket();
-    await click(tab("comparison"));
-    expect(tab("comparison").previousElementSibling).toBeNull();
-    await addSource("tiingo:AAPL");
-    expect(host.textContent).toContain("Select at least two local instruments");
-    expect(fetchMarketComparison).not.toHaveBeenCalled();
-    await click(tab("fred:SP500"));
-    await click(button("Add to comparison"));
-    expect(active()).toBe("comparison");
-    expect(fetchMarketComparison).toHaveBeenLastCalledWith(comparison.request.sources,
+    expect(host.querySelector("[data-market-tab]")).toBeNull();
+    expect(fetchMarketComparison).toHaveBeenLastCalledWith([{ kind: "index", code: "SP500", provider: "fred" }],
       expect.any(String), expect.any(String), expect.any(AbortSignal));
-    expect(host.textContent).toContain("Coverage differs from the requested bounds");
-    expect(host.querySelector('[aria-label="Comparison summary"]')?.textContent).toContain("5200");
-    const plotted = host.querySelector('[data-series="tiingo:AAPL"]');
-    expect(plotted?.querySelectorAll("circle")).toHaveLength(2);
-    expect(plotted?.querySelector("path")).toBeNull();
-    const mode = Array.from(host.querySelectorAll("select")).find(select => select.value === "normalized_100")!;
-    await change(mode, "cumulative_return_pct");
-    const historical = host.querySelector('section[aria-label="Comparison observation table"]')!;
-    expect(historical.textContent).toContain("105 / 5%");
-    expect(historical.textContent).toContain("Unavailable");
-    expect(host.querySelector("output")?.textContent).toContain("Unavailable");
-    const check = host.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
-    await act(async () => check.click());
-    expect(host.querySelectorAll("[data-series]")).toHaveLength(1);
-    expect(historical.textContent).toContain("105 / 5%");
-    expect(fetchMarketComparison).toHaveBeenCalledTimes(1);
-    await press(tab("comparison"), "ArrowRight");
-    expect(active()).toBe("fred:SP500");
-    expect(host.textContent).toContain("Historical index table");
-    await click(tab("comparison"));
-    expect(host.querySelectorAll("[data-series]")).toHaveLength(1);
-    expect(host.textContent).toContain("105 / 5%");
-    expect(fetchMarketComparison).toHaveBeenCalledTimes(2);
+    expect(button("Select comparison instruments")).toBeTruthy();
   });
 
-  it("limits and removes source selections without changing individual tabs", async () => {
-    saveSources();
+  it("batch-selects sources, cancels edits and shares the date range", async () => {
+    localStorage.setItem(MARKET_WORKSPACE_KEY, JSON.stringify({ comparing: true }));
     await mountMarket();
-    await click(tab("comparison"));
-    await addSource("tiingo:NVDA");
-    await addSource("alpha_vantage:AAPL");
-    expect(host.textContent).toContain("Four comparison sources are selected.");
-    await click(button("Select comparison instruments"));
-    expect(host.querySelector<HTMLInputElement>('dialog input[value="tiingo:MSFT"]')?.disabled).toBe(true);
-    await click(button("Cancel", host.querySelector("dialog")!));
-    await click(button("Remove from comparison · AAPL · Alpha Vantage"));
-    expect(host.textContent).not.toContain("Four comparison sources are selected.");
-    await click(button("Clear comparison"));
-    expect(host.textContent).toContain("Select at least two local instruments");
-    expect(tab("fred:SP500")).toBeTruthy();
-  });
-
-  it("selects multiple instruments in one popup and applies a shared range automatically", async () => {
-    await mountMarket();
-    await click(tab("comparison"));
     await click(button("Select comparison instruments"));
     let picker = host.querySelector("dialog")!;
-    for (const key of ["tiingo:AAPL", "tiingo:NVDA"]) {
+    for (const key of ["tiingo:AAPL", "fred:SP500"]) {
       const check = picker.querySelector<HTMLInputElement>('input[value="' + key + '"]')!;
       await act(async () => check.click());
     }
     await click(button("Apply selection", picker));
+    const sources = [{ kind: "equity", code: "AAPL", provider: "tiingo" }, { kind: "index", code: "SP500", provider: "fred" }];
     expect(fetchMarketComparison).toHaveBeenCalledTimes(1);
-    const sources = [{ kind: "equity", code: "AAPL", provider: "tiingo" }, { kind: "equity", code: "NVDA", provider: "tiingo" }];
     const period = Array.from(host.querySelectorAll("select")).find(select => select.value === "1y")!;
     await change(period, "5y");
     expect(fetchMarketComparison).toHaveBeenLastCalledWith(sources, "2019-03-15", "2024-03-15", expect.any(AbortSignal));
     await click(button("Select comparison instruments"));
     picker = host.querySelector("dialog")!;
-    const check = picker.querySelector<HTMLInputElement>('input[value="tiingo:MSFT"]')!;
-    await act(async () => check.click());
+    await act(async () => picker.querySelector<HTMLInputElement>('input[value="tiingo:MSFT"]')!.click());
     await click(button("Cancel", picker));
     expect(fetchMarketComparison).toHaveBeenCalledTimes(2);
-    await change(period, "custom");
-    const dates = host.querySelectorAll<HTMLInputElement>('input[type="date"]');
-    await change(dates[0], "2020-01-01");
-    expect(fetchMarketComparison).toHaveBeenLastCalledWith(sources, "2020-01-01", "2024-03-15", expect.any(AbortSignal));
-  });
-
-  it("restores a comparison, rejects late results and retries a safe error", async () => {
-    saveSources();
-    localStorage.setItem(MARKET_WORKSPACE_KEY, JSON.stringify({ comparing: true }));
-    const old = deferred<ComparisonResult>();
-    vi.mocked(fetchMarketComparison).mockReturnValueOnce(old.promise).mockRejectedValueOnce(new Error("missing_history"));
-    await mountMarket();
-    expect(active()).toBe("comparison");
-    expect(readIndexHistory).not.toHaveBeenCalled();
-    const period = Array.from(host.querySelectorAll("select")).find(select => select.value === "custom")!;
-    await change(period, "5y");
-    expect(host.textContent).toContain("A selected source has no local history");
-    await act(async () => old.resolve(comparison));
-    expect(host.querySelector('[aria-label="Comparison summary"]')).toBeNull();
-    expect(host.textContent).toContain("A selected source has no local history");
-    await click(button("Retry local query"));
-    expect(host.querySelector('[aria-label="Comparison summary"]')).toBeTruthy();
-    expect(fetchMarketComparison).toHaveBeenCalledTimes(3);
-    await click(button("Reload local data"));
-    expect(fetchMarketComparison).toHaveBeenCalledTimes(4);
-  });
-
-  it("localizes the comparison tab and source guidance", async () => {
-    localStorage.setItem("finintel.workspace-preferences.v1", JSON.stringify({ language: "zh-CN" }));
-    await mountMarket("市场");
-    expect(tab("comparison").textContent).toBe("对比");
-    await click(tab("comparison"));
-    expect(host.textContent).toContain("请选择至少两个本地品种进行对比。");
+    const chart = host.querySelector('svg[data-comparison-chart]') ?? host.querySelector('svg[aria-describedby]');
+    const summary = host.querySelector('[aria-label="Comparison summary"]');
+    expect(chart && summary && Boolean(chart.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(host.querySelector("output")?.textContent).toContain("Unavailable");
+    const mode = Array.from(host.querySelectorAll("select")).find(select => select.value === "cumulative_return_pct")!;
+    await change(mode, "close");
+    expect(fetchMarketComparison).toHaveBeenCalledTimes(2);
+    expect(host.textContent).toContain("Actual close");
   });
 });
