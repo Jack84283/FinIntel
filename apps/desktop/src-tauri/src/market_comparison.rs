@@ -76,7 +76,7 @@ impl ComparisonRequest {
             return Err("unsupported_vix");
         }
         if self.contract_version != CONTRACT
-            || !(2..=4).contains(&self.sources.len())
+            || !(1..=4).contains(&self.sources.len())
             || !self.sources.iter().all(Source::valid)
             || self
                 .sources
