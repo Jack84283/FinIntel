@@ -300,7 +300,13 @@ describe("Chart-first Market workspace", () => {
       expect.any(String), expect.any(String), expect.any(AbortSignal));
     expect(button("Select comparison instruments")).toBeTruthy();
     expect(button("1D").disabled).toBe(true);
-    expect(button("Remove from comparison · SP500 · FRED").textContent).toBe("SP500 ×");
+    expect(button("Visible comparison series · SP500 · FRED").textContent).toBe("SP500");
+    expect(button("Remove from comparison · SP500 · FRED").textContent).toBe("×");
+    const chip = button("Visible comparison series · SP500 · FRED");
+    await click(chip);
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+    await click(chip);
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("uses compact shared range shortcuts", async () => {
@@ -376,7 +382,10 @@ describe("Chart-first Market workspace", () => {
     expect(host.textContent).toContain("Four comparison sources are selected.");
     await click(button("Remove from comparison · AAPL · Alpha Vantage"));
     expect(host.textContent).not.toContain("Four comparison sources are selected.");
-    await click(button("Clear comparison"));
+    await click(button("Select comparison instruments"));
+    const clearPicker = host.querySelector("dialog")!;
+    await click(button("Clear comparison", clearPicker));
+    await click(button("Apply selection", clearPicker));
     expect(host.textContent).toContain("Select one or more local instruments.");
   });
 
@@ -448,11 +457,12 @@ describe("Chart-first Market workspace", () => {
     expect(output.className).toBe("sr-only");
     Object.defineProperty(svg, "getScreenCTM", { value: () => ({ inverse: () => ({}) }) });
     Object.defineProperty(svg, "createSVGPoint", { value: () => ({ x: 0, y: 0, matrixTransform() { return { x: this.x, y: this.y }; } }) });
-    await act(async () => svg.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 88, clientY: 100 })));
-    expect(host.querySelector("[data-comparison-tooltip]")?.textContent).toContain("100.00");
-    await act(async () => svg.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 819, clientY: 100 })));
+    await act(async () => svg.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 12, clientY: 100 })));
+    expect(host.querySelector("[data-comparison-tooltip]")?.textContent).toContain("AAPL");
+    expect(host.querySelector("[data-comparison-tooltip]")?.textContent).toContain("100");
+    await act(async () => svg.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 764, clientY: 100 })));
     expect(host.querySelector("[data-comparison-tooltip]")?.textContent).toContain("Unavailable");
-    expect(host.querySelector("[data-comparison-tooltip]")?.textContent).toContain("5,250");
+    expect(host.querySelector("[data-comparison-tooltip]")?.textContent?.replaceAll(",", "")).toContain("5250");
     expect(output.className).toBe("sr-only");
     await act(async () => svg.dispatchEvent(new MouseEvent("pointerout", { bubbles: true, relatedTarget: document.body })));
     expect(host.querySelector("[data-comparison-tooltip]")).toBeNull();
