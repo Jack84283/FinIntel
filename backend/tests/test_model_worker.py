@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from contextlib import closing
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -79,7 +80,7 @@ def seed_market(db):
 
 
 def _database_fingerprint(path):
-    with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as conn:
+    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         dump = "\n".join(conn.iterdump()).encode()
     return version, hashlib.sha256(dump).hexdigest()
@@ -1440,7 +1441,7 @@ def test_al09_market_restore_preserves_separate_completed_ledger(local_storage, 
     backup.restore_backup(snapshot["id"], "replace", db=empty)
     assert _database_fingerprint(empty) == original_market
 
-    with sqlite3.connect(market) as conn:
+    with closing(sqlite3.connect(market)) as conn, conn:
         conn.execute(
             "UPDATE index_daily_closes SET close = '999' WHERE session_date = ?",
             (START.isoformat(),),
