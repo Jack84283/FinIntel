@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { fetchBackendHealth } from "./api";
 import { MarketExplorer } from "./MarketExplorer";
 import { comparisonSourceFromSelection, sourceKey, type ComparisonSource } from "./market-comparison-api";
-import { COMPARISON_LIMIT, readComparisonPreferences, saveComparisonPreferences } from "./market-comparison-preferences";
+import { COMPARISON_LIMIT, readComparisonWorkspace, saveComparisonWorkspace, updateComparisonTab } from "./market-comparison-preferences";
 import { createHealthPoller, type HealthConnection } from "./health-poller";
 import { PreferencesPage } from "./PreferencesPage";
 import { ActionHistoryPage } from "./ActionHistoryPage";
@@ -94,11 +94,12 @@ export default function App() {
       if (validated) {
         const source = comparisonSourceFromSelection(validated);
         if (source) {
-          const saved = readComparisonPreferences();
+          const charts = readComparisonWorkspace();
+          const saved = charts.tabs.find(tab => tab.id === charts.active)!.settings;
           const exists = saved.sources.some(item => sourceKey(item) === sourceKey(source));
           if (!exists && saved.sources.length >= COMPARISON_LIMIT) setPendingComparisonSource(source);
-          else saveComparisonPreferences({ ...saved, sources: exists ? saved.sources : [...saved.sources, source],
-            hidden: saved.hidden.filter(key => key !== sourceKey(source)) });
+          else saveComparisonWorkspace(updateComparisonTab(charts, charts.active, { ...saved, sources: exists ? saved.sources : [...saved.sources, source],
+            hidden: saved.hidden.filter(key => key !== sourceKey(source)) }));
           setMarketWorkspace(current => ({ ...current, comparing: true }));
           setMarketLimitReached(false);
         } else {
