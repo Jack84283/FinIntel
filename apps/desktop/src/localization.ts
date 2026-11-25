@@ -113,6 +113,7 @@ const translations = {
 const additionalChinese: Readonly<Record<string, string>> = {
   "Comparison": "对比",
   "Actual close": "实际收盘值",
+  "Actual closes use USD per share for stocks and ETFs, and index points for indexes. Use returns for relative comparison.": "股票和ETF的实际收盘价以美元/股计，指数以点计。相对表现请使用收益率对比。",
   "Price level": "价格水平",
   "Choose valid dates and one to four different sources.": "请选择有效日期和一到四个不同的数据源。",
   "Select one or more local instruments.": "请选择一个或多个本地品种。",
