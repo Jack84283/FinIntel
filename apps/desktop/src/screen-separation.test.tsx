@@ -1,3 +1,4 @@
+import { parseMarketWorkspace } from "./market-workspace";
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -6,15 +7,25 @@ import { MarketExplorer } from "./MarketExplorer";
 import { DataAcquisitionPage } from "./DataAcquisitionPage";
 import { ActionHistoryPage } from "./ActionHistoryPage";
 
+const marketProps = {
+  workspace: parseMarketWorkspace(null),
+  limitReached: false,
+  onActivateTab: () => undefined,
+  onCloseTab: () => undefined,
+  onChooseInstrument: () => undefined,
+  onUpdateView: () => undefined,
+  onOpenAcquisition: () => undefined,
+};
+
 describe("navigation between research and data operations", () => {
   it("shows SP500 as the initial Market selection", () => {
-    const market = renderToStaticMarkup(<MarketExplorer onOpenAcquisition={() => undefined} />);
+    const market = renderToStaticMarkup(<MarketExplorer {...marketProps} />);
     expect(market).toContain("S&amp;P 500 (SP500)");
     expect(market).toContain("Selected instrument");
   });
 
   it("keeps the Market layout responsive on desktop widths", () => {
-    const market = renderToStaticMarkup(<MarketExplorer onOpenAcquisition={() => undefined} />);
+    const market = renderToStaticMarkup(<MarketExplorer {...marketProps} />);
     expect(market).toContain("min-w-0");
     const source = readFileSync(join(import.meta.dirname, "MarketExplorer.tsx"), "utf8");
     expect(source).toContain("sm:grid-cols-2");
@@ -23,7 +34,7 @@ describe("navigation between research and data operations", () => {
 
   it("keeps acquisition controls and action history off the Markets screen", () => {
     const market = renderToStaticMarkup(
-      <MarketExplorer onOpenAcquisition={() => undefined} />,
+      <MarketExplorer {...marketProps} />,
     );
     expect(market).toContain("Market Data Explorer");
     expect(market).toContain("Data Acquisition");

@@ -53,25 +53,31 @@ export function TablePager({ page, total, onPageChange, disabled = false }: {
 }
 
 /** In-memory tables filter the entire currently loaded result, before pagination. */
-export function LocalDataTable<T>({ rows, searchable, children, label }: {
+export function LocalDataTable<T>({ rows, searchable, children, label, controls }: {
   rows: readonly T[]; searchable: (row: T) => string;
   children: (visible: T[]) => ReactNode; label: string;
+  controls?: { filter: string; page: number; onFilterChange: (filter: string) => void; onPageChange: (page: number) => void };
 }) {
   const { t } = useLocale();
-  const [filter, setFilter] = useState("");
-  const [page, setPage] = useState(0);
+  const [localFilter, setFilter] = useState("");
+  const [localPage, setPage] = useState(0);
+  const filter = controls?.filter ?? localFilter;
+  const page = controls?.page ?? localPage;
   const filtered = useMemo(() => filterRows(rows, filter, searchable), [rows, filter, searchable]);
   const current = boundedPage(page, filtered.length);
-  useEffect(() => { if (page !== current) setPage(current); }, [page, current]);
+  useEffect(() => { if (!controls && page !== current) setPage(current); }, [page, current, controls]);
   return <div className="space-y-2">
     <label className="flex max-w-md flex-col gap-1 text-xs text-muted-foreground">
       {t("Filter table")} — {label}
       <input type="search" value={filter} aria-label={t("Filter table") + " — " + label}
-        placeholder={t("Search table values")} onChange={event => { setFilter(event.target.value); setPage(0); }}
+        placeholder={t("Search table values")} onChange={event => {
+          if (controls) controls.onFilterChange(event.target.value);
+          else { setFilter(event.target.value); setPage(0); }
+        }}
         className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground" />
     </label>
     {children(pageRows(filtered, current))}
     {filtered.length === 0 && <p role="status" className="text-xs text-muted-foreground">{t("No rows match these filters.")}</p>}
-    <TablePager total={filtered.length} page={current} onPageChange={setPage} />
+    <TablePager total={filtered.length} page={current} onPageChange={controls?.onPageChange ?? setPage} />
   </div>;
 }
