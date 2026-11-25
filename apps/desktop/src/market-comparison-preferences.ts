@@ -44,9 +44,12 @@ export function parseComparisonPreferences(value: unknown): ComparisonPreference
   };
 }
 
-export function readComparisonPreferences() {
-  try { return parseComparisonPreferences(JSON.parse(localStorage.getItem(COMPARISON_KEY) ?? "null")); }
-  catch { return parseComparisonPreferences(null); }
+export function readComparisonPreferences(initialSource?: ComparisonSource) {
+  try {
+    const stored = localStorage.getItem(COMPARISON_KEY);
+    if (stored !== null) return parseComparisonPreferences(JSON.parse(stored));
+  } catch { /* Fall back only when storage is unavailable or invalid JSON. */ }
+  return parseComparisonPreferences({ sources: initialSource ? [initialSource] : [] });
 }
 
 export function saveComparisonPreferences(settings: ComparisonPreferences) {
