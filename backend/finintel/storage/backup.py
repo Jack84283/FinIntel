@@ -11,6 +11,7 @@ import re
 import sqlite3
 import tempfile
 import threading
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -38,7 +39,9 @@ def _validated(path: Path, *, version: bool = True) -> dict[str, object]:
     if not path.is_file() or path.is_symlink():
         raise StorageError("SQLite backup is missing or unsafe")
     try:
-        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=10) as conn:
+        with closing(
+            sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
+        ) as conn:
             if conn.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                 raise StorageError("SQLite backup failed integrity verification")
             actual = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -83,8 +86,11 @@ def _validated(path: Path, *, version: bool = True) -> dict[str, object]:
 
 def _copy_sqlite(source: Path, destination: Path) -> None:
     with (
-        sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True, timeout=30) as incoming,
-        sqlite3.connect(destination, timeout=30) as output,
+        closing(
+            sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+        ) as incoming,
+        closing(sqlite3.connect(destination, timeout=30)) as output,
+        output,
     ):
         incoming.backup(output, pages=1000, sleep=0.05)
 
@@ -168,7 +174,9 @@ def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, obje
     path = db if db is not None else database_path()
     backup = _resolve(path, identifier)
     try:
-        with sqlite3.connect(backup.resolve().as_uri() + "?mode=ro", uri=True, timeout=10) as conn:
+        with closing(
+            sqlite3.connect(backup.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
+        ) as conn:
             version = int(conn.execute("PRAGMA user_version").fetchone()[0])
             tables = {
                 row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -204,7 +212,7 @@ def inspect_backup(identifier: str, *, db: Path | None = None) -> dict[str, obje
 
 def _merge(staging: Path, source: Path) -> None:
     """Merge supported data; use source IDs only through mapping tables."""
-    with sqlite3.connect(staging, timeout=30) as dest:
+    with closing(sqlite3.connect(staging, timeout=30)) as dest:
         dest.execute("PRAGMA foreign_keys = ON")
         dest.execute("ATTACH DATABASE ? AS incoming", (str(source.resolve()),))
         try:

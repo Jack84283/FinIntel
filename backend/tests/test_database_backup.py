@@ -377,3 +377,24 @@ def test_invalid_mode_id_and_corruption_never_change_destination(tmp_path):
     with pytest.raises(StorageError):
         restore_backup(saved["id"], "replace", db=target)
     assert symbols(target) == {"AAPL": "100"}
+
+
+def test_snapshot_and_preview_close_handles_before_renaming_or_returning(tmp_path, monkeypatch):
+    path = tmp_path / "finintel.sqlite3"
+    seed(path, "AAPL", "90", "2026-10-20T00:00:00")
+    connect = sqlite3.connect
+    retained = []
+
+    def retain_connection(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        retained.append(connection)
+        return connection
+
+    # Keep references alive so garbage collection cannot hide a leaked handle.
+    monkeypatch.setattr(sqlite3, "connect", retain_connection)
+    snapshot = create_backup(db=path)
+    assert inspect_backup(snapshot["id"], db=path)["counts"]["instruments"] == 1
+    assert len(retained) == 4
+    for connection in retained:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")

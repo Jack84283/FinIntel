@@ -26,11 +26,22 @@ jobs:
         run: python -m pip install -e './backend[dev]'
       - name: Python lint
         run: |
-          ruff check backend scripts/preserve_local_data.py scripts/daily_acquisition_acceptance.py scripts/quality_acceptance.py scripts/issue29_private_evidence.py
-          ruff format --diff backend scripts/preserve_local_data.py scripts/daily_acquisition_acceptance.py scripts/quality_acceptance.py scripts/issue29_private_evidence.py
-          ruff format --check backend scripts/preserve_local_data.py scripts/daily_acquisition_acceptance.py scripts/quality_acceptance.py scripts/issue29_private_evidence.py
+          ruff check backend scripts/preserve_local_data.py scripts/daily_acquisition_acceptance.py scripts/quality_acceptance.py scripts/issue29_private_evidence.py scripts/al09_synthetic_acceptance.py
+          ruff format --diff backend scripts/preserve_local_data.py scripts/daily_acquisition_acceptance.py scripts/quality_acceptance.py scripts/issue29_private_evidence.py scripts/al09_synthetic_acceptance.py
+          ruff format --check backend scripts/preserve_local_data.py scripts/daily_acquisition_acceptance.py scripts/quality_acceptance.py scripts/issue29_private_evidence.py scripts/al09_synthetic_acceptance.py
       - name: Unit tests
         run: python -m pytest backend/tests -q
+      - name: Run AL-09 synthetic acceptance
+        id: al09
+        run: python scripts/al09_synthetic_acceptance.py --output artifacts/al09-synthetic-acceptance.json
+      - name: Archive AL-09 synthetic acceptance evidence
+        if: ${{ !cancelled() && steps.al09.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: finintel-al09-synthetic-acceptance
+          path: artifacts/al09-synthetic-acceptance.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Generate disposable Issue 29 acceptance evidence
         run: |
           mkdir -p artifacts
@@ -98,14 +109,8 @@ jobs:
         run: npm run build
       - name: Check native Rust shell
         run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
-      - name: Run native overlap Unicode unit tests
-        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel overlap_search_tests
-      - name: Run native model-job contract tests
-        run: |
-          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel model_jobs::tests
-          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel analysis_jobs::tests
-          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel backtest_jobs::tests
-          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel backtest_export::tests
+      - name: Run native contract, export and sidecar lifecycle tests
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --bin finintel
       - name: Package macOS app bundle
         if: runner.os == 'macOS'
         run: npm run tauri:build --workspace @finintel/desktop -- --bundles app

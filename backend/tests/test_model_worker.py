@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
 import subprocess
 import sys
 import time
+from contextlib import closing
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -18,7 +20,7 @@ from finintel import main as backend_main
 from finintel.market_data.analytics import AnalyticsError
 from finintel.models import analysis_job_api, job_api, job_worker, managed_analysis
 from finintel.models.analysis_job_api import ANALYSIS_JOBS_PATH
-from finintel.models.contracts import AnalysisRequest, DateRange, SourcePin
+from finintel.models.contracts import AnalysisRequest, AnalysisResult, DateRange, SourcePin
 from finintel.models.engine import evaluate_builtin_indicator
 from finintel.models.job_store import ModelJobLedger, ModelJobRequest, ModelJobStoreError
 from finintel.models.managed_approvals import MANAGED_ANALYSIS_REVISIONS
@@ -75,6 +77,31 @@ def seed_market(db):
             ],
         )
     conn.close()
+
+
+def _database_fingerprint(path):
+    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        dump = "\n".join(conn.iterdump()).encode()
+    return version, hashlib.sha256(dump).hexdigest()
+
+
+def _execute_isolated(identifier, attempt):
+    env = {key: value for key, value in os.environ.items() if key in job_worker.CHILD_ENV_KEYS}
+    env.update(
+        FININTEL_DB_PATH=os.environ["FININTEL_DB_PATH"],
+        FININTEL_MODEL_JOBS_DB_PATH=os.environ["FININTEL_MODEL_JOBS_DB_PATH"],
+        PYTHONPATH=str(Path(__file__).resolve().parents[1]),
+    )
+    worker = subprocess.run(
+        [sys.executable, "-m", "finintel.models.job_worker", "--child", identifier, str(attempt)],
+        stdin=subprocess.DEVNULL,
+        env=env,
+        capture_output=True,
+        timeout=90,
+        check=False,
+    )
+    assert worker.returncode == 0, "Isolated model worker failed"
 
 
 def request(snapshot):
@@ -689,6 +716,7 @@ def test_real_child_executes_each_approved_analysis_model(
                 "SELECT 'NDX',provider,session_date,close,retrieved_at,source_url "
                 "FROM index_daily_closes WHERE index_code='SP500'"
             )
+    before = _database_fingerprint(market)
     spec = analysis_request(model_id=model_id, codes=codes, parameters=parameters)
     ledger = ModelJobLedger(jobs)
     client = TestClient(backend_main.app, headers=MANAGED_HEADERS)
@@ -700,18 +728,14 @@ def test_real_child_executes_each_approved_analysis_model(
     assert list(claimed[1].sources) == list(spec.sources)
     assert all(claimed[1].parameters[key] == value for key, value in parameters.items())
 
-    completed = subprocess.run(
-        [sys.executable, "-m", "finintel.models.job_worker", "--child", identifier, "1"],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        timeout=40,
-        check=False,
-    )
-    assert completed.returncode == 0, "Isolated analysis worker failed"
+    _execute_isolated(identifier, 1)
     detail = client.get(f"{ANALYSIS_JOBS_PATH}/{identifier}?include_result=true")
     assert detail.status_code == 200
     finished = detail.json()
     assert finished["state"] == "completed"
+    result = AnalysisResult.model_validate_json(json.dumps(finished["result"]))
+    assert result.evidence.observed_sessions == tuple(START + timedelta(days=i) for i in range(35))
+    assert _database_fingerprint(market) == before
     assert finished["result"]["evidence"]["model"]["model_id"] == model_id
     assert [
         source["identity"]["code"] for source in finished["result"]["evidence"]["sources"]
@@ -1147,22 +1171,31 @@ def _verified_market_quality(market):
         )
 
 
-def _backtest_body(client, *, policy="require_complete"):
+def _backtest_body(client, *, policy="require_complete", isolated=False, sessions=None):
     from finintel.models.backtest import BACKTEST_REVISION, BacktestRequest
 
-    queued = client.post("/api/v1/models/jobs", json=job_api_body(quality_policy=policy))
+    dates = sessions or tuple(START + timedelta(days=i) for i in range(35))
+    queued = client.post(
+        "/api/v1/models/jobs",
+        json=job_api_body(
+            quality_policy=policy, start=dates[0].isoformat(), end=dates[-1].isoformat()
+        ),
+    )
     assert queued.status_code == 202, queued.json()
     source_id = queued.json()["id"]
     assert ModelJobLedger().claim_next()[0] == source_id
-    assert job_worker.run_child(source_id, 1) == 0
+    if isolated:
+        _execute_isolated(source_id, 1)
+    else:
+        assert job_worker.run_child(source_id, 1) == 0
     source = ModelJobLedger().get(source_id, include_result=True, legacy_only=True)
     research = source["result"]
     simulation = BacktestRequest(
         index_code="SP500",
         expected_snapshot_sha256=source["source_snapshot_sha256"],
-        training_end=START + timedelta(days=30),
-        test_start=START + timedelta(days=31),
-        test_end=START + timedelta(days=33),
+        training_end=dates[19] if sessions else dates[30],
+        test_start=dates[20] if sessions else dates[31],
+        test_end=dates[-1] if sessions else dates[33],
     )
     return source, {
         "contract_version": "backtest-job-request-v1",
@@ -1184,7 +1217,8 @@ def test_durable_backtest_uses_frozen_source_and_persists_exact_engine_report(lo
     seed_market(market)
     _verified_market_quality(market)
     client = TestClient(backend_main.app, headers=MANAGED_HEADERS)
-    source, body = _backtest_body(client)
+    before = _database_fingerprint(market)
+    source, body = _backtest_body(client, isolated=True)
     assert TestClient(backend_main.app).post(BACKTEST_JOBS_PATH, json=body).status_code == 403
     assert client.post(BACKTEST_JOBS_PATH, json={**body, "module": "/private/file"}).json() == {
         "detail": "invalid_input"
@@ -1204,14 +1238,7 @@ def test_durable_backtest_uses_frozen_source_and_persists_exact_engine_report(lo
     ledger = ModelJobLedger()
     _, _, attempt = ledger.claim_next()
     assert ledger.claim_next() is None
-    worker = subprocess.run(
-        [sys.executable, "-m", "finintel.models.job_worker", "--child", identifier, str(attempt)],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        timeout=40,
-        check=False,
-    )
-    assert worker.returncode == 0
+    _execute_isolated(identifier, attempt)
     detail = client.get(route, params={"include_result": "true"}).json()
     assert detail["state"] == "completed"
     result = detail["result"]
@@ -1222,6 +1249,11 @@ def test_durable_backtest_uses_frozen_source_and_persists_exact_engine_report(lo
     assert result["report"] == expected
     assert result["request_sha256"] == detail["request_sha256"]
     assert expected["transactions"][0]["signal_as_of_session"] == body["simulation"]["training_end"]
+
+    assert (
+        expected["transactions"][0]["hypothetical_fill_session"] == body["simulation"]["test_start"]
+    )
+    assert _database_fingerprint(market) == before
 
     with sqlite3.connect(market) as conn:
         conn.execute(
@@ -1390,3 +1422,149 @@ def test_backtest_fails_closed_on_source_writer_lock_contention(local_storage):
     assert job["error_code"] == "storage_unavailable"
     assert job["result"] is None
     assert client.post(f"{BACKTEST_JOBS_PATH}/{identifier}/retry").json()["request"] == body
+
+
+def test_al09_market_restore_preserves_separate_completed_ledger(local_storage, monkeypatch):
+    from finintel.storage import backup
+
+    market, jobs = local_storage
+    seed_market(market)
+    _verified_market_quality(market)
+    with TestClient(backend_main.app, headers=MANAGED_HEADERS) as client:
+        source, _ = _backtest_body(client, isolated=True)
+    original_market = _database_fingerprint(market)
+    original_ledger = _database_fingerprint(jobs)
+    snapshot = backup.create_backup(db=market)
+
+    # This shares the synthetic backup directory but has no destination database.
+    empty = market.with_name("empty.sqlite3")
+    backup.restore_backup(snapshot["id"], "replace", db=empty)
+    assert _database_fingerprint(empty) == original_market
+
+    with closing(sqlite3.connect(market)) as conn, conn:
+        conn.execute(
+            "UPDATE index_daily_closes SET close = '999' WHERE session_date = ?",
+            (START.isoformat(),),
+        )
+    revised_market = _database_fingerprint(market)
+    assert revised_market != original_market
+
+    real_copy = backup._copy_sqlite
+
+    def interrupt_first_destination_write(incoming, destination):
+        if destination == market and incoming.name == "incoming.sqlite3":
+            real_copy(incoming, destination)
+            raise OSError("synthetic interruption after destination write")
+        real_copy(incoming, destination)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(backup, "_copy_sqlite", interrupt_first_destination_write)
+        with pytest.raises(backup.StorageError, match="prior database was recovered"):
+            backup.restore_backup(snapshot["id"], "replace", db=market)
+    assert _database_fingerprint(market) == revised_market
+    backup.restore_backup(snapshot["id"], "replace", db=market)
+    assert _database_fingerprint(market) == original_market
+    assert _database_fingerprint(jobs) == original_ledger
+    reopened = ModelJobLedger(jobs).get(source["id"], include_result=True, legacy_only=True)
+    assert reopened["result"] == source["result"]
+
+
+def _seed_maximum_window(market, codes):
+    sessions = tuple(date(2017, 1, 2) + timedelta(days=i + i // 5 * 2) for i in range(2000))
+    with _write_connection(market) as conn:
+        conn.executemany(
+            "INSERT INTO index_daily_closes "
+            "(index_code,provider,session_date,close,retrieved_at,source_url) "
+            "VALUES (?,'fred',?,?,'2026-01-02T00:00:00+00:00',?)",
+            [
+                (
+                    code,
+                    session.isoformat(),
+                    str(1000 + index + i + (i % 13)),
+                    f"https://fred.stlouisfed.org/series/{code}",
+                )
+                for index, code in enumerate(codes)
+                for i, session in enumerate(sessions)
+            ],
+        )
+    conn.close()
+    _verified_market_quality(market)
+    return sessions
+
+
+@pytest.mark.parametrize(
+    ("model", "codes"),
+    [
+        ("builtin.relative_strength", ("NDX", "DJIA", "SP500", "NASDAQCOM")),
+        ("builtin.market_regime", ("SP500",)),
+    ],
+)
+def test_al09_maximum_observed_window(local_storage, model, codes):
+    market, jobs = local_storage
+    sessions = _seed_maximum_window(market, codes)
+    before = _database_fingerprint(market)
+    spec = AnalysisRequest(
+        model_id=model,
+        model_version="1.0.0",
+        window=DateRange(start=sessions[0], end=sessions[-1]),
+        sources=tuple(
+            SourcePin(
+                identity=next(
+                    identity for identity in PRICE_INDEX_SOURCES if identity.code == code
+                ),
+                snapshot_sha256=job_worker.source_snapshot_for_job(
+                    code=code,
+                    start=sessions[0],
+                    end=sessions[-1],
+                    quality_policy="require_complete",
+                ),
+            )
+            for code in codes
+        ),
+        parameters={},
+        quality_policy="require_complete",
+    )
+    with TestClient(backend_main.app, headers=MANAGED_HEADERS) as client:
+        queued = client.post(ANALYSIS_JOBS_PATH, json=analysis_api_body(spec))
+        assert queued.status_code == 202, queued.json()
+        identifier = queued.json()["id"]
+        assert ModelJobLedger(jobs).claim_next()[0] == identifier
+        _execute_isolated(identifier, 1)
+        detail = client.get(f"{ANALYSIS_JOBS_PATH}/{identifier}?include_result=true")
+        assert detail.status_code == 200
+    result = AnalysisResult.model_validate_json(json.dumps(detail.json()["result"]))
+    assert result.evidence.observed_sessions == sessions
+    assert [source.identity.code for source in result.evidence.sources] == list(codes)
+    assert not result.evidence.warnings
+    assert all(source.quality.status == "verified" for source in result.evidence.sources)
+    if model == "builtin.market_regime":
+        assert result.points[0]["volatility_state"] == "unknown"
+        assert result.points[-1]["volatility_state"] != "unknown"
+        assert result.points[-1]["volatility_calibration_count"] == 756
+    assert _database_fingerprint(market) == before
+
+
+def test_al09_maximum_backtest_source_window(local_storage):
+    from finintel.models.backtest_job_api import BACKTEST_JOBS_PATH
+
+    market, jobs = local_storage
+    sessions = _seed_maximum_window(market, ("SP500",))
+    before = _database_fingerprint(market)
+    with TestClient(backend_main.app, headers=MANAGED_HEADERS) as client:
+        source, body = _backtest_body(client, isolated=True, sessions=sessions)
+        assert source["result"]["observations"] == 2000
+        queued = client.post(BACKTEST_JOBS_PATH, json=body)
+        assert queued.status_code == 202, queued.json()
+        identifier = queued.json()["id"]
+        assert ModelJobLedger(jobs).claim_next()[0] == identifier
+        _execute_isolated(identifier, 1)
+        detail = client.get(f"{BACKTEST_JOBS_PATH}/{identifier}?include_result=true")
+        assert detail.status_code == 200
+    payload = detail.json()
+    assert payload["state"] == "completed"
+    assert payload["result"]["request_sha256"] == payload["request_sha256"]
+    report = payload["result"]["report"]
+    assert [point["session_date"] for point in report["rows"]] == [
+        session.isoformat() for session in sessions[20:]
+    ]
+    assert _database_fingerprint(market) == before
