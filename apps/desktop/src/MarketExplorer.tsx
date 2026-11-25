@@ -64,7 +64,7 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
   const { t } = useLocale();
   const notify = useNotify();
   const { active } = workspace;
-  const [historicalDetails, setHistoricalDetails] = useState(false);
+  const [historicalDetails, setHistoricalDetails] = useState(() => !workspace.comparing && !comparisonSourceFromSelection(workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!.selection));
   const comparing = !historicalDetails;
   const [comparison, setComparison] = useState(() => {
     const saved = readComparisonPreferences();
@@ -74,7 +74,7 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
   const [comparisonPickerOpen, setComparisonPickerOpen] = useState(false);
   const [comparisonNotice, setComparisonNotice] = useState("");
   useEffect(() => { saveComparisonPreferences(comparison); }, [comparison]);
-  useEffect(() => { if (comparing) onShowComparison(); }, [comparing]);
+  useEffect(() => { if (comparing && !workspace.comparing) onShowComparison(); }, [comparing, workspace.comparing, onShowComparison]);
   const { selection, view } = workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!;
   const { start, end, period, draftStart, draftEnd, sortColumn, descending, tableFilter, showSearch } = view;
   const update = (patch: Partial<MarketView>) => onUpdateView(active, patch);
