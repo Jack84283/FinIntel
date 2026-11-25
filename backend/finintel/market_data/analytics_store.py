@@ -19,6 +19,14 @@ from finintel.market_data.index_history import INDEX_SERIES
 from finintel.storage.db import StorageError, _read_connection, database_path
 
 
+class SeriesUnavailable(AnalyticsError):
+    """The exact source or its supported metadata are unavailable."""
+
+
+class SeriesLimitExceeded(AnalyticsError):
+    """The selected observations exceed the bounded read."""
+
+
 def _read_series(
     conn: sqlite3.Connection,
     *,
@@ -40,7 +48,7 @@ def _read_series(
             (code, provider),
         ).fetchone()
         if row is None or row["units"] != "index_points" or row["frequency"] != "daily":
-            raise AnalyticsError("Index return semantics or source metadata are unavailable")
+            raise SeriesUnavailable("Index return semantics or source metadata are unavailable")
         semantics = "volatility_index" if row["series_type"] == "volatility" else "price_index"
         identity = SeriesIdentity(
             kind, code, provider, semantics, semantics, "daily", "index_points"
@@ -64,7 +72,7 @@ def _read_series(
             (code, provider),
         ).fetchone()
         if row is None:
-            raise AnalyticsError("No supported raw daily equity series for this source")
+            raise SeriesUnavailable("No supported raw daily equity series for this source")
         identity = SeriesIdentity(
             kind,
             code,
@@ -85,7 +93,7 @@ def _read_series(
         raise AnalyticsError("Only index or equity source observations are supported")
     records = conn.execute(sql, args).fetchall()
     if len(records) > max_observations:
-        raise AnalyticsError(
+        raise SeriesLimitExceeded(
             f"Window exceeds {max_observations:,} observations; choose a shorter date range"
         )
     rows = [(record["session_date"], record["close"]) for record in records]

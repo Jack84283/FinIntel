@@ -1,6 +1,7 @@
 mod analysis_jobs;
 mod backtest_jobs;
 mod backtest_export;
+mod market_comparison;
 mod model_jobs;
 
 use std::sync::{atomic::{AtomicBool, AtomicU16, Ordering}, Mutex, OnceLock};
@@ -1528,6 +1529,7 @@ fn main() {
             market_instruments,
             market_instrument_directory,
             market_daily,
+            market_comparison::market_comparison,
             market_imports,
             market_imports_search,
             market_acquisition_status,

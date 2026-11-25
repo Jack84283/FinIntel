@@ -17,11 +17,11 @@ const RIGHT = 819;
 const TOP = 18;
 const BOTTOM = 213;
 
-function Legend({ labels }: { labels: readonly string[] }) {
+function Legend({ labels, indices }: { labels: readonly string[]; indices?: readonly number[] }) {
   return <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
     {labels.map((label, index) => <li key={label} className="flex items-center gap-2">
       <svg viewBox="0 0 28 8" width="28" height="8" aria-hidden="true">
-        <path d="M0 4H28" strokeWidth="2" strokeDasharray={DASHES[index]} className={COLORS[index]} />
+        <path d="M0 4H28" strokeWidth="2" strokeDasharray={DASHES[indices?.[index] ?? index]} className={COLORS[indices?.[index] ?? index]} />
       </svg>{label}
     </li>)}
   </ul>;
@@ -37,7 +37,7 @@ function DateLabels({ rows }: { rows: readonly Observation[] }) {
   </g>;
 }
 
-export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventField, markers, step, nonPositive, plotting }: {
+export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventField, markers, step, nonPositive, plotting, styleIndices }: {
   title: string;
   rows: readonly Observation[];
   columns: readonly ResultColumn[];
@@ -46,6 +46,7 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
   eventField?: string;
   step?: boolean;
   nonPositive?: boolean;
+  styleIndices?: readonly number[];
   plotting?: { convert: typeof chartNumber; omittedMessage: string };
   markers?: { dates: ReadonlySet<string>; label: string };
 }) {
@@ -109,7 +110,7 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
 
   return <figure className="min-w-0 space-y-2">
     <figcaption className="font-medium">{title} <span className="text-xs font-normal text-muted-foreground">· {unitLabel(unit, t)}</span></figcaption>
-    <Legend labels={columns.map(column => column.label)} />
+    <Legend labels={columns.map(column => column.label)} indices={styleIndices} />
     {omitted && <p className="text-xs text-muted-foreground">{t(plotting!.omittedMessage)}</p>}
     {markers && markers.dates.size > 0 && <p className="text-xs text-muted-foreground">{markers.label}</p>}
     {hasEvents && <p className="text-xs text-muted-foreground">{t("Triangles mark post-close crossover events.")}</p>}
@@ -122,11 +123,11 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
         </g>)}
         {zero && <path d={`M${LEFT},${y(0)}H${RIGHT}`} stroke="currentColor" opacity=".45" />}
         {paths.map(({ strokes, dots }, i) => <g key={columns[i].field.name} data-series={columns[i].field.name}>
-          {strokes && <path fill="none" strokeWidth="2" strokeDasharray={DASHES[i]} strokeLinejoin="round"
-            className={COLORS[i]} d={strokes}>
+          {strokes && <path fill="none" strokeWidth="2" strokeDasharray={DASHES[styleIndices?.[i] ?? i]} strokeLinejoin="round"
+            className={COLORS[styleIndices?.[i] ?? i]} d={strokes}>
             <title>{columns[i].label}</title>
           </path>}
-          {dots.map(dot => <circle key={dot.date} cx={dot.x} cy={dot.y} r="2.5" className={COLORS[i]} />)}
+          {dots.map(dot => <circle key={dot.date} cx={dot.x} cy={dot.y} r="2.5" className={COLORS[styleIndices?.[i] ?? i]} />)}
         </g>)}
         {markers && [...markers.dates].map(date => <path key={date} data-transaction-session={date}
           d={`M${x(date)},${TOP}V${BOTTOM}`} stroke="currentColor" strokeDasharray="1 4" opacity=".65">

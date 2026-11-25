@@ -15,6 +15,7 @@ from finintel.market_data.analytics_api import router as analytics_router
 from finintel.market_data.daily_status_api import router as daily_status_router
 from finintel.market_data.daily_status_api import start_scheduler, stop_scheduler
 from finintel.market_data.index_history_api import router as index_history_router
+from finintel.market_data.market_comparison_api import router as market_comparison_router
 from finintel.market_data.membership_api import router as membership_router
 from finintel.market_data.quality_api import router as quality_router
 from finintel.market_data.validation_api import router as validation_router
@@ -75,6 +76,7 @@ def health() -> HealthResponse:
 
 app.include_router(market_data_router)
 app.include_router(analytics_router)
+app.include_router(market_comparison_router)
 app.include_router(models_router)
 app.include_router(model_jobs_router)
 app.include_router(analysis_jobs_router)

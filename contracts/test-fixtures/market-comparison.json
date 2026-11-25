@@ -1,0 +1,135 @@
+{
+  "contract_version": "market-comparison-v1",
+  "calculation_revision": "market-comparison-decimal-v1",
+  "request": {
+    "contract_version": "market-comparison-v1",
+    "sources": [
+      {
+        "kind": "equity",
+        "code": "AAPL",
+        "provider": "tiingo"
+      },
+      {
+        "kind": "index",
+        "code": "SP500",
+        "provider": "fred"
+      }
+    ],
+    "start": "2024-01-02",
+    "end": "2024-01-09"
+  },
+  "baseline_date": "2024-01-03",
+  "last_common_date": "2024-01-08",
+  "shared_sessions": 2,
+  "sources": [
+    {
+      "key": "tiingo:AAPL",
+      "identity": {
+        "kind": "equity",
+        "code": "AAPL",
+        "provider": "tiingo"
+      },
+      "adjustment": "raw_unadjusted",
+      "return_semantics": "raw_unadjusted_equity_price_usd_per_share",
+      "frequency": "1d",
+      "units": "usd_per_share",
+      "snapshot_sha256": "a298467a64e8f883083626710cf2fab6e8e15b9e02b33fe71fd3b9fa32461ff6",
+      "first_date": "2024-01-02",
+      "latest_date": "2024-01-08",
+      "baseline_close": "100.00",
+      "common_end_close": "105",
+      "common_end_return_pct": "5",
+      "latest_close": "105",
+      "observations": 3,
+      "missing_sessions": 2,
+      "nonshared_sessions": 0
+    },
+    {
+      "key": "fred:SP500",
+      "identity": {
+        "kind": "index",
+        "code": "SP500",
+        "provider": "fred"
+      },
+      "adjustment": "price_index",
+      "return_semantics": "price_index",
+      "frequency": "daily",
+      "units": "index_points",
+      "snapshot_sha256": "0a9dee2ca690e63694f6c65b98285f998794d9f5f68fe83616d4d9d9388449ca",
+      "first_date": "2024-01-03",
+      "latest_date": "2024-01-09",
+      "baseline_close": "5000",
+      "common_end_close": "5200",
+      "common_end_return_pct": "4",
+      "latest_close": "5250",
+      "observations": 4,
+      "missing_sessions": 0,
+      "nonshared_sessions": 2
+    }
+  ],
+  "points": [
+    {
+      "session_date": "2024-01-03",
+      "values": [
+        {
+          "close": "100.00",
+          "normalized_100": "100",
+          "cumulative_return_pct": "0"
+        },
+        {
+          "close": "5000",
+          "normalized_100": "100",
+          "cumulative_return_pct": "0"
+        }
+      ]
+    },
+    {
+      "session_date": "2024-01-05",
+      "values": [
+        null,
+        {
+          "close": "5050",
+          "normalized_100": "101",
+          "cumulative_return_pct": "1"
+        }
+      ]
+    },
+    {
+      "session_date": "2024-01-08",
+      "values": [
+        {
+          "close": "105",
+          "normalized_100": "105",
+          "cumulative_return_pct": "5"
+        },
+        {
+          "close": "5200",
+          "normalized_100": "104",
+          "cumulative_return_pct": "4"
+        }
+      ]
+    },
+    {
+      "session_date": "2024-01-09",
+      "values": [
+        null,
+        {
+          "close": "5250",
+          "normalized_100": "105",
+          "cumulative_return_pct": "5"
+        }
+      ]
+    }
+  ],
+  "fingerprint_sha256": "d6ba767171e2f5814ac5679f175f9af3a7230ff632caefa97dc576107f123046",
+  "output_sha256": "6268bd781fc28eebd49b65a12778c20fe4b42a5bcb98653da9ea961bc4263ad4",
+  "warnings": [
+    "price_level_only",
+    "mixed_semantics",
+    "quality_unverified",
+    "coverage_gaps"
+  ],
+  "read_only": true,
+  "no_network": true,
+  "no_synthetic_sessions": true
+}

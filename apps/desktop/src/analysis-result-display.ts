@@ -23,13 +23,13 @@ const utcDay = (day: string) => Date.parse(day + "T00:00:00Z");
 export function fieldLabel(key: string, t: Translator): string {
   const translated = t(key);
   if (translated !== key) return translated;
-  if (Object.hasOwn(englishLabels, key)) return englishLabels[key];
+  if (Object.hasOwn(englishLabels, key)) return t(englishLabels[key]);
   return key.replaceAll("_", " ").replace(/\b(?:ema|sma|rsi|utc|var)\b/g,
     token => token === "var" ? "VaR" : token.toUpperCase()).replace(/^./, letter => letter.toUpperCase());
 }
 
 export function unitLabel(unit: string, t: Translator) {
-  return percentageUnits.has(unit) ? t("Percent") : fieldLabel(unit, t);
+  return (percentageUnits.has(unit) || unit === "percent_points") ? t("Percent") : fieldLabel(unit, t);
 }
 
 export function observedDate(day: string, language: string) {
@@ -78,7 +78,7 @@ export function formatCell(value: unknown, field: AnalysisOutputField, language:
   }
   const integer = BigInt(digits.slice(0, point)).toLocaleString(language);
   const magnitude = sign + integer + (fractionDigits ? separator + fractionDigits : "");
-  return magnitude + (isPercent ? "%" : "");
+  return magnitude + (isPercent || field.units === "percent_points" ? "%" : "");
 }
 
 export function datePosition(date: string, first: string, last: string): number {

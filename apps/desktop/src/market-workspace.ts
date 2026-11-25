@@ -27,6 +27,7 @@ export interface MarketTab {
 export interface MarketWorkspace {
   tabs: MarketTab[];
   active: string;
+  comparing?: true;
 }
 
 export function marketTabKey(selection: MarketSelection): string {
@@ -91,7 +92,8 @@ export function parseMarketWorkspace(value: unknown): MarketWorkspace {
     if (tabs.length === MARKET_TAB_LIMIT) break;
   }
   if (!tabs.length) tabs.push({ selection: DEFAULT_MARKET_SELECTION, view: parseView() });
-  return { tabs, active: typeof saved.active === "string" && keys.has(saved.active) ? saved.active : marketTabKey(tabs[0].selection) };
+  return { tabs, active: typeof saved.active === "string" && keys.has(saved.active) ? saved.active : marketTabKey(tabs[0].selection),
+    ...(saved.comparing === true ? { comparing: true } : {}) };
 }
 
 export function readMarketWorkspace(): MarketWorkspace {
@@ -114,7 +116,7 @@ export function openMarketTab(workspace: MarketWorkspace, requested: MarketSelec
   const selection = parseMarketSelection(requested);
   if (!selection) return workspace;
   const active = marketTabKey(selection);
-  if (workspace.tabs.some(tab => marketTabKey(tab.selection) === active)) return { ...workspace, active };
+  if (workspace.tabs.some(tab => marketTabKey(tab.selection) === active)) return { tabs: workspace.tabs, active };
   if (mode === "new" && workspace.tabs.length >= MARKET_TAB_LIMIT) return workspace;
   const tab: MarketTab = { selection, view: parseView() };
   const tabs: MarketTab[] = mode === "new" ? [...workspace.tabs, tab] : workspace.tabs.map(previous =>
@@ -129,5 +131,5 @@ export function closeMarketTab(workspace: MarketWorkspace, key: string): MarketW
   if (index < 0 || workspace.tabs.length < 2) return workspace;
   const tabs = workspace.tabs.filter(tab => marketTabKey(tab.selection) !== key);
   const active = workspace.active === key ? marketTabKey(tabs[Math.min(index, tabs.length - 1)].selection) : workspace.active;
-  return { tabs, active };
+  return { ...workspace, tabs, active };
 }

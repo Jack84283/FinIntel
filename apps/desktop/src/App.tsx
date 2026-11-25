@@ -140,9 +140,10 @@ export default function App() {
             limitReached={marketLimitReached}
             onChooseInstrument={chooseMarketInstrument}
             onUpdateView={updateMarketView}
+            onShowComparison={() => setMarketWorkspace(current => ({ ...current, comparing: true }))}
             onActivateTab={key => {
               setMarketLimitReached(false);
-              setMarketWorkspace(current => ({ ...current, active: key }));
+              setMarketWorkspace(current => ({ tabs: current.tabs, active: key }));
             }}
             onCloseTab={key => {
               setMarketLimitReached(false);
