@@ -84,7 +84,7 @@ export default function App() {
   }
 
   function openMarkets(selection?: MarketSelection) {
-    if (selection) chooseMarketInstrument(selection, "new");
+    if (selection) chooseMarketInstrument(selection, "current");
     setScreen("market");
   }
 
