@@ -28,6 +28,7 @@ export function MarketComparisonChart({ result, mode, hidden, onVisibility }: {
   const displayed = useMemo(() => columns.filter(column => !hidden.includes(column.field.name)), [columns, hidden]);
   const closeField = field("close", "price_level");
   return <div className="space-y-3">
+    {mode === "close" && <p className="text-xs text-muted-foreground">{t("Actual closes use USD per share for stocks and ETFs, and index points for indexes. Use returns for relative comparison.")}</p>}
     <fieldset className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
       <legend className="mb-1 text-xs font-medium text-muted-foreground">{t("Visible comparison series")}</legend>
       {columns.map(column => <label key={column.field.name} className="flex items-center gap-1.5">
@@ -50,12 +51,12 @@ export function MarketComparisonChart({ result, mode, hidden, onVisibility }: {
           <table className="w-full min-w-max text-right text-xs tabular-nums">
             <thead className="bg-muted text-muted-foreground">
               <tr><th scope="col" className="px-3 py-2 text-left">{t("Date")}</th>
-                {columns.map(column => <th key={column.field.name} scope="col" className="px-3 py-2">{column.label} · {t("Close")} / {title}</th>)}</tr>
+                {columns.map(column => <th key={column.field.name} scope="col" className="px-3 py-2">{column.label} · {mode === "close" ? title : `${t("Close")} / ${title}`}</th>)}</tr>
             </thead>
             <tbody>{visible.map(point => <tr key={point.session_date} className="border-t">
               <th scope="row" className="px-3 py-2 text-left font-medium">{point.session_date}</th>
               {point.values.map((value, i) => <td key={columns[i].field.name} className="px-3 py-2">
-                {value ? <><span className="text-muted-foreground">{formatCell(value.close, closeField, language, t)} / </span>
+                {value ? <>{mode !== "close" && <span className="text-muted-foreground">{formatCell(value.close, closeField, language, t)} / </span>}
                   {formatCell(value[mode], columns[i].field, language, t)}</> : t("Unavailable")}
               </td>)}
             </tr>)}</tbody>
