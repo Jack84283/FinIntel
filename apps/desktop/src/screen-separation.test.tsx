@@ -22,8 +22,8 @@ const marketProps = {
 describe("navigation between research and data operations", () => {
   it("shows SP500 as the initial Market selection", () => {
     const market = renderToStaticMarkup(<MarketExplorer {...marketProps} />);
-    expect(market).toContain("S&amp;P 500 (SP500)");
-    expect(market).toContain("Selected instrument");
+    expect(market).toContain("SP500");
+    expect(market).toContain("Select comparison instruments");
   });
 
   it("keeps the Market layout responsive on desktop widths", () => {
