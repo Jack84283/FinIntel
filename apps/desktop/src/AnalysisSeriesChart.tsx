@@ -116,9 +116,10 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
     {omitted && <p className="text-xs text-muted-foreground">{t(plotting!.omittedMessage)}</p>}
     {markers && markers.dates.size > 0 && <p className="text-xs text-muted-foreground">{markers.label}</p>}
     {hasEvents && <p className="text-xs text-muted-foreground">{t("Triangles mark post-close crossover events.")}</p>}
-    <div className="overflow-x-auto rounded-md border bg-muted/30 p-2">
+    <div className="relative overflow-x-auto rounded-md border bg-muted/30 p-2">
       <svg viewBox="0 0 840 250" role="img" aria-label={title + " · " + unitLabel(unit, t)}
         aria-describedby={descriptionId} preserveAspectRatio={expanded ? "none" : undefined} className={expanded ? "h-[65vh] min-h-[320px] w-full min-w-[460px]" : "h-auto w-full min-w-[460px]"}
+        data-comparison-chart={expanded ? "" : undefined}
         onPointerMove={event => {
           if (!expanded) return;
           const matrix = event.currentTarget.getScreenCTM();
@@ -165,6 +166,10 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
         })}
         <DateLabels rows={rows} />
       </svg>
+      {expanded && inspection && <div aria-hidden="true" className="pointer-events-none absolute right-4 top-4 grid max-w-[75%] gap-1 rounded-md border bg-background/95 p-3 text-xs tabular-nums shadow-sm">
+        <strong>{observedDate(selection.session_date, language)}</strong>
+        {inspection(index)}
+      </div>}
     </div>
     <p id={descriptionId} className="sr-only">{t("The observation table contains the exact values. Missing values leave gaps.")}</p>
     <label className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
