@@ -15,7 +15,7 @@ import type { MarketSelection } from "./market-selection";
 import { MarketTabs } from "./MarketTabs";
 import { MarketComparisonPanel } from "./MarketComparisonPanel";
 import { comparisonSource, comparisonSourceFromSelection, sourceKey, type ComparisonSource } from "./market-comparison-api";
-import { COMPARISON_LIMIT, readComparisonPreferences, saveComparisonPreferences } from "./market-comparison-preferences";
+import { COMPARISON_LIMIT, COMPARISON_TAB_LIMIT, readComparisonWorkspace, saveComparisonWorkspace, updateComparisonTab, addComparisonTab, closeComparisonTab, type ComparisonPreferences } from "./market-comparison-preferences";
 import { MARKET_TAB_LIMIT, marketTabKey, marketTabSymbol, parseMarketSelection, type MarketSort, type MarketView, type MarketWorkspace } from "./market-workspace";
 import { IndexLineChart, MarketCharts } from "./market-chart";
 import { TechnicalIndicatorsCard } from "./TechnicalIndicatorsCard";
@@ -68,10 +68,15 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
   const { active } = workspace;
   const [historicalDetails, setHistoricalDetails] = useState(() => !workspace.comparing && !comparisonSourceFromSelection(workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!.selection));
   const comparing = !historicalDetails;
-  const [comparison, setComparison] = useState(() => {
+  const [comparisonWorkspace, setComparisonWorkspace] = useState(() => {
     const source = comparisonSourceFromSelection(workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!.selection);
-    return readComparisonPreferences(workspace.comparing ? undefined : source);
+    return readComparisonWorkspace(workspace.comparing ? undefined : source);
   });
+  const comparison = comparisonWorkspace.tabs.find(tab => tab.id === comparisonWorkspace.active)!.settings;
+  const activeComparisonId = comparisonWorkspace.active;
+  const setComparison = (update: ComparisonPreferences | ((current: ComparisonPreferences) => ComparisonPreferences)) => {
+    setComparisonWorkspace(current => updateComparisonTab(current, activeComparisonId, update));
+  };
   const [comparisonPickerOpen, setComparisonPickerOpen] = useState(false);
   const [comparisonNotice, setComparisonNotice] = useState("");
   const [detailKey, setDetailKey] = useState("");
@@ -84,7 +89,7 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
     if (dialog && typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
     return () => { if (dialog?.open && typeof dialog.close === "function") dialog.close(); };
   }, [pendingComparisonSource]);
-  useEffect(() => { saveComparisonPreferences(comparison); }, [comparison]);
+  useEffect(() => { saveComparisonWorkspace(comparisonWorkspace); }, [comparisonWorkspace]);
   useEffect(() => { if (comparing && !workspace.comparing) onShowComparison(); }, [comparing, workspace.comparing, onShowComparison]);
   const { selection, view } = workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!;
   const { start, end, period, draftStart, draftEnd, sortColumn, descending, tableFilter, showSearch } = view;
@@ -442,9 +447,37 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
           </div>
         </div>
       </dialog>}
-      {comparing ? <div id={`${panelId}-comparison-panel`} role="region" aria-label={t("Compare local instruments")} className="min-w-0">
-        <MarketComparisonPanel settings={comparison} choices={comparisonChoices} directoryLoading={indexState === "loading"}
+      {comparing ? <div className="min-w-0 space-y-2">
+        <div className="flex min-w-0 items-center gap-1 border-b border-border">
+          <div role="tablist" aria-label={t("Comparison charts")} className="flex min-w-0 gap-1 overflow-x-auto">
+            {comparisonWorkspace.tabs.map((tab, index) => <div key={tab.id} className={`flex shrink-0 items-center rounded-t-md ${tab.id === activeComparisonId ? "bg-secondary" : ""}`}>
+              <Button type="button" role="tab" id={`${panelId}-${tab.id}`} aria-controls={`${panelId}-comparison-panel`}
+                aria-selected={tab.id === activeComparisonId} tabIndex={tab.id === activeComparisonId ? 0 : -1}
+                size="sm" variant="ghost" onClick={() => { setComparisonPickerOpen(false); setComparisonNotice(""); setDetailKey(""); setComparisonWorkspace(current => ({ ...current, active: tab.id })); }}
+                onKeyDown={event => {
+                  const tabs = comparisonWorkspace.tabs;
+                  const next = event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
+                  if (next < 0) return;
+                  event.preventDefault();
+                  setComparisonPickerOpen(false); setComparisonNotice(""); setDetailKey("");
+                  setComparisonWorkspace(current => ({ ...current, active: tabs[next].id }));
+                  document.getElementById(`${panelId}-${tabs[next].id}`)?.focus();
+                }}>
+                {t("Chart")} {tab.id.slice(6)}{tab.settings.sources.length > 0 && <span className="text-xs text-muted-foreground">{tab.settings.sources.map(source => source.code).join(" · ")}</span>}
+              </Button>
+              {comparisonWorkspace.tabs.length > 1 && <Button type="button" size="icon-sm" variant="ghost" aria-label={`${t("Close chart")} ${tab.id.slice(6)}`}
+                onClick={() => { setComparisonPickerOpen(false); setComparisonNotice(""); setDetailKey(""); setComparisonWorkspace(current => closeComparisonTab(current, tab.id)); }}>×</Button>}
+            </div>)}
+          </div>
+          <Button type="button" variant="ghost" size="icon-sm" className="shrink-0" disabled={comparisonWorkspace.tabs.length >= COMPARISON_TAB_LIMIT}
+            aria-label={t("Add chart tab")} title={t("Add chart tab")} onClick={() => {
+              setComparisonNotice(""); setDetailKey(""); setComparisonWorkspace(addComparisonTab); setComparisonPickerOpen(true);
+            }}>+</Button>
+        </div>
+        <div id={`${panelId}-comparison-panel`} role="tabpanel" aria-labelledby={`${panelId}-${activeComparisonId}`} className="min-w-0">
+        <MarketComparisonPanel key={activeComparisonId} settings={comparison} choices={comparisonChoices} directoryLoading={indexState === "loading"}
           directoryFailed={indexState === "error"} refreshRevision={reload} onChange={setComparison} pickerOpen={comparisonPickerOpen} onPickerOpen={setComparisonPickerOpen} names={comparisonNames} onOpenAcquisition={onOpenAcquisition} />
+        </div>
       </div> : <div id={panelId} role="tabpanel" aria-labelledby={`${panelId}-${active}`} className="min-w-0 space-y-2">
       {indexState === "loading" && <Card><CardContent><Skeleton className="h-8 w-64" aria-label={t("Loading local instruments")} /></CardContent></Card>}
       {indexState === "error" && <Card role="alert"><CardHeader><CardTitle>{t("Local database unavailable")}</CardTitle></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground"><p>{indexError || directoryError}</p><p>{t("Start the Python service on 127.0.0.1:8765 and try again.")}</p><Button onClick={() => setReload((value) => value + 1)} variant="secondary">{t("Retry")}</Button></CardContent></Card>}
