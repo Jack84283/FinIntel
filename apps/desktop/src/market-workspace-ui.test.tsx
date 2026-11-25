@@ -299,6 +299,19 @@ describe("Chart-first Market workspace", () => {
     expect(fetchMarketComparison).toHaveBeenLastCalledWith([{ kind: "index", code: "SP500", provider: "fred" }],
       expect.any(String), expect.any(String), expect.any(AbortSignal));
     expect(button("Select comparison instruments")).toBeTruthy();
+    expect(button("1D").disabled).toBe(true);
+    expect(button("Remove from comparison · SP500 · FRED").textContent).toBe("SP500 ×");
+  });
+
+  it("uses compact shared range shortcuts", async () => {
+    const sources = (comparisonFixture as ComparisonResult).request.sources;
+    localStorage.setItem(COMPARISON_KEY, JSON.stringify({ sources }));
+    await mountMarket();
+    for (const [label, start] of [["1W", "2024-03-08"], ["1M", "2024-02-15"], ["3M", "2023-12-15"], ["6M", "2023-09-15"], ["YTD", "2024-01-01"], ["1Y", "2023-03-15"], ["3Y", "2021-03-15"], ["5Y", "2019-03-15"], ["10Y", "2014-03-15"]]) {
+      await click(button(label));
+      expect(button(label).getAttribute("aria-pressed")).toBe("true");
+      expect(fetchMarketComparison).toHaveBeenLastCalledWith(sources, start, "2024-03-15", expect.any(AbortSignal));
+    }
   });
 
   it("batch-selects sources, cancels edits and shares the date range", async () => {
@@ -314,8 +327,8 @@ describe("Chart-first Market workspace", () => {
     await click(button("Apply selection", picker));
     const sources = [{ kind: "equity", code: "AAPL", provider: "tiingo" }, { kind: "index", code: "SP500", provider: "fred" }];
     expect(fetchMarketComparison).toHaveBeenCalledTimes(1);
-    const period = Array.from(host.querySelectorAll("select")).find(select => select.value === "1y")!;
-    await change(period, "5y");
+    expect(button("1Y").getAttribute("aria-pressed")).toBe("true");
+    await click(button("5Y"));
     expect(fetchMarketComparison).toHaveBeenLastCalledWith(sources, "2019-03-15", "2024-03-15", expect.any(AbortSignal));
     await click(button("Select comparison instruments"));
     picker = host.querySelector("dialog")!;
@@ -330,7 +343,7 @@ describe("Chart-first Market workspace", () => {
     await change(mode, "close");
     expect(fetchMarketComparison).toHaveBeenCalledTimes(2);
     expect(host.textContent).toContain("Actual close");
-    await change(period, "custom");
+    await click(button("Custom dates"));
     const dates = host.querySelectorAll<HTMLInputElement>('input[type="date"]');
     await change(dates[0], "2020-01-01");
     expect(fetchMarketComparison).toHaveBeenLastCalledWith(sources, "2020-01-01", "2024-03-15", expect.any(AbortSignal));
@@ -458,8 +471,8 @@ describe("Chart-first Market workspace", () => {
     await mountMarket();
     expect(host.querySelector("[data-market-tab]")).toBeNull();
     expect(readIndexHistory).not.toHaveBeenCalled();
-    const period = Array.from(host.querySelectorAll("select")).find(select => select.value === "custom")!;
-    await change(period, "5y");
+    expect(button("Custom dates").getAttribute("aria-pressed")).toBe("true");
+    await click(button("5Y"));
     expect(host.textContent).toContain("A selected source has no local history");
     await act(async () => old.resolve(comparison));
     expect(host.querySelector('[aria-label="Comparison summary"]')).toBeNull();
