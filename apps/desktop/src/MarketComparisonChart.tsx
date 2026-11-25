@@ -6,6 +6,7 @@ import { LocalDataTable } from "./components/TablePagination";
 import { useLocale } from "./localization";
 import type { ComparisonMode, ComparisonResult, ComparisonSource } from "./market-comparison-api";
 
+const INSPECTION_COLORS = ["text-blue-700 [html:not([data-theme=light])_&]:text-blue-300", "text-amber-700 [html:not([data-theme=light])_&]:text-amber-300", "text-teal-700 [html:not([data-theme=light])_&]:text-teal-300", "text-fuchsia-700 [html:not([data-theme=light])_&]:text-fuchsia-300"];
 const providers = { fred: "FRED", tiingo: "Tiingo", alpaca_sip: "Alpaca SIP", alpha_vantage: "Alpha Vantage" };
 export const comparisonLabel = (source: ComparisonSource) => `${source.code} · ${providers[source.provider]}`;
 const units = (mode: ComparisonMode) => mode === "close" ? "price_level" : mode === "normalized_100" ? "index_base_100" : "percent_points";
@@ -40,7 +41,7 @@ export function MarketComparisonChart({ result, mode, hidden, onVisibility }: {
       ? <AnalysisSeriesChart title={title} rows={rows} columns={displayed} styleIndices={displayed.map(column => columns.indexOf(column))} expanded
           inspection={index => result.sources.map((source, i) => {
             const value = result.points[index].values[i];
-            return <span key={source.key}>{comparisonLabel(source.identity)} · {t("Close")}: {value ? formatCell(value.close, closeField, language, t) : t("Unavailable")} {value ? (source.identity.kind === "index" ? "pts" : "USD") : ""} · {t("Cumulative price return")}: {value ? formatCell(value.cumulative_return_pct, field("return", "percent_points"), language, t) : t("Unavailable")}</span>;
+            return <span key={source.key}><strong className={INSPECTION_COLORS[i]}>{comparisonLabel(source.identity)}</strong> · {t("Close")}: {value ? formatCell(value.close, closeField, language, t) : t("Unavailable")} {value ? (source.identity.kind === "index" ? "pts" : "USD") : ""} · {t("Cumulative price return")}: {value ? formatCell(value.cumulative_return_pct, field("return", "percent_points"), language, t) : t("Unavailable")}</span>;
           })} />
       : <p role="status" className="text-sm text-muted-foreground">{t("Show a series to display the comparison chart.")}</p>}
     <details className="space-y-2">
