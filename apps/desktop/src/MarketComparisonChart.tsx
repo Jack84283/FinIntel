@@ -24,24 +24,24 @@ export function MarketComparisonChart({ result, mode, hidden, onVisibility }: {
     ...Object.fromEntries(result.sources.map(({ key }, i) => [key, point.values[i]?.[mode] ?? null])),
   })), [result, mode]);
   const columns: ResultColumn[] = useMemo(() => result.sources.map(source => ({
-    label: comparisonLabel(source.identity), field: field(source.key, units(mode)),
+    label: result.sources.filter(item => item.identity.code === source.identity.code).length > 1 ? comparisonLabel(source.identity) : source.identity.code, field: field(source.key, units(mode)),
   })), [result, mode]);
   const displayed = useMemo(() => columns.filter(column => !hidden.includes(column.field.name)), [columns, hidden]);
   const closeField = field("close", "price_level");
   return <div className="space-y-3">
     {mode === "close" && <p className="text-xs text-muted-foreground">{t("Actual closes use USD per share for stocks and ETFs, and index points for indexes. Use returns for relative comparison.")}</p>}
-    <fieldset className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-      <legend className="mb-1 text-xs font-medium text-muted-foreground">{t("Visible comparison series")}</legend>
+    <fieldset className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+      <legend className="sr-only">{t("Visible comparison series")}</legend>
       {columns.map(column => <label key={column.field.name} className="flex items-center gap-1.5">
         <input type="checkbox" checked={!hidden.includes(column.field.name)} onChange={() => onVisibility(column.field.name)}
-          className="accent-primary focus-visible:ring-2 focus-visible:ring-ring" />{column.label}
+          className="accent-primary focus-visible:ring-2 focus-visible:ring-ring" /><span className={INSPECTION_COLORS[columns.indexOf(column)]}>{column.label}</span>
       </label>)}
     </fieldset>
     {displayed.length > 0
-      ? <AnalysisSeriesChart title={title} rows={rows} columns={displayed} styleIndices={displayed.map(column => columns.indexOf(column))} expanded
+      ? <AnalysisSeriesChart title={title} rows={rows} columns={displayed} styleIndices={displayed.map(column => columns.indexOf(column))} expanded hideLegend
           inspection={index => result.sources.map((source, i) => {
             const value = result.points[index].values[i];
-            return <span key={source.key}><strong className={INSPECTION_COLORS[i]}>{comparisonLabel(source.identity)}</strong> · {t("Close")}: {value ? formatCell(value.close, closeField, language, t) : t("Unavailable")} {value ? (source.identity.kind === "index" ? "pts" : "USD") : ""} · {t("Cumulative price return")}: {value ? formatCell(value.cumulative_return_pct, field("return", "percent_points"), language, t) : t("Unavailable")}</span>;
+            return <span key={source.key}><strong className={INSPECTION_COLORS[i]}>{columns[i].label}</strong> · {t("Close")}: {value ? formatCell(value.close, closeField, language, t) : t("Unavailable")} {value ? (source.identity.kind === "index" ? "pts" : "USD") : ""} · {t("Cumulative price return")}: {value ? formatCell(value.cumulative_return_pct, field("return", "percent_points"), language, t) : t("Unavailable")}</span>;
           })} />
       : <p role="status" className="text-sm text-muted-foreground">{t("Show a series to display the comparison chart.")}</p>}
     <details className="space-y-2">
