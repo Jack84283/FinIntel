@@ -8,7 +8,7 @@ import type { ComparisonMode, ComparisonResult, ComparisonSource } from "./marke
 
 const providers = { fred: "FRED", tiingo: "Tiingo", alpaca_sip: "Alpaca SIP", alpha_vantage: "Alpha Vantage" };
 export const comparisonLabel = (source: ComparisonSource) => `${source.code} · ${providers[source.provider]}`;
-const units = (mode: ComparisonMode) => mode === "normalized_100" ? "index_base_100" : "percent_points";
+const units = (mode: ComparisonMode) => mode === "close" ? "price_level" : mode === "normalized_100" ? "index_base_100" : "percent_points";
 const field = (name: string, units: string): AnalysisOutputField => ({
   name, kind: "decimal", units, nullable: true, strictly_positive: false, allowed_values: [],
 });
@@ -17,7 +17,7 @@ export function MarketComparisonChart({ result, mode, hidden, onVisibility }: {
   result: ComparisonResult; mode: ComparisonMode; hidden: readonly string[]; onVisibility: (key: string) => void;
 }) {
   const { t, language } = useLocale();
-  const title = t(mode === "normalized_100" ? "Base 100" : "Cumulative price return");
+  const title = t(mode === "close" ? "Actual close" : mode === "normalized_100" ? "Base 100" : "Cumulative price return");
   const rows = useMemo(() => result.points.map(point => ({
     session_date: point.session_date,
     ...Object.fromEntries(result.sources.map(({ key }, i) => [key, point.values[i]?.[mode] ?? null])),
@@ -36,10 +36,15 @@ export function MarketComparisonChart({ result, mode, hidden, onVisibility }: {
       </label>)}
     </fieldset>
     {displayed.length > 0
-      ? <AnalysisSeriesChart title={title} rows={rows} columns={displayed} styleIndices={displayed.map(column => columns.indexOf(column))} />
+      ? <AnalysisSeriesChart title={title} rows={rows} columns={displayed} styleIndices={displayed.map(column => columns.indexOf(column))} expanded
+          inspection={index => result.sources.map((source, i) => {
+            const value = result.points[index].values[i];
+            return <span key={source.key}>{comparisonLabel(source.identity)} · {t("Close")}: {value ? formatCell(value.close, closeField, language, t) : t("Unavailable")} {value ? (source.identity.kind === "index" ? "pts" : "USD") : ""} · {t("Cumulative price return")}: {value ? formatCell(value.cumulative_return_pct, field("return", "percent_points"), language, t) : t("Unavailable")}</span>;
+          })} />
       : <p role="status" className="text-sm text-muted-foreground">{t("Show a series to display the comparison chart.")}</p>}
-    <section className="space-y-2" aria-label={t("Comparison observation table")}>
-      <h3 className="text-sm font-semibold">{t("Comparison observation table")}</h3>
+    <details className="space-y-2">
+      <summary className="cursor-pointer text-sm font-semibold">{t("Comparison observation table")}</summary>
+      <section className="space-y-2" aria-label={t("Comparison observation table")}>
       <LocalDataTable rows={result.points} label={t("Comparison observation table")} searchable={row => row.session_date}>
         {visible => <div className="overflow-x-auto rounded-md border">
           <table className="w-full min-w-max text-right text-xs tabular-nums">
@@ -58,5 +63,6 @@ export function MarketComparisonChart({ result, mode, hidden, onVisibility }: {
         </div>}
       </LocalDataTable>
     </section>
+    </details>
   </div>;
 }
