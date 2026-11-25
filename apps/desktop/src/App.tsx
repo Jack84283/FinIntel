@@ -9,8 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchBackendHealth } from "./api";
 import { MarketExplorer } from "./MarketExplorer";
-import { comparisonSourceFromSelection, sourceKey } from "./market-comparison-api";
-import { readComparisonPreferences, saveComparisonPreferences } from "./market-comparison-preferences";
+import { comparisonSourceFromSelection, sourceKey, type ComparisonSource } from "./market-comparison-api";
+import { COMPARISON_LIMIT, readComparisonPreferences, saveComparisonPreferences } from "./market-comparison-preferences";
 import { createHealthPoller, type HealthConnection } from "./health-poller";
 import { PreferencesPage } from "./PreferencesPage";
 import { ActionHistoryPage } from "./ActionHistoryPage";
@@ -59,6 +59,7 @@ export default function App() {
   const t = (key: string) => translate(language, key);
   const [marketWorkspace, setMarketWorkspace] = useState(readMarketWorkspace);
   const [marketLimitReached, setMarketLimitReached] = useState(false);
+  const [pendingComparisonSource, setPendingComparisonSource] = useState<ComparisonSource>();
   useEffect(() => { saveMarketWorkspace(marketWorkspace); }, [marketWorkspace]);
   const [connection, setConnection] = useState<HealthConnection>({ kind: "loading" });
   const poller = useRef<ReturnType<typeof createHealthPoller> | null>(null);
@@ -71,6 +72,7 @@ export default function App() {
   }, [screen]);
 
   const navigate = (next: Screen) => {
+    if (next !== "market") setPendingComparisonSource(undefined);
     if (next === "model-jobs") setOpenedAnalysisJob(undefined);
     setScreen(next);
   };
@@ -87,14 +89,16 @@ export default function App() {
 
   function openMarkets(selection?: MarketSelection) {
     if (selection) {
+      setPendingComparisonSource(undefined);
       const validated = parseMarketSelection(selection);
       if (validated) {
         const source = comparisonSourceFromSelection(validated);
         if (source) {
           const saved = readComparisonPreferences();
           const exists = saved.sources.some(item => sourceKey(item) === sourceKey(source));
-          saveComparisonPreferences({ ...saved, sources: exists ? saved.sources : [source],
-            hidden: exists ? saved.hidden.filter(key => key !== sourceKey(source)) : [] });
+          if (!exists && saved.sources.length >= COMPARISON_LIMIT) setPendingComparisonSource(source);
+          else saveComparisonPreferences({ ...saved, sources: exists ? saved.sources : [...saved.sources, source],
+            hidden: saved.hidden.filter(key => key !== sourceKey(source)) });
           setMarketWorkspace(current => ({ ...current, comparing: true }));
           setMarketLimitReached(false);
         } else {
@@ -153,6 +157,8 @@ export default function App() {
         </nav>
         {screen === "market" ? (
           <MarketExplorer
+            pendingComparisonSource={pendingComparisonSource}
+            onResolvePendingComparison={() => setPendingComparisonSource(undefined)}
             workspace={marketWorkspace}
             limitReached={marketLimitReached}
             onChooseInstrument={chooseMarketInstrument}
@@ -166,7 +172,7 @@ export default function App() {
               setMarketLimitReached(false);
               setMarketWorkspace(current => closeMarketTab(current, key));
             }}
-            onOpenAcquisition={() => setScreen("data-acquisition")}
+            onOpenAcquisition={() => { setPendingComparisonSource(undefined); setScreen("data-acquisition"); }}
           />
         ) : screen === "index-intelligence" ? (
           <IndexIntelligencePage onOpenAcquisition={() => setScreen("data-acquisition")}
