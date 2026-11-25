@@ -371,6 +371,8 @@ describe("Market comparison panel", () => {
     await click(button("Retry local query"));
     expect(host.querySelector('[aria-label="Comparison summary"]')).toBeTruthy();
     expect(fetchMarketComparison).toHaveBeenCalledTimes(3);
+    await click(button("Reload local data"));
+    expect(fetchMarketComparison).toHaveBeenCalledTimes(4);
   });
 
   it("localizes the comparison tab and source guidance", async () => {

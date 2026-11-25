@@ -27,11 +27,12 @@ const errors: Record<ComparisonError, string> = {
   invalid_response: "The comparison response could not be verified. Retry the local query.",
 };
 
-export function MarketComparisonPanel({ settings, choices, directoryLoading, directoryFailed, onChange, onAdd, onOpenAcquisition }: {
+export function MarketComparisonPanel({ settings, choices, directoryLoading, directoryFailed, refreshRevision, onChange, onAdd, onOpenAcquisition }: {
   settings: ComparisonPreferences;
   choices: ComparisonSource[];
   directoryLoading: boolean;
   directoryFailed: boolean;
+  refreshRevision: number;
   onChange: (settings: ComparisonPreferences) => void;
   onAdd: (source: ComparisonSource) => void;
   onOpenAcquisition: () => void;
@@ -43,7 +44,7 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
   const [draft, setDraft] = useState({ start, end });
   const [dateError, setDateError] = useState(false);
   const [retry, setRetry] = useState(0);
-  const request = useMemo(() => ({ sources, start, end, retry }), [sources, start, end, retry]);
+  const request = useMemo(() => ({ sources, start, end, retry, refreshRevision }), [sources, start, end, retry, refreshRevision]);
   const [state, setState] = useState<{ request: typeof request; result?: ComparisonResult; error?: ComparisonError }>();
   const current = state?.request === request ? state : undefined;
 
@@ -169,7 +170,7 @@ function ComparisonResultContent({ result, settings, onChange }: {
 }) {
   const { t } = useLocale();
   const { hidden, mode } = settings;
-  const headers = ["Instrument", "Stored window", "Baseline close", "Common endpoint close", "Comparable price return",
+  const headers = ["Instrument", "Comparable price return", "Stored window", "Baseline close", "Common endpoint close",
     "Latest source close", "Observations", "Missing dates", "Nonshared dates", "Price semantics"];
   return <Card className="gap-2 py-3">
     <CardContent className="space-y-3">
@@ -184,8 +185,8 @@ function ComparisonResultContent({ result, settings, onChange }: {
             <th scope="col" key={header} className={`px-3 py-2 ${i === 0 ? "text-left" : ""}`}>{t(header)}</th>)}</tr></thead>
           <tbody>{result.sources.map(source => <tr key={source.key} className="border-t">
             <th scope="row" className="px-3 py-2 text-left">{comparisonLabel(source.identity)}</th>
-            {[source.first_date + " – " + source.latest_date, source.baseline_close, source.common_end_close,
-              source.common_end_return_pct + "%", source.latest_close, source.observations, source.missing_sessions,
+            {[source.common_end_return_pct + "%", source.first_date + " – " + source.latest_date, source.baseline_close,
+              source.common_end_close, source.latest_close, source.observations, source.missing_sessions,
               source.nonshared_sessions, t(source.identity.kind === "index" ? "Price index · index points" : "Raw unadjusted price · USD per share")]
               .map((value, i) => <td key={headers[i + 1]} className="px-3 py-2">{value}</td>)}
           </tr>)}</tbody>

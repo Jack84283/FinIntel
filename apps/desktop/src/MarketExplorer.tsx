@@ -377,7 +377,7 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
       {comparisonNotice && <p role="status" className="px-1 text-xs text-muted-foreground">{t(comparisonNotice)}</p>}
       {comparing ? <div id={`${panelId}-comparison-panel`} role="tabpanel" aria-labelledby={`${panelId}-comparison`} className="min-w-0">
         <MarketComparisonPanel settings={comparison} choices={comparisonChoices} directoryLoading={indexState === "loading"}
-          directoryFailed={indexState === "error"} onChange={setComparison} onAdd={addComparison} onOpenAcquisition={onOpenAcquisition} />
+          directoryFailed={indexState === "error"} refreshRevision={reload} onChange={setComparison} onAdd={addComparison} onOpenAcquisition={onOpenAcquisition} />
       </div> : <div id={panelId} role="tabpanel" aria-labelledby={`${panelId}-${active}`} className="min-w-0 space-y-2">
       {indexState === "loading" && <Card><CardContent><Skeleton className="h-8 w-64" aria-label={t("Loading local instruments")} /></CardContent></Card>}
       {indexState === "error" && <Card role="alert"><CardHeader><CardTitle>{t("Local database unavailable")}</CardTitle></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground"><p>{indexError || directoryError}</p><p>{t("Start the Python service on 127.0.0.1:8765 and try again.")}</p><Button onClick={() => setReload((value) => value + 1)} variant="secondary">{t("Retry")}</Button></CardContent></Card>}
