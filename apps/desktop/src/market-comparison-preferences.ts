@@ -64,3 +64,64 @@ export function saveComparisonPreferences(settings: ComparisonPreferences) {
   try { localStorage.setItem(COMPARISON_KEY, JSON.stringify(settings)); }
   catch { /* The in-memory session is still usable. */ }
 }
+
+
+export const COMPARISON_TABS_KEY = "finintel.market-comparison-tabs.v1";
+export const COMPARISON_TAB_LIMIT = 8;
+export interface ComparisonTab {
+  id: string;
+  settings: ComparisonPreferences;
+}
+export interface ComparisonWorkspace {
+  active: string;
+  tabs: ComparisonTab[];
+  nextId: number;
+}
+
+export function readComparisonWorkspace(initialSource?: ComparisonSource): ComparisonWorkspace {
+  try {
+    const stored = JSON.parse(localStorage.getItem(COMPARISON_TABS_KEY) ?? "null");
+    if (stored && Array.isArray(stored.tabs)) {
+      const tabs: ComparisonTab[] = [];
+      for (const tab of stored.tabs) {
+        if (!tab || typeof tab.id !== "string" || !/^chart-[1-9][0-9]{0,8}$/.test(tab.id)
+          || tabs.some(item => item.id === tab.id)) continue;
+        tabs.push({ id: tab.id, settings: parseComparisonPreferences(tab.settings) });
+        if (tabs.length === COMPARISON_TAB_LIMIT) break;
+      }
+      if (tabs.length) return {
+        tabs, active: tabs.some(tab => tab.id === stored.active) ? stored.active : tabs[0].id,
+        nextId: Math.max(1, ...tabs.map(tab => Number(tab.id.slice(6)))) + 1,
+      };
+    }
+  } catch { /* Preserve compatibility with existing single-chart preferences. */ }
+  return { active: "chart-1", tabs: [{ id: "chart-1", settings: readComparisonPreferences(initialSource) }], nextId: 2 };
+}
+
+export function saveComparisonWorkspace(workspace: ComparisonWorkspace) {
+  try { localStorage.setItem(COMPARISON_TABS_KEY, JSON.stringify(workspace)); }
+  catch { /* In-memory session remains usable. */ }
+  const active = workspace.tabs.find(tab => tab.id === workspace.active);
+  if (active) saveComparisonPreferences(active.settings);
+}
+
+export function updateComparisonTab(workspace: ComparisonWorkspace, id: string,
+  update: ComparisonPreferences | ((current: ComparisonPreferences) => ComparisonPreferences)): ComparisonWorkspace {
+  return { ...workspace, tabs: workspace.tabs.map(tab => tab.id !== id ? tab : {
+    ...tab, settings: typeof update === "function" ? update(tab.settings) : update,
+  }) };
+}
+
+export function addComparisonTab(workspace: ComparisonWorkspace): ComparisonWorkspace {
+  if (workspace.tabs.length >= COMPARISON_TAB_LIMIT) return workspace;
+  const id = "chart-" + workspace.nextId;
+  return { active: id, nextId: workspace.nextId + 1,
+    tabs: [...workspace.tabs, { id, settings: parseComparisonPreferences(null) }] };
+}
+
+export function closeComparisonTab(workspace: ComparisonWorkspace, id: string): ComparisonWorkspace {
+  const index = workspace.tabs.findIndex(tab => tab.id === id);
+  if (index < 0 || workspace.tabs.length <= 1) return workspace;
+  const tabs = workspace.tabs.filter(tab => tab.id !== id);
+  return { ...workspace, tabs, active: workspace.active === id ? tabs[Math.min(index, tabs.length - 1)].id : workspace.active };
+}
