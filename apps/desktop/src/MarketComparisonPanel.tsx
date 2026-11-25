@@ -3,7 +3,7 @@ import { CalendarDays, Search } from "lucide-react";
 import { searchAcquirableSymbols } from "./symbol-catalog-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { MarketComparisonChart, comparisonLabel } from "./MarketComparisonChart";
+import { MarketComparisonChart, comparisonLabel, INSPECTION_COLORS } from "./MarketComparisonChart";
 import { useLocale } from "./localization";
 import { comparisonError, fetchMarketComparison, sourceKey, validComparisonWindow,
   type ComparisonError, type ComparisonResult, type ComparisonSource,
@@ -127,21 +127,25 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
   };
 
   return <div className="min-w-0 space-y-2">
-    <Card className="gap-2 py-3">
-      <CardContent className="space-y-3">
+    <Card className="gap-0 py-3">
+      <CardContent className="space-y-2">
         <div className="flex flex-wrap items-center gap-2" aria-label={t("Compare local instruments")}>
-          {sources.map(source => <Button key={sourceKey(source)} type="button" variant="outline" size="sm"
-            title={comparisonLabel(source)}
-            aria-label={`${t("Remove from comparison")} · ${comparisonLabel(source)}`}
-            onClick={() => onChange({ ...settings, sources: sources.filter(item => sourceKey(item) !== sourceKey(source)),
-              hidden: hidden.filter(key => key !== sourceKey(source)) })}>
-            {sources.filter(item => item.code === source.code).length > 1 ? comparisonLabel(source) : source.code} <span aria-hidden="true">×</span>
-          </Button>)}
+          {sources.map((source, index) => {
+            const key = sourceKey(source);
+            const visible = !hidden.includes(key);
+            const label = sources.filter(item => item.code === source.code).length > 1 ? comparisonLabel(source) : source.code;
+            return <div key={key} className="inline-flex h-8 items-center rounded-md border border-border bg-background">
+              <button type="button" aria-pressed={visible} aria-label={`${t("Visible comparison series")} · ${comparisonLabel(source)}`}
+                title={comparisonLabel(source)} onClick={() => onChange({ ...settings, hidden: visible ? [...hidden, key] : hidden.filter(item => item !== key) })}
+                className={`px-2 text-sm font-semibold focus-visible:ring-2 focus-visible:ring-ring ${INSPECTION_COLORS[index]} ${visible ? "" : "opacity-50 line-through"}`}>{label}</button>
+              <button type="button" aria-label={`${t("Remove from comparison")} · ${comparisonLabel(source)}`}
+                className="pr-2 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => onChange({ ...settings, sources: sources.filter(item => sourceKey(item) !== key), hidden: hidden.filter(item => item !== key) })}>×</button>
+            </div>;
+          })}
           <Button type="button" variant="outline" size="icon-sm" onClick={openPicker} aria-label={t("Select comparison instruments")} title={t("Select comparison instruments")}>
             <Search aria-hidden="true" />
           </Button>
-          {sources.length > 0 && <Button type="button" size="sm" variant="ghost" className="ml-auto text-xs"
-            onClick={() => onChange({ ...settings, sources: [], hidden: [] })}>{t("Clear comparison")}</Button>}
           {atLimit && <span role="status" className="sr-only">{t("Four comparison sources are selected.")}</span>}
         </div>
         {pickerOpen && <dialog ref={dialog} aria-label={t("Select comparison instruments")}
@@ -180,6 +184,7 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs text-muted-foreground">{pending.length} / {COMPARISON_LIMIT}</span>
               <div className="flex gap-2">
+                <Button type="button" variant="ghost" onClick={() => setPending([])}>{t("Clear comparison")}</Button>
                 <Button type="button" variant="outline" onClick={closePicker}>{t("Cancel")}</Button>
                 <Button type="button" onClick={() => {
                   onChange({ ...settings, sources: pending, hidden: hidden.filter(key => selected.has(key)) });
@@ -223,24 +228,21 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
           <Button type="button" variant="outline" size="sm" onClick={() => setRetry(value => value + 1)}>{t("Retry local query")}</Button>
           {current.error === "missing_history" && <Button type="button" size="sm" variant="ghost" onClick={onOpenAcquisition}>{t("Open Data Acquisition")}</Button>}
         </div>}
+        {current?.result && <ComparisonResultContent key={current.result.output_sha256} result={current.result} settings={settings} />}
       </CardContent>
     </Card>
-    {current?.result && <ComparisonResultContent key={current.result.output_sha256} result={current.result}
-      settings={settings} onChange={onChange} />}
   </div>;
 }
 
-function ComparisonResultContent({ result, settings, onChange }: {
-  result: ComparisonResult; settings: ComparisonPreferences; onChange: (settings: ComparisonPreferences) => void;
+function ComparisonResultContent({ result, settings }: {
+  result: ComparisonResult; settings: ComparisonPreferences;
 }) {
   const { t } = useLocale();
   const { hidden, mode } = settings;
   const headers = ["Instrument", "Comparable price return", "Stored window", "Baseline close", "Common endpoint close",
     "Latest source close", "Observations", "Missing dates", "Nonshared dates", "Price semantics"];
-  return <Card className="gap-2 py-3">
-    <CardContent className="space-y-3">
-      <MarketComparisonChart result={result} mode={mode} hidden={hidden} onVisibility={key => onChange({ ...settings,
-        hidden: hidden.includes(key) ? hidden.filter(item => item !== key) : [...hidden, key] })} />
+  return <div className="space-y-2" data-market-chart-content>
+      <MarketComparisonChart result={result} mode={mode} hidden={hidden} />
       <details className="space-y-2 text-xs text-muted-foreground">
         <summary className="cursor-pointer font-medium">{t("Data notes")}</summary>
         <p>{t(warnings.price_level_only)}</p>
@@ -276,6 +278,5 @@ function ComparisonResultContent({ result, settings, onChange }: {
             <dd>{source.snapshot_sha256}</dd></div>)}
         </dl>
       </details>
-    </CardContent>
-  </Card>;
+  </div>;
 }
