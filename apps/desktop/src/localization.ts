@@ -112,6 +112,11 @@ const translations = {
 
 const additionalChinese: Readonly<Record<string, string>> = {
   "Comparison": "对比",
+  "Actual close": "实际收盘值",
+  "Choose valid dates and one to four different sources.": "请选择有效日期和一到四个不同的数据源。",
+  "Select one or more local instruments.": "请选择一个或多个本地品种。",
+  "Historical price details": "历史价格详情",
+  "Price comparison": "价格对比",
   "Compare local instruments": "对比本地品种",
   "Select comparison instruments": "选择对比品种",
   "Apply selection": "应用选择",
