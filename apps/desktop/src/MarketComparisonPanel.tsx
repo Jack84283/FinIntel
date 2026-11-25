@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Plus } from "lucide-react";
+import { searchAcquirableSymbols } from "./symbol-catalog-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MarketComparisonChart, comparisonLabel } from "./MarketComparisonChart";
@@ -27,20 +29,31 @@ const errors: Record<ComparisonError, string> = {
   invalid_response: "The comparison response could not be verified. Retry the local query.",
 };
 
-export function MarketComparisonPanel({ settings, choices, directoryLoading, directoryFailed, refreshRevision, onChange, onAdd, onOpenAcquisition }: {
+export function MarketComparisonPanel({ settings, choices, directoryLoading, directoryFailed, refreshRevision, onChange, pickerOpen, onPickerOpen, names, onOpenAcquisition }: {
   settings: ComparisonPreferences;
   choices: ComparisonSource[];
   directoryLoading: boolean;
   directoryFailed: boolean;
   refreshRevision: number;
   onChange: (settings: ComparisonPreferences) => void;
-  onAdd: (source: ComparisonSource) => void;
+  pickerOpen: boolean;
+  onPickerOpen: (open: boolean) => void;
+  names: Record<string, string>;
   onOpenAcquisition: () => void;
 }) {
   const { t } = useLocale();
   const { sources, start, end, period, mode, hidden } = settings;
   const [query, setQuery] = useState("");
-  const [candidate, setCandidate] = useState("");
+  const [pending, setPending] = useState<ComparisonSource[]>(sources);
+  const [matches, setMatches] = useState<Record<string, string>>({});
+  const [wasOpen, setWasOpen] = useState(false);
+  if (wasOpen !== pickerOpen) {
+    setWasOpen(pickerOpen);
+    if (pickerOpen) { setPending(sources); setQuery(""); setMatches({}); }
+  }
+  const dialog = useRef<HTMLDialogElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState({ start, end });
   const [dateError, setDateError] = useState(false);
   const [retry, setRetry] = useState(0);
@@ -57,13 +70,50 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
     return () => abort.abort();
   }, [request]);
 
-  const selected = new Set(sources.map(sourceKey));
-  const options = choices.filter(source => !selected.has(sourceKey(source))
-    && comparisonLabel(source).toLowerCase().includes(query.trim().toLowerCase()));
+  useEffect(() => {
+    if (!pickerOpen) return;
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const node = dialog.current;
+    if (node && typeof node.showModal === "function" && !node.open) node.showModal();
+    searchInput.current?.focus();
+    return () => {
+      if (node?.open && typeof node.close === "function") node.close();
+      opener.current?.focus();
+    };
+  }, [pickerOpen]);
+
+  useEffect(() => {
+    if (!pickerOpen || !query.trim()) return;
+    let active = true;
+    const timer = setTimeout(() => {
+      void searchAcquirableSymbols(query.trim(), "All", 100).then(result => {
+        if (active) setMatches(Object.fromEntries(result.results.map(item => [item.symbol, item.name])));
+      }).catch(() => { /* Symbol/provider search remains available offline. */ });
+    }, 150);
+    return () => { active = false; clearTimeout(timer); };
+  }, [pickerOpen, query]);
+
+  function openPicker() {
+    onPickerOpen(true);
+  }
+  function closePicker() {
+    onPickerOpen(false);
+  }
+
+  // Mount a fresh draft each time the parent opens the picker.
+  const selected = new Set(pending.map(sourceKey));
+  const q = query.trim().toLowerCase();
+  const options = choices.filter(source => [comparisonLabel(source), names[source.code], matches[source.code]]
+    .some(value => value?.toLowerCase().includes(q)));
   const additions = options.slice(0, 100);
-  const addSource = additions.find(source => sourceKey(source) === candidate);
-  const atLimit = sources.length === COMPARISON_LIMIT;
+  const atLimit = sources.length >= COMPARISON_LIMIT;
   const showVix = query.trim().toUpperCase() === "VIX";
+  const changeDraft = (next: { start: string; end: string }) => {
+    setDraft(next);
+    const valid = validComparisonWindow(next.start, next.end);
+    setDateError(!valid);
+    if (valid && (next.start !== start || next.end !== end)) onChange({ ...settings, ...next, period: "custom" });
+  };
   const pickPeriod = (period: ComparisonPeriod) => {
     setDateError(false);
     if (period === "custom") {
@@ -91,31 +141,56 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
               hidden: hidden.filter(key => key !== sourceKey(source)) })}>
             {comparisonLabel(source)} <span aria-hidden="true">×</span>
           </Button>)}
-        </div>
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="grid gap-1 text-xs text-muted-foreground">{t("Search local instruments")}
-            <input type="search" value={query} onChange={event => { setQuery(event.target.value); setCandidate(""); }}
-              maxLength={80} className="h-8 rounded-md border border-input bg-background px-2 text-foreground" />
-          </label>
-          <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">{t("Local comparison source")}
-            <select value={addSource ? candidate : ""} onChange={event => setCandidate(event.target.value)}
-              className="h-8 max-w-full rounded-md border border-input bg-background px-2 text-foreground">
-              <option value="">{t("Select a local instrument")}</option>
-              {additions.map(source => <option key={sourceKey(source)} value={sourceKey(source)}>{comparisonLabel(source)}</option>)}
-            </select>
-          </label>
-          <Button type="button" size="sm" disabled={!addSource || atLimit} onClick={() => {
-            if (addSource) onAdd(addSource);
-            setCandidate("");
-            setQuery("");
-          }}>{t("Add to comparison")}</Button>
+          <Button type="button" variant="outline" size="sm" onClick={openPicker}>
+            <Plus aria-hidden="true" /> {t("Add to comparison")}
+          </Button>
           {atLimit && <span role="status" className="text-xs text-muted-foreground">{t("Four comparison sources are selected.")}</span>}
         </div>
-        {directoryLoading && <p role="status" className="text-xs text-muted-foreground">{t("Loading local instruments")}</p>}
-        {!directoryLoading && (directoryFailed || !choices.length || showVix || !additions.length || options.length > additions.length) &&
-          <p role="status" className="text-xs text-muted-foreground">{t(directoryFailed ? errors.backend_unavailable
-            : showVix ? errors.unsupported_vix : !choices.length ? "No stored market data yet"
-              : !additions.length ? "No matching local comparison sources." : "Refine the search to see more local sources.")}</p>}
+        {pickerOpen && <dialog ref={dialog} aria-label={t("Select comparison instruments")}
+          className="fixed inset-0 m-auto max-h-[85vh] w-[min(36rem,90vw)] overflow-auto rounded-lg border bg-background p-4 text-foreground shadow-xl backdrop:bg-black/50"
+          onCancel={event => { event.preventDefault(); closePicker(); }}
+          onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); closePicker(); } }}>
+          <div className="space-y-3">
+            <h3 className="text-base font-semibold">{t("Select comparison instruments")}</h3>
+            <label className="grid gap-1 text-sm">{t("Search local instruments")}
+              <input ref={searchInput} type="search" value={query} maxLength={80}
+                onChange={event => { setQuery(event.target.value); setMatches({}); }}
+                className="h-9 rounded-md border border-input bg-background px-2" />
+            </label>
+            <div className="flex flex-wrap gap-1">
+              {pending.map(source => <Button key={sourceKey(source)} type="button" size="sm" variant="outline"
+                onClick={() => setPending(items => items.filter(item => sourceKey(item) !== sourceKey(source)))}>
+                {comparisonLabel(source)} ×
+              </Button>)}
+            </div>
+            <div className="max-h-72 overflow-y-auto rounded-md border">
+              {additions.map(source => <label key={sourceKey(source)} className="flex items-center gap-2 border-b px-3 py-2 text-sm last:border-b-0">
+                <input type="checkbox" value={sourceKey(source)} checked={selected.has(sourceKey(source))}
+                  disabled={!selected.has(sourceKey(source)) && pending.length >= COMPARISON_LIMIT}
+                  onChange={event => setPending(items => event.target.checked
+                    ? items.length < COMPARISON_LIMIT && !items.some(item => sourceKey(item) === sourceKey(source)) ? [...items, source] : items
+                    : items.filter(item => sourceKey(item) !== sourceKey(source)))} />
+                <span>{comparisonLabel(source)}</span>
+                <span className="text-xs text-muted-foreground">{names[source.code] || matches[source.code]}</span>
+              </label>)}
+            </div>
+            {directoryLoading && <p role="status" className="text-xs text-muted-foreground">{t("Loading local instruments")}</p>}
+            {!directoryLoading && (directoryFailed || !choices.length || showVix || !additions.length || options.length > additions.length) &&
+              <p role="status" className="text-xs text-muted-foreground">{t(directoryFailed ? errors.backend_unavailable
+                : showVix ? errors.unsupported_vix : !choices.length ? "No stored market data yet"
+                  : !additions.length ? "No matching local comparison sources." : "Refine the search to see more local sources.")}</p>}
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">{pending.length} / {COMPARISON_LIMIT}</span>
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" onClick={closePicker}>{t("Cancel")}</Button>
+                <Button type="button" onClick={() => {
+                  onChange({ ...settings, sources: pending, hidden: hidden.filter(key => selected.has(key)) });
+                  closePicker();
+                }}>{t("Apply selection")}</Button>
+              </div>
+            </div>
+          </div>
+        </dialog>}
         <div className="flex flex-wrap items-end gap-2">
           <label className="grid gap-1 text-xs text-muted-foreground">{t("Comparison period")}
             <select value={period} onChange={event => pickPeriod(event.target.value as ComparisonPeriod)}
@@ -124,22 +199,16 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
               <option value="10y">{t("Last 10 years")}</option><option value="custom">{t("Custom dates")}</option>
             </select>
           </label>
-          {period === "custom" && <form className="flex flex-wrap items-end gap-2" onSubmit={event => {
-            event.preventDefault();
-            if (!validComparisonWindow(draft.start, draft.end)) { setDateError(true); return; }
-            setDateError(false);
-            onChange({ ...settings, ...draft });
-          }}>
+          {period === "custom" && <div className="flex flex-wrap items-end gap-2">
             <label className="grid gap-1 text-xs text-muted-foreground">{t("Start date")}
-              <input type="date" required value={draft.start} onChange={event => setDraft({ ...draft, start: event.target.value })}
+              <input type="date" required value={draft.start} onChange={event => changeDraft({ ...draft, start: event.target.value })}
                 className="h-8 rounded-md border border-input bg-background px-2 text-foreground" />
             </label>
             <label className="grid gap-1 text-xs text-muted-foreground">{t("End date")}
-              <input type="date" required value={draft.end} onChange={event => setDraft({ ...draft, end: event.target.value })}
+              <input type="date" required value={draft.end} onChange={event => changeDraft({ ...draft, end: event.target.value })}
                 className="h-8 rounded-md border border-input bg-background px-2 text-foreground" />
             </label>
-            <Button size="sm" type="submit" variant="outline">{t("Apply range")}</Button>
-          </form>}
+          </div>}
           <label className="grid gap-1 text-xs text-muted-foreground">{t("Comparison display")}
             <select value={mode} onChange={event => onChange({ ...settings, mode: event.target.value === "cumulative_return_pct"
               ? "cumulative_return_pct" : "normalized_100" })}

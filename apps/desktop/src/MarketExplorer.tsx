@@ -65,6 +65,7 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
   const notify = useNotify();
   const { active, comparing } = workspace;
   const [comparison, setComparison] = useState(readComparisonPreferences);
+  const [comparisonPickerOpen, setComparisonPickerOpen] = useState(false);
   const [comparisonNotice, setComparisonNotice] = useState("");
   useEffect(() => { saveComparisonPreferences(comparison); }, [comparison]);
   const { selection, view } = workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!;
@@ -235,6 +236,8 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
     return [...choices.values()];
   }, [indexCatalog, instruments]);
 
+  const comparisonNames = useMemo(() => ({ ...instrumentNames, ...Object.fromEntries(indexCatalog.map(item => [item.code, item.name])) }), [instrumentNames, indexCatalog]);
+
   function addComparison(source: ComparisonSource) {
     if (comparison.sources.some(item => sourceKey(item) === sourceKey(source))) {
       setComparisonNotice("");
@@ -261,11 +264,11 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
   }
 
   function addInstrument() {
+    if (comparing) { setComparisonPickerOpen(true); return; }
     if (workspace.tabs.length >= MARKET_TAB_LIMIT) {
       setPickerNotice(true);
       return;
     }
-    if (comparing) onActivateTab(active);
     setInstrumentQuery("");
     setPendingInstrument(null);
     setActiveSuggestion(-1);
@@ -363,7 +366,7 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
         </>}
       />
       <MarketTabs workspace={workspace} panelId={panelId} onCompare={() => { setComparisonNotice(""); onShowComparison(); }}
-        onActivate={key => { setPickerNotice(false); setComparisonNotice(""); onActivateTab(key); }}
+        onActivate={key => { setComparisonPickerOpen(false); setPickerNotice(false); setComparisonNotice(""); onActivateTab(key); }}
         onClose={key => { setPickerNotice(false); onCloseTab(key); }} onAdd={addInstrument} describe={tab => {
           const item = tab.selection;
           if (item.kind === "index") {
@@ -377,7 +380,7 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
       {comparisonNotice && <p role="status" className="px-1 text-xs text-muted-foreground">{t(comparisonNotice)}</p>}
       {comparing ? <div id={`${panelId}-comparison-panel`} role="tabpanel" aria-labelledby={`${panelId}-comparison`} className="min-w-0">
         <MarketComparisonPanel settings={comparison} choices={comparisonChoices} directoryLoading={indexState === "loading"}
-          directoryFailed={indexState === "error"} refreshRevision={reload} onChange={setComparison} onAdd={addComparison} onOpenAcquisition={onOpenAcquisition} />
+          directoryFailed={indexState === "error"} refreshRevision={reload} onChange={setComparison} pickerOpen={comparisonPickerOpen} onPickerOpen={setComparisonPickerOpen} names={comparisonNames} onOpenAcquisition={onOpenAcquisition} />
       </div> : <div id={panelId} role="tabpanel" aria-labelledby={`${panelId}-${active}`} className="min-w-0 space-y-2">
       {indexState === "loading" && <Card><CardContent><Skeleton className="h-8 w-64" aria-label={t("Loading local instruments")} /></CardContent></Card>}
       {indexState === "error" && <Card role="alert"><CardHeader><CardTitle>{t("Local database unavailable")}</CardTitle></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground"><p>{indexError || directoryError}</p><p>{t("Start the Python service on 127.0.0.1:8765 and try again.")}</p><Button onClick={() => setReload((value) => value + 1)} variant="secondary">{t("Retry")}</Button></CardContent></Card>}

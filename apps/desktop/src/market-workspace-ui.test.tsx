@@ -291,9 +291,11 @@ describe("Market comparison panel", () => {
   const comparison = comparisonFixture as ComparisonResult;
 
   async function addSource(key: string) {
-    const picker = host.querySelector<HTMLSelectElement>('select')!;
-    await change(picker, key);
-    await click(button("Add to comparison"));
+    await click(button("Select comparison instruments"));
+    const picker = host.querySelector("dialog")!;
+    const check = Array.from(picker.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).find(input => input.value === key)!;
+    await act(async () => check.click());
+    await click(button("Apply selection", picker));
   }
 
   function saveSources() {
@@ -346,12 +348,41 @@ describe("Market comparison panel", () => {
     await addSource("tiingo:NVDA");
     await addSource("alpha_vantage:AAPL");
     expect(host.textContent).toContain("Four comparison sources are selected.");
-    expect(button("Add to comparison").disabled).toBe(true);
+    await click(button("Select comparison instruments"));
+    expect(host.querySelector<HTMLInputElement>('dialog input[value="tiingo:MSFT"]')?.disabled).toBe(true);
+    await click(button("Cancel", host.querySelector("dialog")!));
     await click(button("Remove from comparison · AAPL · Alpha Vantage"));
     expect(host.textContent).not.toContain("Four comparison sources are selected.");
     await click(button("Clear comparison"));
     expect(host.textContent).toContain("Select at least two local instruments");
     expect(tab("fred:SP500")).toBeTruthy();
+  });
+
+  it("selects multiple instruments in one popup and applies a shared range automatically", async () => {
+    await mountMarket();
+    await click(tab("comparison"));
+    await click(button("Select comparison instruments"));
+    let picker = host.querySelector("dialog")!;
+    for (const key of ["tiingo:AAPL", "tiingo:NVDA"]) {
+      const check = picker.querySelector<HTMLInputElement>('input[value="' + key + '"]')!;
+      await act(async () => check.click());
+    }
+    await click(button("Apply selection", picker));
+    expect(fetchMarketComparison).toHaveBeenCalledTimes(1);
+    const sources = [{ kind: "equity", code: "AAPL", provider: "tiingo" }, { kind: "equity", code: "NVDA", provider: "tiingo" }];
+    const period = Array.from(host.querySelectorAll("select")).find(select => select.value === "1y")!;
+    await change(period, "5y");
+    expect(fetchMarketComparison).toHaveBeenLastCalledWith(sources, "2019-03-15", "2024-03-15", expect.any(AbortSignal));
+    await click(button("Select comparison instruments"));
+    picker = host.querySelector("dialog")!;
+    const check = picker.querySelector<HTMLInputElement>('input[value="tiingo:MSFT"]')!;
+    await act(async () => check.click());
+    await click(button("Cancel", picker));
+    expect(fetchMarketComparison).toHaveBeenCalledTimes(2);
+    await change(period, "custom");
+    const dates = host.querySelectorAll<HTMLInputElement>('input[type="date"]');
+    await change(dates[0], "2020-01-01");
+    expect(fetchMarketComparison).toHaveBeenLastCalledWith(sources, "2020-01-01", "2024-03-15", expect.any(AbortSignal));
   });
 
   it("restores a comparison, rejects late results and retries a safe error", async () => {
