@@ -51,7 +51,9 @@ type HistoryResult =
   | { kind: "equity"; data: DailySeries }
   | { kind: "error" };
 
-export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowComparison, onCloseTab, onChooseInstrument, onUpdateView, onOpenAcquisition }: {
+export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowComparison, onCloseTab, onChooseInstrument, onUpdateView, onOpenAcquisition, pendingComparisonSource, onResolvePendingComparison }: {
+  pendingComparisonSource?: ComparisonSource;
+  onResolvePendingComparison?: () => void;
   workspace: MarketWorkspace;
   limitReached: boolean;
   onActivateTab: (key: string) => void;
@@ -73,6 +75,15 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
   const [comparisonPickerOpen, setComparisonPickerOpen] = useState(false);
   const [comparisonNotice, setComparisonNotice] = useState("");
   const [detailKey, setDetailKey] = useState("");
+  const [replacementKey, setReplacementKey] = useState("");
+  const replacementDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    setReplacementKey("");
+    if (!pendingComparisonSource) return;
+    const dialog = replacementDialog.current;
+    if (dialog && typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
+    return () => { if (dialog?.open && typeof dialog.close === "function") dialog.close(); };
+  }, [pendingComparisonSource]);
   useEffect(() => { saveComparisonPreferences(comparison); }, [comparison]);
   useEffect(() => { if (comparing && !workspace.comparing) onShowComparison(); }, [comparing, workspace.comparing, onShowComparison]);
   const { selection, view } = workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!;
@@ -280,7 +291,7 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
       const key = marketTabKey(target);
       if (workspace.tabs.some(tab => marketTabKey(tab.selection) === key)) onActivateTab(key);
       else if (workspace.tabs.length < MARKET_TAB_LIMIT) onChooseInstrument(target, "new");
-      else { setComparisonNotice("Close a historical tab before opening another instrument."); setHistoricalDetails(true); return; }
+      else { setComparisonNotice("Close a historical tab before opening another instrument."); return; }
     }
     setComparisonNotice("");
     setHistoricalDetails(true);
@@ -405,7 +416,32 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
           return `${name ? `${name} (${item.symbol})` : item.symbol} · ${providerName(item.provider)}`;
         }} />}
       {(limitReached || pickerNotice) && <p role="status" className="px-1 text-xs text-muted-foreground">{t("Eight instrument tabs are open. Close one to open another.")}</p>}
-      {comparisonNotice && <p role="status" className="px-1 text-xs text-muted-foreground">{t(comparisonNotice)}</p>}
+      {comparisonNotice && <div role="status" className="flex items-center gap-2 px-1 text-xs text-muted-foreground">{t(comparisonNotice)}
+        {comparing && comparisonNotice === "Close a historical tab before opening another instrument." && <Button size="sm" variant="outline" onClick={() => { setComparisonNotice(""); setHistoricalDetails(true); }}>{t("Manage historical tabs")}</Button>}
+      </div>}
+      {pendingComparisonSource && <dialog ref={replacementDialog} aria-label={t("Replace comparison instrument")}
+        className="fixed inset-0 m-auto w-[min(28rem,90vw)] rounded-lg border bg-background p-4 text-foreground shadow-xl backdrop:bg-black/50"
+        onCancel={event => { event.preventDefault(); onResolvePendingComparison?.(); }}
+        onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); onResolvePendingComparison?.(); } }}>
+        <div className="space-y-3">
+          <h3 className="font-semibold">{t("Replace comparison instrument")}</h3>
+          <p className="text-sm">{t("Four comparison sources are selected.")} {t("Choose an instrument to replace with")} {pendingComparisonSource.code} · {pendingComparisonSource.provider === "fred" ? "FRED" : providerName(pendingComparisonSource.provider)}.</p>
+          <label className="grid gap-1 text-sm">{t("Instrument to replace")}
+            <select value={replacementKey} onChange={event => setReplacementKey(event.target.value)} className="h-9 rounded-md border border-input bg-background px-2">
+              <option value="">{t("Select an instrument")}</option>
+              {comparison.sources.map(source => <option key={sourceKey(source)} value={sourceKey(source)}>{source.code} · {source.provider}</option>)}
+            </select>
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => onResolvePendingComparison?.()}>{t("Cancel")}</Button>
+            <Button disabled={!comparison.sources.some(source => sourceKey(source) === replacementKey)} onClick={() => {
+              setComparison(current => ({ ...current, sources: current.sources.map(source => sourceKey(source) === replacementKey ? pendingComparisonSource : source),
+                hidden: current.hidden.filter(key => key !== replacementKey) }));
+              onResolvePendingComparison?.();
+            }}>{t("Replace instrument")}</Button>
+          </div>
+        </div>
+      </dialog>}
       {comparing ? <div id={`${panelId}-comparison-panel`} role="region" aria-label={t("Compare local instruments")} className="min-w-0">
         <MarketComparisonPanel settings={comparison} choices={comparisonChoices} directoryLoading={indexState === "loading"}
           directoryFailed={indexState === "error"} refreshRevision={reload} onChange={setComparison} pickerOpen={comparisonPickerOpen} onPickerOpen={setComparisonPickerOpen} names={comparisonNames} onOpenAcquisition={onOpenAcquisition} />
