@@ -18,7 +18,10 @@ import { IndexMembershipPage } from "./IndexMembershipPage";
 import { IndexIntelligencePage } from "./IndexIntelligencePage";
 import { ModelJobsWorkspace } from "./ModelJobsWorkspace";
 import { DataAcquisitionPage, type MarketSelection } from "./DataAcquisitionPage";
-import { resolveMarketSelection } from "./market-selection";
+import {
+  MARKET_TAB_LIMIT, closeMarketTab, marketTabKey, openMarketTab, parseMarketSelection,
+  readMarketWorkspace, saveMarketWorkspace, type MarketView,
+} from "./market-workspace";
 
 type Screen = "overview" | "market" | "index-intelligence" | "model-jobs" | "intelligence" | "data-acquisition" | "daily-acquisition" | "data-validation" | "data-quality" | "index-membership" | "action-history" | "portfolio" | "settings";
 const groups = [
@@ -52,7 +55,9 @@ export default function App() {
   const [openedAnalysisJob, setOpenedAnalysisJob] = useState<string>();
   const [language, setLanguage] = useState<AppLanguage>(currentLanguage);
   const t = (key: string) => translate(language, key);
-  const [marketSelection, setMarketSelection] = useState<MarketSelection | null>(null);
+  const [marketWorkspace, setMarketWorkspace] = useState(readMarketWorkspace);
+  const [marketLimitReached, setMarketLimitReached] = useState(false);
+  useEffect(() => { saveMarketWorkspace(marketWorkspace); }, [marketWorkspace]);
   const [connection, setConnection] = useState<HealthConnection>({ kind: "loading" });
   const poller = useRef<ReturnType<typeof createHealthPoller> | null>(null);
   const mainScrollRef = useRef<HTMLElement | null>(null);
@@ -68,10 +73,28 @@ export default function App() {
     setScreen(next);
   };
 
-  const openMarkets = (selection?: MarketSelection) => {
-    setMarketSelection((current) => resolveMarketSelection(current, selection));
+  function chooseMarketInstrument(selection: MarketSelection, mode: "current" | "new") {
+    const validated = parseMarketSelection(selection);
+    if (!validated) return;
+    const key = marketTabKey(validated);
+    const full = mode === "new" && marketWorkspace.tabs.length >= MARKET_TAB_LIMIT
+      && !marketWorkspace.tabs.some(tab => marketTabKey(tab.selection) === key);
+    setMarketLimitReached(full);
+    setMarketWorkspace(current => openMarketTab(current, validated, mode));
+  }
+
+  function openMarkets(selection?: MarketSelection) {
+    if (selection) chooseMarketInstrument(selection, "new");
     setScreen("market");
-  };
+  }
+
+  function updateMarketView(key: string, patch: Partial<MarketView>) {
+    setMarketWorkspace(current => ({
+      ...current,
+      tabs: current.tabs.map(tab => marketTabKey(tab.selection) === key
+        ? { ...tab, view: { ...tab.view, ...patch } } : tab),
+    }));
+  }
 
   const checkHealth = useCallback(() => { void poller.current?.checkNow(); }, []);
 
@@ -113,8 +136,18 @@ export default function App() {
         </nav>
         {screen === "market" ? (
           <MarketExplorer
-            initialSelection={marketSelection}
-            onSelectionChange={setMarketSelection}
+            workspace={marketWorkspace}
+            limitReached={marketLimitReached}
+            onChooseInstrument={chooseMarketInstrument}
+            onUpdateView={updateMarketView}
+            onActivateTab={key => {
+              setMarketLimitReached(false);
+              setMarketWorkspace(current => ({ ...current, active: key }));
+            }}
+            onCloseTab={key => {
+              setMarketLimitReached(false);
+              setMarketWorkspace(current => closeMarketTab(current, key));
+            }}
             onOpenAcquisition={() => setScreen("data-acquisition")}
           />
         ) : screen === "index-intelligence" ? (

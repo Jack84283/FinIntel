@@ -111,6 +111,15 @@ const translations = {
 } as const;
 
 const additionalChinese: Readonly<Record<string, string>> = {
+  "Market instrument tabs": "市场品种标签页",
+  "Add instrument tab": "添加品种标签页",
+  "Close tab": "关闭标签页",
+  "Eight instrument tabs are open. Close one to open another.": "已打开八个品种标签页。请先关闭一个，再打开新的标签页。",
+  "Open in Current Tab": "在当前标签页打开",
+  "Open in New Tab": "在新标签页打开",
+  "Select a stored instrument, then choose where to open it.": "请选择本地已有的品种，再选择打开位置。",
+  "Check that this instrument and provider have local history.": "请确认本地已保存此品种和数据源的历史记录。",
+
   "Historical Data": "历史数据",
   "Daily & Incremental Data": "每日与增量数据",
   "Fetch and store historical index, stock, and ETF observations in local SQLite.": "在本地 SQLite 中获取并保存指数、股票和 ETF 的历史观测数据。",
