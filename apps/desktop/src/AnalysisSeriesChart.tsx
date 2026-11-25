@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import type { AnalysisOutputField } from "./analysis-jobs-api";
 import { useLocale } from "./localization";
 import {
@@ -37,7 +37,7 @@ function DateLabels({ rows }: { rows: readonly Observation[] }) {
   </g>;
 }
 
-export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventField, markers, step, nonPositive, plotting, styleIndices }: {
+export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventField, markers, step, nonPositive, plotting, styleIndices, expanded, inspection }: {
   title: string;
   rows: readonly Observation[];
   columns: readonly ResultColumn[];
@@ -47,6 +47,8 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
   step?: boolean;
   nonPositive?: boolean;
   styleIndices?: readonly number[];
+  expanded?: boolean;
+  inspection?: (index: number) => ReactNode;
   plotting?: { convert: typeof chartNumber; omittedMessage: string };
   markers?: { dates: ReadonlySet<string>; label: string };
 }) {
@@ -116,7 +118,19 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
     {hasEvents && <p className="text-xs text-muted-foreground">{t("Triangles mark post-close crossover events.")}</p>}
     <div className="overflow-x-auto rounded-md border bg-muted/30 p-2">
       <svg viewBox="0 0 840 250" role="img" aria-label={title + " · " + unitLabel(unit, t)}
-        aria-describedby={descriptionId} className="h-auto w-full min-w-[460px]">
+        aria-describedby={descriptionId} preserveAspectRatio={expanded ? "none" : undefined} className={expanded ? "h-[65vh] min-h-[320px] w-full min-w-[460px]" : "h-auto w-full min-w-[460px]"}
+        onPointerMove={event => {
+          if (!expanded) return;
+          const matrix = event.currentTarget.getScreenCTM();
+          if (!matrix) return;
+          const point = event.currentTarget.createSVGPoint();
+          point.x = event.clientX; point.y = event.clientY;
+          const position = point.matrixTransform(matrix.inverse());
+          if (position.x < LEFT || position.x > RIGHT || position.y < TOP || position.y > BOTTOM) return;
+          let nearest = 0;
+          for (let i = 1; i < rows.length; i++) if (Math.abs(x(rows[i].session_date) - position.x) < Math.abs(x(rows[nearest].session_date) - position.x)) nearest = i;
+          setInspected(nearest);
+        }}>
         {ticks.map(tick => <g key={tick} className="text-muted-foreground">
           <path d={`M${LEFT},${y(tick)}H${RIGHT}`} stroke="currentColor" opacity="0.25" strokeDasharray="3 5" />
           <text x={LEFT - 9} y={y(tick) + 4} fontSize="12" textAnchor="end" fill="currentColor">{formatAxis.format(tick)}</text>
@@ -145,6 +159,10 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
           </path>;
         })}
         <path d={`M${x(selection.session_date)},${TOP}V${BOTTOM}`} stroke="currentColor" strokeDasharray="3 4" opacity=".48" />
+        {expanded && columns.map((column, i) => {
+          const value = chartNumber(cell(selection, column.field.name), unit);
+          return value === null ? null : <circle key={column.field.name} cx={x(selection.session_date)} cy={y(value)} r="3.5" className={COLORS[styleIndices?.[i] ?? i]} fill="currentColor" />;
+        })}
         <DateLabels rows={rows} />
       </svg>
     </div>
@@ -158,7 +176,7 @@ export function AnalysisSeriesChart({ title, rows, columns, range, zero, eventFi
     </label>
     <output className="flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums">
       <strong>{observedDate(selection.session_date, language)}</strong>
-      {columns.map(column => <span key={column.field.name}>{column.label} · {formatCell(cell(selection, column.field.name), column.field, language, t)}</span>)}
+      {inspection ? inspection(index) : columns.map(column => <span key={column.field.name}>{column.label} · {formatCell(cell(selection, column.field.name), column.field, language, t)}</span>)}
       {eventField && <span>{fieldLabel(eventField, t)} · {fieldLabel(String(cell(selection, eventField) ?? "Unavailable"), t)}</span>}
     </output>
   </figure>;
