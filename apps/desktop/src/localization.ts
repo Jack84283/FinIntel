@@ -113,6 +113,9 @@ const translations = {
 const additionalChinese: Readonly<Record<string, string>> = {
   "Comparison": "对比",
   "Actual close": "实际收盘值",
+  "Intraday history is not available in local daily data.": "本地日线数据不包含日内行情。",
+  "Data notes": "数据说明",
+  "Select an instrument": "选择品种",
   "Actual closes use USD per share for stocks and ETFs, and index points for indexes. Use returns for relative comparison.": "股票和ETF的实际收盘价以美元/股计，指数以点计。相对表现请使用收益率对比。",
   "Price level": "价格水平",
   "Choose valid dates and one to four different sources.": "请选择有效日期和一到四个不同的数据源。",
