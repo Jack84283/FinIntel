@@ -40,7 +40,7 @@ export function parseComparisonPreferences(value: unknown): ComparisonPreference
     sources, hidden: sources.map(sourceKey).filter(key => hidden.includes(key)),
     period: hasWindow ? period : period === "custom" ? "1y" : period,
     ...(hasWindow ? { start: raw.start as string, end: raw.end as string } : presetWindow(period === "custom" ? "1y" : period)),
-    mode: raw.mode === "cumulative_return_pct" ? raw.mode : "normalized_100",
+    mode: raw.mode === "normalized_100" || raw.mode === "close" ? raw.mode : "cumulative_return_pct",
   };
 }
 
