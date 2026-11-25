@@ -33,7 +33,7 @@ function DateLabels({ rows, right = RIGHT, bottom = BOTTOM }: { rows: readonly O
   const last = rows.at(-1)!.session_date;
   return <g fill="currentColor" className="text-muted-foreground" fontSize="12">
     <text x={LEFT} y={bottom + 26}>{observedDate(first, language)}</text>
-    {first !== last && <text x={RIGHT} y="239" textAnchor="end">{observedDate(last, language)}</text>}
+    {first !== last && <text x={right} y={bottom + 26} textAnchor="end">{observedDate(last, language)}</text>}
   </g>;
 }
 
@@ -227,7 +227,7 @@ export function AnalysisStateTimeline({ rows, field, title }: {
         className="h-auto w-full min-w-[460px]">
         {states.map((state, index) => <g key={state} transform={`translate(0,${32 + index * 49})`}>
           <text x={LEFT - 9} y="4" textAnchor="end" fontSize="12" fill="currentColor">{fieldLabel(state, t)}</text>
-          <path d={`M${LEFT},0H${right}`} stroke="currentColor" opacity=".2" />
+          <path d={`M${LEFT},0H${RIGHT}`} stroke="currentColor" opacity=".2" />
           <path data-state={state} d={paths[index]} className={COLORS[index]} strokeWidth="2" />
         </g>)}
         <DateLabels rows={rows} />
