@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ListFilter } from "lucide-react";
+import { CalendarDays, Search } from "lucide-react";
 import { searchAcquirableSymbols } from "./symbol-catalog-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { useLocale } from "./localization";
 import { comparisonError, fetchMarketComparison, sourceKey, validComparisonWindow,
   type ComparisonError, type ComparisonResult, type ComparisonSource,
 } from "./market-comparison-api";
-import { COMPARISON_LIMIT, presetWindow, type ComparisonPeriod, type ComparisonPreferences } from "./market-comparison-preferences";
+import { COMPARISON_LIMIT, COMPARISON_PERIODS, presetWindow, type ComparisonPeriod, type ComparisonPreferences } from "./market-comparison-preferences";
 
 const warnings = {
   price_level_only: "This comparison uses historical price levels. Returns may exclude dividends, and unadjusted prices can reflect splits.",
@@ -129,22 +129,20 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
   return <div className="min-w-0 space-y-2">
     <Card className="gap-2 py-3">
       <CardContent className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">{t("Compare local instruments")}</h2>
-          {sources.length > 0 && <Button type="button" size="sm" variant="ghost"
-            onClick={() => onChange({ ...settings, sources: [], hidden: [] })}>{t("Clear comparison")}</Button>}
-        </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2" aria-label={t("Compare local instruments")}>
           {sources.map(source => <Button key={sourceKey(source)} type="button" variant="outline" size="sm"
+            title={comparisonLabel(source)}
             aria-label={`${t("Remove from comparison")} · ${comparisonLabel(source)}`}
             onClick={() => onChange({ ...settings, sources: sources.filter(item => sourceKey(item) !== sourceKey(source)),
               hidden: hidden.filter(key => key !== sourceKey(source)) })}>
-            {comparisonLabel(source)} <span aria-hidden="true">×</span>
+            {sources.filter(item => item.code === source.code).length > 1 ? comparisonLabel(source) : source.code} <span aria-hidden="true">×</span>
           </Button>)}
-          <Button type="button" variant="outline" size="sm" onClick={openPicker}>
-            <ListFilter aria-hidden="true" /> {t("Select comparison instruments")}
+          <Button type="button" variant="outline" size="icon-sm" onClick={openPicker} aria-label={t("Select comparison instruments")} title={t("Select comparison instruments")}>
+            <Search aria-hidden="true" />
           </Button>
-          {atLimit && <span role="status" className="text-xs text-muted-foreground">{t("Four comparison sources are selected.")}</span>}
+          {sources.length > 0 && <Button type="button" size="sm" variant="ghost" className="ml-auto text-xs"
+            onClick={() => onChange({ ...settings, sources: [], hidden: [] })}>{t("Clear comparison")}</Button>}
+          {atLimit && <span role="status" className="sr-only">{t("Four comparison sources are selected.")}</span>}
         </div>
         {pickerOpen && <dialog ref={dialog} aria-label={t("Select comparison instruments")}
           className="fixed inset-0 m-auto max-h-[85vh] w-[min(36rem,90vw)] overflow-auto rounded-lg border bg-background p-4 text-foreground shadow-xl backdrop:bg-black/50"
@@ -191,15 +189,22 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
             </div>
           </div>
         </dialog>}
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="grid gap-1 text-xs text-muted-foreground">{t("Comparison period")}
-            <select value={period} onChange={event => pickPeriod(event.target.value as ComparisonPeriod)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-foreground">
-              <option value="1y">{t("Last 1 year")}</option><option value="5y">{t("Last 5 years")}</option>
-              <option value="10y">{t("Last 10 years")}</option><option value="custom">{t("Custom dates")}</option>
+        <div className="flex flex-wrap items-center gap-1 border-t pt-2" role="group" aria-label={t("Comparison period")}>
+          <Button type="button" size="sm" variant="ghost" disabled title={t("Intraday history is not available in local daily data.")}>1D</Button>
+          {COMPARISON_PERIODS.map(item => <Button key={item} type="button" size="sm" variant={period === item ? "secondary" : "ghost"}
+            aria-pressed={period === item} onClick={() => pickPeriod(item)} className="px-2">{item.toUpperCase()}</Button>)}
+          <Button type="button" size="icon-sm" variant={period === "custom" ? "secondary" : "ghost"} aria-pressed={period === "custom"}
+            aria-label={t("Custom dates")} title={t("Custom dates")} onClick={() => pickPeriod("custom")}><CalendarDays aria-hidden="true" /></Button>
+          <div className="ml-auto">
+            <select aria-label={t("Comparison display")} value={mode} onChange={event => onChange({ ...settings, mode: event.target.value === "close" ? "close" : event.target.value === "cumulative_return_pct" ? "cumulative_return_pct" : "normalized_100" })}
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground">
+              <option value="cumulative_return_pct">%</option>
+              <option value="close">{t("Actual close")}</option>
+              <option value="normalized_100">{t("Base 100")}</option>
             </select>
-          </label>
-          {period === "custom" && <div className="flex flex-wrap items-end gap-2">
+          </div>
+        </div>
+        {period === "custom" && <div className="flex flex-wrap items-end gap-2">
             <label className="grid gap-1 text-xs text-muted-foreground">{t("Start date")}
               <input type="date" required value={draft.start} onChange={event => changeDraft({ ...draft, start: event.target.value })}
                 className="h-8 rounded-md border border-input bg-background px-2 text-foreground" />
@@ -209,18 +214,8 @@ export function MarketComparisonPanel({ settings, choices, directoryLoading, dir
                 className="h-8 rounded-md border border-input bg-background px-2 text-foreground" />
             </label>
           </div>}
-          <label className="grid gap-1 text-xs text-muted-foreground">{t("Comparison display")}
-            <select value={mode} onChange={event => onChange({ ...settings, mode: event.target.value === "close" ? "close" : event.target.value === "cumulative_return_pct"
-              ? "cumulative_return_pct" : "normalized_100" })}
-              className="h-8 rounded-md border border-input bg-background px-2 text-foreground">
-              <option value="close">{t("Actual close")}</option>
-              <option value="normalized_100">{t("Base 100")}</option>
-              <option value="cumulative_return_pct">{t("Cumulative price return")}</option>
-            </select>
-          </label>
-        </div>
         {dateError && <p role="alert" className="text-xs text-destructive">{t("Choose an ordered date window of up to ten years ending no later than today.")}</p>}
-        <p className="text-xs text-muted-foreground">{t("Requested window")} · {start} – {end}</p>
+        <p className="sr-only">{t("Requested window")} · {start} – {end}</p>
         {sources.length < 1 && <p role="status" className="text-sm text-muted-foreground">{t("Select one or more local instruments.")}</p>}
         {sources.length >= 1 && !current && <p role="status" className="text-sm text-muted-foreground">{t("Loading local comparison…")}</p>}
         {current?.error && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
@@ -244,10 +239,13 @@ function ComparisonResultContent({ result, settings, onChange }: {
     "Latest source close", "Observations", "Missing dates", "Nonshared dates", "Price semantics"];
   return <Card className="gap-2 py-3">
     <CardContent className="space-y-3">
-      <p className="text-xs text-muted-foreground">{t(warnings.price_level_only)}</p>
-      {result.warnings.filter(warning => warning !== "price_level_only").map(warning => <p key={warning} className="text-xs text-muted-foreground">{t(warnings[warning])}</p>)}
       <MarketComparisonChart result={result} mode={mode} hidden={hidden} onVisibility={key => onChange({ ...settings,
         hidden: hidden.includes(key) ? hidden.filter(item => item !== key) : [...hidden, key] })} />
+      <details className="space-y-2 text-xs text-muted-foreground">
+        <summary className="cursor-pointer font-medium">{t("Data notes")}</summary>
+        <p>{t(warnings.price_level_only)}</p>
+        {result.warnings.filter(warning => warning !== "price_level_only").map(warning => <p key={warning}>{t(warnings[warning])}</p>)}
+      </details>
       <details className="space-y-2 text-xs text-muted-foreground">
         <summary className="cursor-pointer font-medium">{t("Comparison summary")}</summary>
       <div className="space-y-1 text-xs text-muted-foreground">
