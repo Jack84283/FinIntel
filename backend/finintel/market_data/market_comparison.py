@@ -50,7 +50,7 @@ class Source(Contract):
 
 class ComparisonRequest(Contract):
     contract_version: Literal["market-comparison-v1"]
-    sources: Annotated[list[Source], Field(min_length=2, max_length=4)]
+    sources: Annotated[list[Source], Field(min_length=1, max_length=4)]
     start: date
     end: date
 
