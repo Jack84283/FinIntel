@@ -9,6 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchBackendHealth } from "./api";
 import { MarketExplorer } from "./MarketExplorer";
+import { comparisonSourceFromSelection, sourceKey } from "./market-comparison-api";
+import { readComparisonPreferences, saveComparisonPreferences } from "./market-comparison-preferences";
 import { createHealthPoller, type HealthConnection } from "./health-poller";
 import { PreferencesPage } from "./PreferencesPage";
 import { ActionHistoryPage } from "./ActionHistoryPage";
@@ -84,7 +86,22 @@ export default function App() {
   }
 
   function openMarkets(selection?: MarketSelection) {
-    if (selection) chooseMarketInstrument(selection, "current");
+    if (selection) {
+      const validated = parseMarketSelection(selection);
+      if (validated) {
+        const source = comparisonSourceFromSelection(validated);
+        if (source) {
+          const saved = readComparisonPreferences();
+          const exists = saved.sources.some(item => sourceKey(item) === sourceKey(source));
+          saveComparisonPreferences({ ...saved, sources: exists ? saved.sources : [source],
+            hidden: exists ? saved.hidden.filter(key => key !== sourceKey(source)) : [] });
+          setMarketWorkspace(current => ({ ...current, comparing: true }));
+          setMarketLimitReached(false);
+        } else {
+          chooseMarketInstrument(validated, "new");
+        }
+      }
+    }
     setScreen("market");
   }
 
