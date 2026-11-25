@@ -5,7 +5,8 @@ import {
 
 export const COMPARISON_KEY = "finintel.market-comparison.v1";
 export const COMPARISON_LIMIT = 4;
-export type ComparisonPeriod = "1y" | "5y" | "10y" | "custom";
+export const COMPARISON_PERIODS = ["1w", "1m", "3m", "6m", "ytd", "1y", "3y", "5y", "10y"] as const;
+export type ComparisonPeriod = typeof COMPARISON_PERIODS[number] | "custom";
 
 export interface ComparisonPreferences {
   sources: ComparisonSource[];
@@ -19,8 +20,15 @@ export interface ComparisonPreferences {
 export function presetWindow(period: Exclude<ComparisonPeriod, "custom">, today = new Date()) {
   const end = today.toISOString().slice(0, 10);
   const start = new Date(end + "T00:00:00Z");
-  start.setUTCFullYear(start.getUTCFullYear() - Number.parseInt(period, 10));
-  if (start.getUTCDate() !== today.getUTCDate()) start.setUTCDate(0);
+  if (period === "1w") start.setUTCDate(start.getUTCDate() - 7);
+  else if (period === "ytd") start.setUTCMonth(0, 1);
+  else {
+    const day = start.getUTCDate();
+    if (period.endsWith("m")) start.setUTCMonth(start.getUTCMonth() - Number.parseInt(period, 10), 1);
+    else { start.setUTCDate(1); start.setUTCFullYear(start.getUTCFullYear() - Number.parseInt(period, 10)); }
+    const last = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).getUTCDate();
+    start.setUTCDate(Math.min(day, last));
+  }
   return { start: start.toISOString().slice(0, 10), end };
 }
 
@@ -33,7 +41,7 @@ export function parseComparisonPreferences(value: unknown): ComparisonPreference
     sources.push(source);
     if (sources.length === COMPARISON_LIMIT) break;
   }
-  const period = raw.period === "custom" || raw.period === "5y" || raw.period === "10y" ? raw.period : "1y";
+  const period: ComparisonPeriod = raw.period === "custom" ? "custom" : COMPARISON_PERIODS.find(item => item === raw.period) ?? "1y";
   const hasWindow = typeof raw.start === "string" && typeof raw.end === "string" && validComparisonWindow(raw.start, raw.end);
   const hidden = Array.isArray(raw.hidden) ? raw.hidden : [];
   return {
