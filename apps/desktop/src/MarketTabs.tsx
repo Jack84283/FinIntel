@@ -73,6 +73,6 @@ export function MarketTabs({ workspace, panelId, describe, onActivate, onClose, 
       })}
     </div>
     <Button type="button" variant="ghost" size="icon-sm" className="shrink-0"
-      aria-label={t("Add instrument tab")} title={t("Add instrument tab")} onClick={onAdd}><Plus aria-hidden="true" /></Button>
+      aria-label={t(workspace.comparing ? "Select comparison instruments" : "Add instrument tab")} title={t(workspace.comparing ? "Select comparison instruments" : "Add instrument tab")} onClick={onAdd}><Plus aria-hidden="true" /></Button>
   </div>;
 }
