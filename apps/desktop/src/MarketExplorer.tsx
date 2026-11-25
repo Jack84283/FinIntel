@@ -15,7 +15,7 @@ import type { MarketSelection } from "./market-selection";
 import { MarketTabs } from "./MarketTabs";
 import { MarketComparisonPanel } from "./MarketComparisonPanel";
 import { comparisonSource, comparisonSourceFromSelection, sourceKey, type ComparisonSource } from "./market-comparison-api";
-import { COMPARISON_LIMIT, readComparisonPreferences, saveComparisonPreferences } from "./market-comparison-preferences";
+import { COMPARISON_LIMIT, COMPARISON_TAB_LIMIT, readComparisonWorkspace, saveComparisonWorkspace, updateComparisonTab, addComparisonTab, closeComparisonTab, type ComparisonPreferences } from "./market-comparison-preferences";
 import { MARKET_TAB_LIMIT, marketTabKey, marketTabSymbol, parseMarketSelection, type MarketSort, type MarketView, type MarketWorkspace } from "./market-workspace";
 import { IndexLineChart, MarketCharts } from "./market-chart";
 import { TechnicalIndicatorsCard } from "./TechnicalIndicatorsCard";
@@ -51,7 +51,9 @@ type HistoryResult =
   | { kind: "equity"; data: DailySeries }
   | { kind: "error" };
 
-export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowComparison, onCloseTab, onChooseInstrument, onUpdateView, onOpenAcquisition }: {
+export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowComparison, onCloseTab, onChooseInstrument, onUpdateView, onOpenAcquisition, pendingComparisonSource, onResolvePendingComparison }: {
+  pendingComparisonSource?: ComparisonSource;
+  onResolvePendingComparison?: () => void;
   workspace: MarketWorkspace;
   limitReached: boolean;
   onActivateTab: (key: string) => void;
@@ -63,11 +65,32 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
 }) {
   const { t } = useLocale();
   const notify = useNotify();
-  const { active, comparing } = workspace;
-  const [comparison, setComparison] = useState(readComparisonPreferences);
+  const { active } = workspace;
+  const [historicalDetails, setHistoricalDetails] = useState(() => !workspace.comparing && !comparisonSourceFromSelection(workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!.selection));
+  const comparing = !historicalDetails;
+  const [comparisonWorkspace, setComparisonWorkspace] = useState(() => {
+    const source = comparisonSourceFromSelection(workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!.selection);
+    return readComparisonWorkspace(workspace.comparing ? undefined : source);
+  });
+  const comparison = comparisonWorkspace.tabs.find(tab => tab.id === comparisonWorkspace.active)!.settings;
+  const activeComparisonId = comparisonWorkspace.active;
+  const setComparison = (update: ComparisonPreferences | ((current: ComparisonPreferences) => ComparisonPreferences)) => {
+    setComparisonWorkspace(current => updateComparisonTab(current, activeComparisonId, update));
+  };
   const [comparisonPickerOpen, setComparisonPickerOpen] = useState(false);
   const [comparisonNotice, setComparisonNotice] = useState("");
-  useEffect(() => { saveComparisonPreferences(comparison); }, [comparison]);
+  const [detailKey, setDetailKey] = useState("");
+  const [replacementKey, setReplacementKey] = useState("");
+  const replacementDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    setReplacementKey("");
+    if (!pendingComparisonSource) return;
+    const dialog = replacementDialog.current;
+    if (dialog && typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
+    return () => { if (dialog?.open && typeof dialog.close === "function") dialog.close(); };
+  }, [pendingComparisonSource]);
+  useEffect(() => { saveComparisonWorkspace(comparisonWorkspace); }, [comparisonWorkspace]);
+  useEffect(() => { if (comparing && !workspace.comparing) onShowComparison(); }, [comparing, workspace.comparing, onShowComparison]);
   const { selection, view } = workspace.tabs.find(tab => marketTabKey(tab.selection) === active)!;
   const { start, end, period, draftStart, draftEnd, sortColumn, descending, tableFilter, showSearch } = view;
   const update = (patch: Partial<MarketView>) => onUpdateView(active, patch);
@@ -260,7 +283,23 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
         : "Choose a supported instrument and its exact local provider.");
       return;
     }
-    if (addComparison(source)) onShowComparison();
+    if (addComparison(source)) { setHistoricalDetails(false); onShowComparison(); }
+  }
+
+  function showHistoricalDetails() {
+    if (!comparing) { setHistoricalDetails(false); return; }
+    const source = comparison.sources.find(item => sourceKey(item) === detailKey) ?? comparison.sources[0];
+    if (source) {
+      const target: MarketSelection = source.kind === "index"
+        ? { kind: "index", code: source.code }
+        : { kind: "equity", symbol: source.code, provider: source.provider };
+      const key = marketTabKey(target);
+      if (workspace.tabs.some(tab => marketTabKey(tab.selection) === key)) onActivateTab(key);
+      else if (workspace.tabs.length < MARKET_TAB_LIMIT) onChooseInstrument(target, "new");
+      else { setComparisonNotice("Close a historical tab before opening another instrument."); return; }
+    }
+    setComparisonNotice("");
+    setHistoricalDetails(true);
   }
 
   function addInstrument() {
@@ -361,11 +400,16 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
           <Badge variant="outline">{t("Local SQLite")}</Badge>
           <Button type="button" variant="secondary" size="sm" onClick={() => setReload((value) => value + 1)}><RefreshCw aria-hidden="true" /> {t("Reload local data")}</Button>
           <Button type="button" size="sm" onClick={onOpenAcquisition}><Database aria-hidden="true" /> {t("Data Acquisition")}</Button>
+          {comparing && comparison.sources.length > 1 && <select aria-label={t("Historical detail instrument")} value={comparison.sources.some(item => sourceKey(item) === detailKey) ? detailKey : sourceKey(comparison.sources[0])}
+            onChange={event => setDetailKey(event.target.value)} className="h-8 rounded-md border border-input bg-background px-2 text-xs">
+            {comparison.sources.map(source => <option key={sourceKey(source)} value={sourceKey(source)}>{source.code} · {source.provider}</option>)}
+          </select>}
+          <Button type="button" variant="outline" size="sm" onClick={showHistoricalDetails}>{t(comparing ? "Historical price details" : "Price comparison")}</Button>
           {!comparing && <><Button type="button" variant="outline" size="sm" onClick={compareCurrent}>{t("Add to comparison")}</Button>
           <Button type="button" variant={pickerVisible ? "secondary" : "outline"} size="sm" aria-expanded={pickerVisible} aria-controls="market-search-panel" onClick={() => { setAddMode(false); update({ showSearch: !pickerVisible }); }}><SlidersHorizontal aria-hidden="true" /> {pickerVisible ? t("Hide filters") : t("Show filters")}</Button></>}
         </>}
       />
-      <MarketTabs workspace={workspace} panelId={panelId} onCompare={() => { setComparisonNotice(""); onShowComparison(); }}
+      {!comparing && <MarketTabs workspace={{ ...workspace, comparing: undefined }} panelId={panelId} onCompare={() => { setComparisonNotice(""); setHistoricalDetails(false); onShowComparison(); }}
         onActivate={key => { setComparisonPickerOpen(false); setPickerNotice(false); setComparisonNotice(""); onActivateTab(key); }}
         onClose={key => { setPickerNotice(false); onCloseTab(key); }} onAdd={addInstrument} describe={tab => {
           const item = tab.selection;
@@ -375,12 +419,65 @@ export function MarketExplorer({ workspace, limitReached, onActivateTab, onShowC
           }
           const name = instrumentNames[item.symbol];
           return `${name ? `${name} (${item.symbol})` : item.symbol} · ${providerName(item.provider)}`;
-        }} />
+        }} />}
       {(limitReached || pickerNotice) && <p role="status" className="px-1 text-xs text-muted-foreground">{t("Eight instrument tabs are open. Close one to open another.")}</p>}
-      {comparisonNotice && <p role="status" className="px-1 text-xs text-muted-foreground">{t(comparisonNotice)}</p>}
-      {comparing ? <div id={`${panelId}-comparison-panel`} role="tabpanel" aria-labelledby={`${panelId}-comparison`} className="min-w-0">
-        <MarketComparisonPanel settings={comparison} choices={comparisonChoices} directoryLoading={indexState === "loading"}
+      {comparisonNotice && <div role="status" className="flex items-center gap-2 px-1 text-xs text-muted-foreground">{t(comparisonNotice)}
+        {comparing && comparisonNotice === "Close a historical tab before opening another instrument." && <Button size="sm" variant="outline" onClick={() => { setComparisonNotice(""); setHistoricalDetails(true); }}>{t("Manage historical tabs")}</Button>}
+      </div>}
+      {pendingComparisonSource && <dialog ref={replacementDialog} aria-label={t("Replace comparison instrument")}
+        className="fixed inset-0 m-auto w-[min(28rem,90vw)] rounded-lg border bg-background p-4 text-foreground shadow-xl backdrop:bg-black/50"
+        onCancel={event => { event.preventDefault(); onResolvePendingComparison?.(); }}
+        onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); onResolvePendingComparison?.(); } }}>
+        <div className="space-y-3">
+          <h3 className="font-semibold">{t("Replace comparison instrument")}</h3>
+          <p className="text-sm">{t("Four comparison sources are selected.")} {t("Choose an instrument to replace with")} {pendingComparisonSource.code} · {pendingComparisonSource.provider === "fred" ? "FRED" : providerName(pendingComparisonSource.provider)}.</p>
+          <label className="grid gap-1 text-sm">{t("Instrument to replace")}
+            <select value={replacementKey} onChange={event => setReplacementKey(event.target.value)} className="h-9 rounded-md border border-input bg-background px-2">
+              <option value="">{t("Select an instrument")}</option>
+              {comparison.sources.map(source => <option key={sourceKey(source)} value={sourceKey(source)}>{source.code} · {source.provider}</option>)}
+            </select>
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => onResolvePendingComparison?.()}>{t("Cancel")}</Button>
+            <Button disabled={!comparison.sources.some(source => sourceKey(source) === replacementKey)} onClick={() => {
+              setComparison(current => ({ ...current, sources: current.sources.map(source => sourceKey(source) === replacementKey ? pendingComparisonSource : source),
+                hidden: current.hidden.filter(key => key !== replacementKey) }));
+              onResolvePendingComparison?.();
+            }}>{t("Replace instrument")}</Button>
+          </div>
+        </div>
+      </dialog>}
+      {comparing ? <div className="min-w-0 space-y-2">
+        <div className="flex min-w-0 items-center gap-1 border-b border-border">
+          <div role="tablist" aria-label={t("Comparison charts")} className="flex min-w-0 gap-1 overflow-x-auto">
+            {comparisonWorkspace.tabs.map((tab, index) => <div key={tab.id} className={`flex shrink-0 items-center rounded-t-md ${tab.id === activeComparisonId ? "bg-secondary" : ""}`}>
+              <Button type="button" role="tab" id={`${panelId}-${tab.id}`} aria-controls={`${panelId}-comparison-panel`}
+                aria-selected={tab.id === activeComparisonId} tabIndex={tab.id === activeComparisonId ? 0 : -1}
+                size="sm" variant="ghost" onClick={() => { setComparisonPickerOpen(false); setComparisonNotice(""); setDetailKey(""); setComparisonWorkspace(current => ({ ...current, active: tab.id })); }}
+                onKeyDown={event => {
+                  const tabs = comparisonWorkspace.tabs;
+                  const next = event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
+                  if (next < 0) return;
+                  event.preventDefault();
+                  setComparisonPickerOpen(false); setComparisonNotice(""); setDetailKey("");
+                  setComparisonWorkspace(current => ({ ...current, active: tabs[next].id }));
+                  document.getElementById(`${panelId}-${tabs[next].id}`)?.focus();
+                }}>
+                {t("Chart")} {tab.id.slice(6)}{tab.settings.sources.length > 0 && <span className="text-xs text-muted-foreground">{tab.settings.sources.map(source => source.code).join(" · ")}</span>}
+              </Button>
+              {comparisonWorkspace.tabs.length > 1 && <Button type="button" size="icon-sm" variant="ghost" aria-label={`${t("Close chart")} ${tab.id.slice(6)}`}
+                onClick={() => { setComparisonPickerOpen(false); setComparisonNotice(""); setDetailKey(""); setComparisonWorkspace(current => closeComparisonTab(current, tab.id)); }}>×</Button>}
+            </div>)}
+          </div>
+          <Button type="button" variant="ghost" size="icon-sm" className="shrink-0" disabled={comparisonWorkspace.tabs.length >= COMPARISON_TAB_LIMIT}
+            aria-label={t("Add chart tab")} title={t("Add chart tab")} onClick={() => {
+              setComparisonNotice(""); setDetailKey(""); setComparisonWorkspace(addComparisonTab); setComparisonPickerOpen(true);
+            }}>+</Button>
+        </div>
+        <div id={`${panelId}-comparison-panel`} role="tabpanel" aria-labelledby={`${panelId}-${activeComparisonId}`} className="min-w-0">
+        <MarketComparisonPanel key={activeComparisonId} settings={comparison} choices={comparisonChoices} directoryLoading={indexState === "loading"}
           directoryFailed={indexState === "error"} refreshRevision={reload} onChange={setComparison} pickerOpen={comparisonPickerOpen} onPickerOpen={setComparisonPickerOpen} names={comparisonNames} onOpenAcquisition={onOpenAcquisition} />
+        </div>
       </div> : <div id={panelId} role="tabpanel" aria-labelledby={`${panelId}-${active}`} className="min-w-0 space-y-2">
       {indexState === "loading" && <Card><CardContent><Skeleton className="h-8 w-64" aria-label={t("Loading local instruments")} /></CardContent></Card>}
       {indexState === "error" && <Card role="alert"><CardHeader><CardTitle>{t("Local database unavailable")}</CardTitle></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground"><p>{indexError || directoryError}</p><p>{t("Start the Python service on 127.0.0.1:8765 and try again.")}</p><Button onClick={() => setReload((value) => value + 1)} variant="secondary">{t("Retry")}</Button></CardContent></Card>}

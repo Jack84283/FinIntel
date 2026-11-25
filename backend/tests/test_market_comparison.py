@@ -111,7 +111,7 @@ def test_mixed_alignment_hashes_and_database_preservation(local, monkeypatch):
     ("sources", "overrides", "error"),
     [
         ([AAPL, AAPL], {}, "invalid_input"),
-        ([AAPL], {}, "invalid_input"),
+        ([], {}, "invalid_input"),
         ([AAPL, {**SP500, "code": "VIX"}], {}, "unsupported_vix"),
         ([AAPL, {**SP500, "provider": "tiingo"}], {}, "invalid_source"),
         ([AAPL, {**AAPL, "provider": "alpha_vantage"}], {}, "missing_history"),
@@ -175,6 +175,10 @@ def test_ten_year_four_source_fixture(tmp_path, monkeypatch):
 
 def test_equity_only_sources_and_single_source_semantic_refusal(local):
     path, client = local
+    single = client.post(PATH, json=payload([AAPL]))
+    assert single.status_code == 200
+    assert single.json()["shared_sessions"] == 3
+    assert single.json()["baseline_date"] == DATES[0]
     result = client.post(PATH, json=payload([AAPL, ETF])).json()
     assert result["shared_sessions"] == 2
     assert result["sources"][1]["identity"] == ETF

@@ -13,7 +13,7 @@ const ERRORS = ["invalid_input", "invalid_source", "unsupported_vix", "missing_h
   "backend_unavailable", "invalid_response"] as const;
 export type ComparisonError = typeof ERRORS[number];
 export type ComparisonWarning = typeof WARNINGS[number];
-export type ComparisonMode = "normalized_100" | "cumulative_return_pct";
+export type ComparisonMode = "normalized_100" | "cumulative_return_pct" | "close";
 export type ComparisonSource =
   | { kind: "index"; provider: "fred"; code: typeof PRICE_CODES[number] }
   | { kind: "equity"; provider: typeof PROVIDERS[number]; code: string };
@@ -220,7 +220,7 @@ async function readBounded(response: Response): Promise<unknown> {
 }
 
 export async function fetchMarketComparison(sources: ComparisonSource[], start: string, end: string, signal?: AbortSignal) {
-  if (sources.length < 2 || sources.length > 4 || sources.some(source => !comparisonSource(source))
+  if (sources.length < 1 || sources.length > 4 || sources.some(source => !comparisonSource(source))
     || new Set(sources.map(sourceKey)).size !== sources.length || !validComparisonWindow(start, end)) throw new Error("invalid_input");
   const request: ComparisonRequest = { contract_version: CONTRACT, sources, start, end };
   if (isTauri()) return parseComparisonResult(await invoke("market_comparison", { request }), request);
